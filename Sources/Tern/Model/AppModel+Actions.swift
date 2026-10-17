@@ -200,9 +200,28 @@ extension AppModel {
         perform(anyUnread ? .markRead : .markUnread, on: keys)
     }
 
-    /// m: Gmail mute keeps a thread out of the inbox for good. Until sync supports it, mute archives.
+    /// m: archives the threads and keeps their later replies out of the inbox. Without sync it just archives.
     func mute() {
-        perform(.archive, on: targets, toast: targets.count > 1 ? "Muted \(targets.count)" : "Muted")
+        let keys = targets
+        guard !keys.isEmpty else { return }
+        let title = keys.count > 1 ? "Muted \(keys.count)" : "Muted"
+        guard let muteThreads = services.muteThreads else {
+            perform(.archive, on: keys, toast: title)
+            return
+        }
+        let leaving = keys.filter { leavesList(.archive) && snapshot.rows[$0] != nil }
+        if !leaving.isEmpty { hide(leaving) }
+        let result = WriteResult<UndoToken>()
+        let entry = UndoEntry(change: .mail(.archive, result), threads: keys)
+        showToast(title, undo: entry)
+        Task {
+            do {
+                result.value = try await muteThreads(keys)
+                committed(leaving)
+            } catch {
+                writeFailed(error, unhide: leaving, entry: entry)
+            }
+        }
     }
 
     /// ⇧R: flags or clears "needs reply".

@@ -12,10 +12,13 @@ extension Integration {
         let store = services.store
         let box = googleBox
         _ = googleAccounts
+        var configuration = SyncConfiguration()
+        configuration.draftFilesDirectory = services.draftFilesDirectory ?? DraftStore.defaultFilesDirectory
         let coordinator = SyncCoordinator(
             store: store, accounts: (try? store.accounts()) ?? [],
             apiProvider: { accountId in box.get()?.api(for: accountId) ?? SignedOutGmail() },
-            encodeDraft: Self.encodeDraft(store))
+            encodeDraft: DraftEncoder.make(store: store),
+            configuration: configuration)
         sync = coordinator
         coordinator.setActive(NSApp.isActive)
         coordinator.start()
@@ -27,27 +30,15 @@ extension Integration {
         services.fetchBodies = { [weak coordinator] key in try await coordinator?.fetchBodies(for: key) }
         services.prefetchBodies = { [weak coordinator] keys in coordinator?.prefetchBodies(adjacentTo: keys) }
         services.serverSearch = { [weak self] text in try await self?.searchGmail(text) ?? 0 }
+        services.muteThreads = { [weak coordinator] keys in
+            guard let coordinator else { throw CocoaError(.featureUnsupported) }
+            return try await coordinator.mute(keys)
+        }
+        services.mute = { [weak model] _ in model?.mute() }
 
         observeActivity()
         observeNetwork()
         observeSyncStatus()
-    }
-
-    /// Builds the RFC 822 message for a draft: From is the account, replies carry the threading headers.
-    /// Kept to one function so it can give way to the engine's own encoder.
-    nonisolated static func encodeDraft(_ store: MailStore) -> @Sendable (Draft, Account) throws -> Data {
-        { draft, account in
-            let (replied, name) = try store.database.reader.read { db in
-                (try draft.replyToMessageId.flatMap { id in
-                    try MailMessage.filter(Column("accountId") == draft.accountId && Column("id") == id).fetchOne(db)
-                }, try Contact.fetchOne(db, key: account.id)?.name ?? "")
-            }
-            let threaded = draft.kind == .reply || draft.kind == .replyAll ? replied : nil
-            let references = [threaded?.refs, threaded?.rfcMessageId].compactMap { $0 }.joined(separator: " ")
-            return try MIMEBuilder.build(
-                draft: draft, from: Participant(name: name, email: account.email),
-                inReplyTo: threaded?.rfcMessageId, references: references.isEmpty ? nil : references)
-        }
     }
 
     // MARK: Search on Gmail

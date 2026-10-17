@@ -312,7 +312,7 @@ extension SelfCheck {
         configuration.observeSystemWake = false
         configuration.attachmentCacheDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-check-\(UUID().uuidString)")
         let coordinator = SyncCoordinator(store: store, accounts: [account], apiProvider: { _ in gmail },
-                                          encodeDraft: Integration.encodeDraft(store), configuration: configuration)
+                                          encodeDraft: DraftEncoder.make(store: store), configuration: configuration)
         coordinator.start()
         var threads = 0
         let started = Date()
@@ -329,7 +329,7 @@ extension SelfCheck {
         let rows = (try? store.threadRows(in: .unifiedInbox, limit: 1)) ?? []
         if let key = rows.first?.id, let content = try? DraftStore(database).makeDraft(.reply(key, all: false)) {
             let draft = content.assembledDraft()
-            let raw = (try? Integration.encodeDraft(store)(draft, account)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+            let raw = (try? DraftEncoder.make(store: store)(draft, account)).map { String(decoding: $0, as: UTF8.self) } ?? ""
             check("a reply is threaded and sent from the account",
                   raw.contains("In-Reply-To: <") && raw.contains("References: <")
                     && raw.components(separatedBy: "\r\n").contains { $0.hasPrefix("From:") && $0.contains("me@example.com") })

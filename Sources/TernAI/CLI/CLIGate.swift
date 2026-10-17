@@ -51,6 +51,9 @@ public actor CLIGate {
         }
     }
 
+    /// Calls holding a slot and calls waiting for one.
+    var occupancy: (running: Int, waiting: Int) { (running, waiters.count) }
+
     private func cancelWaiter(_ id: UUID) {
         guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
         waiters.remove(at: index).continuation.resume(throwing: CancellationError())

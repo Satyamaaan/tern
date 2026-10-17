@@ -85,9 +85,10 @@ private actor Counter {
 @Test func gateDropsCancelledWaiters() async throws {
     let gate = CLIGate(limit: 1)
     let holder = Task { try await gate.withSlot { try await Task.sleep(for: .milliseconds(300)) } }
-    try await Task.sleep(for: .milliseconds(50))
+    // Step on the gate's own state, not on sleeps that race on a busy machine.
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
     let waiter = Task { try await gate.withSlot { "ran" } }
-    try await Task.sleep(for: .milliseconds(50))
+    for _ in 0..<200 where await gate.occupancy.waiting == 0 { try await Task.sleep(for: .milliseconds(5)) }
     waiter.cancel()
     await #expect(throws: CancellationError.self) { try await waiter.value }
     try await holder.value
