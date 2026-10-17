@@ -6,6 +6,11 @@ import Foundation
 /// Errors: 401 refreshes the token once, then throws `.unauthorized`; 429, rate-limit 403s and 5xx
 /// are retried with backoff (honouring `Retry-After`); 404 is `.notFound` (`.historyExpired` from
 /// `history`); transport failures are `.network`.
+///
+/// Calls that create something (`send`, `sendDraft`, `createDraft`, `createLabel`) are not retried
+/// after a 5xx or a transport failure, because Gmail may have done the work before failing: a
+/// `.server` or `.network` error from them means "maybe". Before sending again, look for the message
+/// with `messageIds(query: "rfc822msgid:<Message-ID>", …)`.
 public final class GmailHTTPClient: GmailAPI {
     public struct Options: Sendable {
         /// Batches of `messages(ids:format:)` in flight at once.
@@ -61,7 +66,8 @@ public final class GmailHTTPClient: GmailAPI {
             var labelListVisibility = "labelShow"
             var messageListVisibility = "show"
         }
-        return try await send("POST", "users/me/labels", json: Body(name: name), cost: GmailQuota.labelsCreate)
+        return try await send("POST", "users/me/labels", json: Body(name: name), cost: GmailQuota.labelsCreate,
+                              idempotent: false)
     }
 
     public func deleteLabel(id: String) async throws {
@@ -133,27 +139,28 @@ public final class GmailHTTPClient: GmailAPI {
         if raw.count > options.uploadThreshold {
             let metadata = threadId.map { ["threadId": $0] }
             return try await upload("POST", "users/me/messages/send", raw: raw, metadata: metadata,
-                                    cost: GmailQuota.messagesSend)
+                                    cost: GmailQuota.messagesSend, idempotent: false)
         }
         return try await send("POST", "users/me/messages/send", json: MessageBody(raw: raw, threadId: threadId),
-                              cost: GmailQuota.messagesSend)
+                              cost: GmailQuota.messagesSend, idempotent: false)
     }
 
     public func createDraft(raw: Data, threadId: String?) async throws -> GmailDraft {
         if raw.count > options.uploadThreshold {
             let metadata = threadId.map { DraftMetadata(id: nil, message: ["threadId": $0]) }
-            return try await upload("POST", "users/me/drafts", raw: raw, metadata: metadata, cost: GmailQuota.draftsCreate)
+            return try await upload("POST", "users/me/drafts", raw: raw, metadata: metadata, cost: GmailQuota.draftsCreate,
+                                    idempotent: false)
         }
         return try await send("POST", "users/me/drafts",
                               json: DraftBody(id: nil, message: MessageBody(raw: raw, threadId: threadId)),
-                              cost: GmailQuota.draftsCreate)
+                              cost: GmailQuota.draftsCreate, idempotent: false)
     }
 
     public func updateDraft(id: String, raw: Data, threadId: String?) async throws -> GmailDraft {
         let path = "users/me/drafts/\(Self.escape(id))"
         if raw.count > options.uploadThreshold {
             let metadata = DraftMetadata(id: id, message: threadId.map { ["threadId": $0] })
-            return try await upload("PUT", path, raw: raw, metadata: metadata, cost: GmailQuota.draftsUpdate)
+            return try await upload("PUT", path, raw: raw, metadata: metadata, cost: GmailQuota.draftsUpdate, idempotent: true)
         }
         return try await send("PUT", path, json: DraftBody(id: id, message: MessageBody(raw: raw, threadId: threadId)),
                               cost: GmailQuota.draftsUpdate)
@@ -164,7 +171,7 @@ public final class GmailHTTPClient: GmailAPI {
     }
 
     public func sendDraft(id: String) async throws -> GmailMessageRef {
-        try await send("POST", "users/me/drafts/send", json: ["id": id], cost: GmailQuota.draftsSend)
+        try await send("POST", "users/me/drafts/send", json: ["id": id], cost: GmailQuota.draftsSend, idempotent: false)
     }
 
     public func sendAs() async throws -> [GmailSendAs] {
@@ -196,7 +203,7 @@ public final class GmailHTTPClient: GmailAPI {
     /// The media upload endpoint: `uploadType=media` with the bare `message/rfc822` body, or
     /// `uploadType=multipart` when JSON metadata (such as `threadId`) has to travel with it.
     private func upload<Metadata: Encodable, Response: Decodable>(
-        _ method: String, _ path: String, raw: Data, metadata: Metadata?, cost: Int
+        _ method: String, _ path: String, raw: Data, metadata: Metadata?, cost: Int, idempotent: Bool
     ) async throws -> Response {
         var request: URLRequest
         if let metadata {
@@ -214,7 +221,7 @@ public final class GmailHTTPClient: GmailAPI {
             request.httpBody = raw
             request.setValue("message/rfc822", forHTTPHeaderField: "Content-Type")
         }
-        return try decode(try await perform(request, cost: cost).data)
+        return try decode(try await perform(request, cost: cost, idempotent: idempotent).data)
     }
 
     // MARK: - Requests
@@ -242,11 +249,12 @@ public final class GmailHTTPClient: GmailAPI {
         try decode(try await perform(request("GET", path, query: query), cost: cost).data)
     }
 
-    private func send<Body: Encodable, T: Decodable>(_ method: String, _ path: String, json: Body, cost: Int) async throws -> T {
+    private func send<Body: Encodable, T: Decodable>(_ method: String, _ path: String, json: Body, cost: Int,
+                                                     idempotent: Bool = true) async throws -> T {
         var request = try request(method, path)
         request.httpBody = try JSONEncoder().encode(json)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try decode(try await perform(request, cost: cost).data)
+        return try decode(try await perform(request, cost: cost, idempotent: idempotent).data)
     }
 
     func decode<T: Decodable>(_ data: Data) throws -> T {
@@ -257,8 +265,9 @@ public final class GmailHTTPClient: GmailAPI {
         }
     }
 
-    /// Sends `request` with rate limiting, auth, and retries.
-    func perform(_ request: URLRequest, cost: Int) async throws -> Response {
+    /// Sends `request` with rate limiting, auth, and retries. A non-idempotent request is retried
+    /// only when Gmail refused it outright (401, 429, rate-limit 403), never after a 5xx.
+    func perform(_ request: URLRequest, cost: Int, idempotent: Bool = true) async throws -> Response {
         var retries = 0
         var refreshedAuth = false
         while true {
@@ -294,6 +303,8 @@ public final class GmailHTTPClient: GmailAPI {
                 await tokens.invalidate(token)
                 guard !refreshedAuth else { throw GmailAPIError.unauthorized }
                 refreshedAuth = true
+            case .retry(_, false, let error) where !idempotent:
+                throw error
             case .retry(let retryAfter, let rateLimited, let error):
                 try await backOff(retry: retries, retryAfter: retryAfter, rateLimited: rateLimited, finalError: error)
                 retries += 1
@@ -342,7 +353,7 @@ enum GmailResponseDisposition: Equatable {
         var error: Inner?
     }
 
-    private static let rateLimitReasons: Set<String> = ["rateLimitExceeded", "userRateLimitExceeded"]
+    private static let rateLimitReasons: Set<String> = ["rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED"]
     private static let scopeReasons: Set<String> = ["insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"]
 
     init(status: Int, body: Data, retryAfter: String?, now: TimeInterval) {
@@ -362,7 +373,7 @@ enum GmailResponseDisposition: Equatable {
             self = .fail(.notFound)
         case 429:
             self = .retry(retryAfter: delay, rateLimited: true, error: .rateLimited(retryAfter: delay))
-        case 403 where !reasons.isDisjoint(with: Self.rateLimitReasons):
+        case 403 where !reasons.isDisjoint(with: Self.rateLimitReasons) || error?.status == "RESOURCE_EXHAUSTED":
             self = .retry(retryAfter: delay, rateLimited: true, error: .rateLimited(retryAfter: delay))
         case 403 where reasons.contains("dailyLimitExceeded") || reasons.contains("quotaExceeded"):
             self = .fail(.rateLimited(retryAfter: delay))

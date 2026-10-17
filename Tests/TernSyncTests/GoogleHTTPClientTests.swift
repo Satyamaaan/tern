@@ -92,6 +92,37 @@ import Testing
         #expect(clock.sleeps == [0.75])
     }
 
+    @Test func sendIsNotRetriedAfterAServerError() async throws {
+        let calls = Mutex(0)
+        let server = StubServer { _ in
+            let n = calls.withLock { $0 += 1; return $0 }
+            return n == 1 ? .error(429) : .error(503, message: "Backend Error")
+        }
+        let clock = TestClock()
+        let client = makeClient(server, clock: clock)
+        // 429 means Gmail refused the send, so it is retried; a 503 might have sent it, so it isn't.
+        await #expect(throws: GmailAPIError.server(status: 503, message: "Backend Error")) {
+            try await client.send(raw: Data("x".utf8), threadId: nil)
+        }
+        #expect(server.requests.count == 2)
+        await #expect(throws: GmailAPIError.server(status: 503, message: "Backend Error")) {
+            try await client.sendDraft(id: "r1")
+        }
+        #expect(server.requests.count == 3)
+    }
+
+    @Test func newStyleRateLimitReasonsAreRetried() async throws {
+        let calls = Mutex(0)
+        let server = StubServer { _ in
+            let n = calls.withLock { $0 += 1; return $0 }
+            return n == 1
+                ? .json(#"{"error":{"code":403,"status":"PERMISSION_DENIED","details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}"#, status: 403)
+                : .json(#"{"labels":[]}"#)
+        }
+        #expect(try await makeClient(server, clock: TestClock()).labels().isEmpty)
+        #expect(server.requests.count == 2)
+    }
+
     @Test func longRetryAfterIsReturnedToTheCaller() async throws {
         let server = StubServer { _ in .error(429, headers: ["Retry-After": "600"]) }
         let clock = TestClock()
@@ -273,5 +304,24 @@ import Testing
         try await limiter.acquire(1)
         #expect(clock.sleeps.count == 2)
         #expect(abs(clock.sleeps[1] - 10) < 0.05)
+    }
+
+    @Test func pauseHoldsCallersAlreadyWaiting() async throws {
+        let virtual = TestClock()
+        let limiter = Locked<GmailRateLimiter?>(nil)
+        let paused = Locked(false)
+        // On the first wait, a 429 elsewhere pauses everyone for 30 s.
+        let clock = GoogleClock(now: { virtual.now }, sleep: { seconds in
+            try await virtual.clock.sleep(seconds)
+            if !paused.value, let limiter = limiter.value {
+                paused.set(true)
+                await limiter.pause(for: 30)
+            }
+        }, random: { 0.5 })
+        limiter.set(GmailRateLimiter(unitsPerMinute: 6000, clock: clock))
+        try await limiter.value!.acquire(680)  // 80 units of debt: 1 s
+        #expect(virtual.sleeps.count == 2)
+        #expect(virtual.sleeps[0] == 1)
+        #expect(abs(virtual.sleeps[1] - 30) < 0.01)
     }
 }

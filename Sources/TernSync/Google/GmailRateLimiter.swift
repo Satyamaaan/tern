@@ -54,16 +54,18 @@ public actor GmailRateLimiter {
         self.lastRefill = clock.now()
     }
 
-    /// Waits until `units` may be spent.
+    /// Waits until `units` may be spent. A pause that starts while a caller waits holds it too.
     public func acquire(_ units: Int) async throws {
-        let now = clock.now()
-        refill(now)
+        let start = clock.now()
+        refill(start)
         tokens -= Double(units)
-        var wait = tokens < 0 ? -tokens / unitsPerSecond : 0
-        wait = max(wait, blockedUntil - now)
-        guard wait > 0 else { return }
+        let ready = start + (tokens < 0 ? -tokens / unitsPerSecond : 0)
         do {
-            try await clock.sleep(wait)
+            while true {
+                let wait = max(ready, blockedUntil) - clock.now()
+                guard wait > 0 else { return }
+                try await clock.sleep(wait)
+            }
         } catch {
             tokens += Double(units)
             throw error
