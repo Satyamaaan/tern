@@ -16,6 +16,10 @@ public protocol GmailAPI: Sendable {
     func messageIds(query: String?, labelIds: [String], pageToken: String?, maxResults: Int) async throws -> GmailIdPage
     /// users.messages.get for many ids, batched internally. Ids that no longer exist are omitted.
     func messages(ids: [String], format: GmailMessageFormat) async throws -> [GmailMessage]
+    /// users.threads.get for many ids, batched internally. Ids that no longer exist are omitted.
+    /// One full-format thread costs 120 quota units, two full messages.get calls cost the same,
+    /// so the engine prefers it for threads of three or more messages.
+    func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread]
     /// users.history.list. Throws `GmailAPIError.historyExpired` when `startHistoryId` is too old.
     func history(startHistoryId: String, pageToken: String?) async throws -> GmailHistoryPage
 
@@ -34,6 +38,13 @@ public protocol GmailAPI: Sendable {
 
     /// Send-as identities with signatures.
     func sendAs() async throws -> [GmailSendAs]
+}
+
+extension GmailAPI {
+    /// Default for clients without threads.get; the engine then falls back to messages.get.
+    public func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread] {
+        throw GmailAPIError.server(status: 501, message: GmailThread.unsupported)
+    }
 }
 
 public enum GmailAPIError: Error, Sendable, Equatable {
@@ -189,6 +200,24 @@ public struct GmailMessage: Codable, Sendable, Hashable {
         self.sizeEstimate = sizeEstimate
         self.raw = raw
     }
+}
+
+public struct GmailThread: Codable, Sendable, Hashable {
+    public var id: String
+    public var snippet: String?
+    public var historyId: String?
+    /// Oldest first.
+    public var messages: [GmailMessage]?
+
+    public init(id: String, snippet: String? = nil, historyId: String? = nil, messages: [GmailMessage]? = nil) {
+        self.id = id
+        self.snippet = snippet
+        self.historyId = historyId
+        self.messages = messages
+    }
+
+    /// The message of the default `threads(ids:format:)`.
+    public static let unsupported = "threads.get is not implemented by this client"
 }
 
 public struct GmailHistoryMessage: Codable, Sendable, Hashable {
