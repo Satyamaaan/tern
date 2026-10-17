@@ -39,7 +39,7 @@ public final class SyncCoordinator {
     /// - Parameters:
     ///   - accounts: Accounts to sync; each is stored if the database doesn't have it yet.
     ///   - apiProvider: The Gmail client for an account id (asked again after `reauthorized`).
-    ///   - encodeDraft: Builds the RFC 822 message for a draft.
+    ///   - encodeDraft: Builds the RFC 822 message for a draft: `DraftEncoder.make(store:)`.
     public init(store: MailStore, accounts: [Account],
                 apiProvider: @escaping @Sendable (String) -> any GmailAPI,
                 encodeDraft: @escaping @Sendable (Draft, Account) throws -> Data,
@@ -215,7 +215,12 @@ public final class SyncCoordinator {
         let relay = self.relay
         let sync = AccountSync(
             account: account, store: store, api: apiProvider(account.id), encodeDraft: encodeDraft,
-            configuration: configuration, clock: clock, statusSink: { relay.yield($0) })
+            configuration: configuration, clock: clock,
+            remoteAttachmentFetcher: { [weak self] ref, file in
+                guard let owner = await self?.sync(for: ref.accountId) else { throw SyncError.unknownAccount(ref.accountId) }
+                return try await owner.attachmentData(ref, file: file)
+            },
+            statusSink: { relay.yield($0) })
         syncs[account.id] = sync
         let status = SyncStatus(accountId: account.id, quotaLimit: configuration.quota.unitsPerMinute)
         status.apply(SyncStatusSnapshot(accountId: account.id, state: account.syncState,

@@ -62,15 +62,22 @@ public actor AccountSync {
     var actionsWaiting = false
     /// The client has no threads.get; fall back to messages.get.
     var threadsUnsupported = false
+    /// The client has no drafts.list; skip looking for a Gmail draft before creating one.
+    var draftListUnsupported = false
+    /// Downloads an attachment of another account's message (a forward whose draft moved accounts).
+    var remoteAttachmentFetcher: (@Sendable (RemoteAttachmentRef, DraftAttachment) async throws -> Data)?
     private var wakeRequested = false
     private var wakeContinuation: CheckedContinuation<Void, Never>?
 
     /// - Parameters:
     ///   - encodeDraft: Builds the RFC 822 message for a draft (the MIME builder lives in Google/).
     ///   - statusSink: Receives every status change; called on this actor.
+    ///   - remoteAttachmentFetcher: Downloads attachments of other accounts' messages, for forwards
+    ///     whose draft moved to this account.
     public init(account: Account, store: MailStore, api: any GmailAPI,
                 encodeDraft: @escaping @Sendable (Draft, Account) throws -> Data,
                 configuration: SyncConfiguration = SyncConfiguration(), clock: any SyncClock = SystemSyncClock(),
+                remoteAttachmentFetcher: (@Sendable (RemoteAttachmentRef, DraftAttachment) async throws -> Data)? = nil,
                 statusSink: @escaping @Sendable (SyncStatusSnapshot) -> Void = { _ in }) {
         self.accountId = account.id
         self.store = store
@@ -82,6 +89,7 @@ public actor AccountSync {
         self.encodeDraft = encodeDraft
         self.configuration = configuration
         self.clock = clock
+        self.remoteAttachmentFetcher = remoteAttachmentFetcher
         self.statusSink = statusSink
         self.account = account
         self.status = SyncStatusSnapshot(accountId: account.id, state: account.syncState,

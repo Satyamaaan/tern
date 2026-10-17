@@ -409,6 +409,9 @@ public actor FakeGmail: GmailAPI {
         remove(messageId)
         message.id = nextId()
         message.labelIds = [SystemLabel.sent]
+        for (key, data) in attachmentData where key.hasPrefix(messageId + "/") {
+            attachmentData[message.id + key.dropFirst(messageId.count)] = data
+        }
         let sent = add(message)
         try finish(.sendDraft)
         return GmailMessageRef(id: sent.id, threadId: sent.threadId)
@@ -697,32 +700,85 @@ public actor FakeGmail: GmailAPI {
         part.parts = children
     }
 
-    /// Reads a simple RFC 822 message (headers, blank line, body) into a single-part payload.
+    /// Reads an RFC 822 message into a payload: multipart trees, base64 and quoted-printable parts,
+    /// attachments (served by `attachment`). Like Gmail, it joins `threadId` only when the message
+    /// refers to one of that thread's messages in In-Reply-To or References.
     private func messageFromRaw(_ raw: Data, threadId: String?, labels: [String]) -> GmailMessage {
-        let text = String(decoding: raw, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
-        let split = text.range(of: "\n\n")
-        let headerText = split.map { String(text[..<$0.lowerBound]) } ?? text
-        let body = split.map { String(text[$0.upperBound...]) } ?? ""
-        var headers: [GmailHeader] = []
-        for line in headerText.split(separator: "\n", omittingEmptySubsequences: true) {
-            if line.first == " " || line.first == "\t", !headers.isEmpty {
-                headers[headers.count - 1].value += " " + line.trimmingCharacters(in: .whitespaces)
-            } else if let colon = line.firstIndex(of: ":") {
-                headers.append(GmailHeader(name: String(line[..<colon]), value: line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)))
-            }
-        }
         let id = nextId()
-        if !headers.contains(where: { $0.name.caseInsensitiveCompare("Message-ID") == .orderedSame }) {
-            headers.append(GmailHeader(name: "Message-ID", value: "<\(id)@fake.tern>"))
+        var payload = parsePart(raw, messageId: id)
+        if payload.header("Message-ID") == nil {
+            payload.headers = (payload.headers ?? []) + [GmailHeader(name: "Message-ID", value: "<\(id)@fake.tern>")]
         }
-        let contentType = headers.first { $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame }?.value ?? "text/plain; charset=UTF-8"
-        let mimeType = MailParsing.parameterizedValue(contentType).value
-        let data = Data(body.utf8)
-        let payload = GmailMessagePart(partId: "", mimeType: mimeType.hasPrefix("text/") ? mimeType : "text/plain", filename: "",
-                                       headers: headers, body: GmailPartBody(size: data.count, data: MailParsing.base64URLEncode(data)))
-        return GmailMessage(id: id, threadId: threadId.flatMap { tid in store.values.contains { $0.threadId == tid } ? tid : nil } ?? id,
-                            labelIds: labels, snippet: Self.snippet(text: mimeType == "text/html" ? nil : body, html: mimeType == "text/html" ? body : nil),
+        Self.assignPartIds(&payload, id: "")
+        let referenced = Set(Self.messageIds(in: [payload.header("In-Reply-To"), payload.header("References")]
+            .compactMap { $0 }.joined(separator: " ")))
+        let joined = threadId.flatMap { tid in
+            store.values.contains { $0.threadId == tid && $0.payload?.header("Message-ID").map(referenced.contains) == true } ? tid : nil
+        }
+        let text = Self.text(of: payload, type: "text/plain")
+        let html = text == nil ? Self.text(of: payload, type: "text/html") : nil
+        return GmailMessage(id: id, threadId: joined ?? id, labelIds: labels, snippet: Self.snippet(text: text, html: html),
                             internalDate: String(Int64(newestDate() * 1000)), payload: payload)
+    }
+
+    /// One MIME part and its children. Text parts keep their data inline; files are stored as
+    /// attachments of `messageId`.
+    private func parsePart(_ data: Data, messageId: String) -> GmailMessagePart {
+        let (lines, body) = MultipartReader.headerLinesAndBody(data)
+        let headers = lines.compactMap { line -> GmailHeader? in
+            guard let colon = line.firstIndex(of: ":") else { return nil }
+            return GmailHeader(name: String(line[..<colon]), value: line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces))
+        }
+        func header(_ name: String) -> String? { headers.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value }
+        let type = MailParsing.parameterizedValue(header("Content-Type") ?? "text/plain; charset=UTF-8")
+        let disposition = header("Content-Disposition").map(MailParsing.parameterizedValue)
+        if type.value.hasPrefix("multipart/"), let boundary = type.parameters["boundary"],
+           let sections = try? MultipartReader.split(body, boundary: boundary) {
+            return GmailMessagePart(mimeType: type.value, filename: "", headers: headers, body: GmailPartBody(size: 0),
+                                    parts: sections.map { parsePart($0, messageId: messageId) })
+        }
+        let bytes = Self.decodeTransfer(body, encoding: header("Content-Transfer-Encoding"))
+        let filename = disposition?.parameters["filename"] ?? type.parameters["name"] ?? ""
+        let mimeType = type.value.isEmpty ? "text/plain" : type.value
+        if !filename.isEmpty || disposition?.value == "attachment" || !mimeType.hasPrefix("text/") {
+            let attachmentId = "ANGjdJ\(nextCounter())"
+            attachmentData["\(messageId)/\(attachmentId)"] = bytes
+            return GmailMessagePart(mimeType: mimeType, filename: filename, headers: headers,
+                                    body: GmailPartBody(attachmentId: attachmentId, size: bytes.count))
+        }
+        return GmailMessagePart(mimeType: mimeType, filename: "", headers: headers,
+                                body: GmailPartBody(size: bytes.count, data: MailParsing.base64URLEncode(bytes)))
+    }
+
+    private static func decodeTransfer(_ body: Data, encoding: String?) -> Data {
+        switch encoding?.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "base64":
+            let compact = String(decoding: body, as: UTF8.self).filter { !$0.isWhitespace }
+            return Data(base64Encoded: compact) ?? Data()
+        case "quoted-printable":
+            let text = String(decoding: body, as: UTF8.self)
+                .replacingOccurrences(of: "=\r\n", with: "").replacingOccurrences(of: "=\n", with: "")
+            return Data(MailParsing.quotedPrintableBytes(text[...], underscoreIsSpace: false))
+        default:
+            return body
+        }
+    }
+
+    /// The first text part of `type`, decoded.
+    private static func text(of part: GmailMessagePart, type: String) -> String? {
+        if part.mimeType == type, part.body?.attachmentId == nil, let data = part.body?.data.flatMap(MailParsing.base64URLDecode) {
+            return String(decoding: data, as: UTF8.self)
+        }
+        for child in part.parts ?? [] {
+            if let found = text(of: child, type: type) { return found }
+        }
+        return nil
+    }
+
+    /// `<…>` ids in a References or In-Reply-To value.
+    private static func messageIds(in value: String) -> [String] {
+        value.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\r" || $0 == "\n" || $0 == "," })
+            .map(String.init).filter { $0.hasPrefix("<") && $0.hasSuffix(">") }
     }
 
     /// Now, or just after the newest message when the account's mail is dated in the future.

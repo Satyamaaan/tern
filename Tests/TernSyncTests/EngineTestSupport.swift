@@ -38,6 +38,7 @@ extension SyncConfiguration {
         // Loops that call syncOnce without moving the clock expect bulk work to run back to back.
         configuration.paceWindow = 0
         configuration.attachmentCacheDirectory = cache
+        configuration.draftFilesDirectory = cache.appendingPathComponent("Draft Files", isDirectory: true)
         configuration.observeSystemWake = false
         return configuration
     }
@@ -63,19 +64,25 @@ struct Harness {
     let configuration: SyncConfiguration
     var accountId: String { testEmail }
 
-    init(configuration: SyncConfiguration = .test(), fake: FakeGmail? = nil, store: MailStore? = nil) throws {
-        self.store = try store ?? MailStore(AppDatabase.inMemory())
+    let encoder: @Sendable (Draft, Account) throws -> Data
+
+    /// - Parameter realEncoder: Encode drafts with `DraftEncoder` (MIME) instead of `testEncoder`.
+    init(configuration: SyncConfiguration = .test(), fake: FakeGmail? = nil, store: MailStore? = nil,
+         realEncoder: Bool = false) throws {
+        let store = try store ?? MailStore(AppDatabase.inMemory())
+        self.store = store
         let clock = EngineTestClock()
         self.clock = clock
         self.fake = fake ?? FakeGmail(email: testEmail, sleep: { _ in })
         self.configuration = configuration
-        self.sync = AccountSync(account: Account(email: testEmail), store: self.store, api: self.fake,
-                                encodeDraft: testEncoder, configuration: configuration, clock: clock)
+        self.encoder = realEncoder ? DraftEncoder.make(store: store) : testEncoder
+        self.sync = AccountSync(account: Account(email: testEmail), store: store, api: self.fake,
+                                encodeDraft: encoder, configuration: configuration, clock: clock)
     }
 
     /// A second engine over the same store and account, as after relaunching the app.
     func relaunched() -> AccountSync {
-        AccountSync(account: Account(email: testEmail), store: store, api: fake, encodeDraft: testEncoder,
+        AccountSync(account: Account(email: testEmail), store: store, api: fake, encodeDraft: encoder,
                     configuration: configuration, clock: clock)
     }
 

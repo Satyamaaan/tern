@@ -187,62 +187,6 @@ extension MailStore {
             """, arguments: [draftId])
     }
 
-    // MARK: Drafts
-
-    /// Saves the draft as queued and schedules it to send at `notBefore` (the end of the undo window,
-    /// or a send-later time). Undo with `cancelPendingSend`.
-    public func queueSend(_ draft: Draft, notBefore: Date?) throws {
-        try database.writer.write { db in
-            var draft = draft
-            draft.state = .queued
-            draft.lastError = nil
-            draft.updatedAt = Date()
-            try draft.upsert(db)
-            try PendingOp(accountId: draft.accountId, kind: .sendDraft, payload: try encodeJSON(DraftOpPayload(draftId: draft.id)),
-                          notBefore: notBefore).insert(db)
-        }
-    }
-
-    /// Saves the draft locally and queues a create/update of the Gmail draft.
-    public func queueSave(_ draft: Draft) throws {
-        try database.writer.write { db in
-            var draft = draft
-            draft.updatedAt = Date()
-            try draft.upsert(db)
-            try PendingOp(accountId: draft.accountId, kind: .saveDraft, payload: try encodeJSON(DraftOpPayload(draftId: draft.id))).insert(db)
-        }
-    }
-
-    /// Queues deletion of the draft. Keep the `draft` row: the engine needs its Gmail draft id and
-    /// removes the row once Gmail has deleted it.
-    public func queueDelete(draftId: String) throws {
-        try database.writer.write { db in
-            guard let draft = try Draft.fetchOne(db, key: draftId) else { return }
-            try PendingOp(accountId: draft.accountId, kind: .deleteDraft, payload: try encodeJSON(DraftOpPayload(draftId: draftId))).insert(db)
-        }
-    }
-
-    /// Undo send: drops a send that hasn't started and puts the draft back to editing.
-    /// Returns false when it's too late (sending, sent, or a retry of a send that may have gone out).
-    @discardableResult
-    public func cancelPendingSend(draftId: String) throws -> Bool {
-        struct Progress: Decodable { var sendingDraftId: String? }
-        return try database.writer.write { db in
-            let sends = try Self.draftOps(db, draftId: draftId).filter {
-                $0.kind == .sendDraft && $0.state == .pending
-                    && (try? JSONDecoder().decode(Progress.self, from: Data($0.payload.utf8)))?.sendingDraftId == nil
-            }
-            guard !sends.isEmpty else { return false }
-            _ = try PendingOp.deleteAll(db, keys: sends.compactMap(\.id))
-            if var draft = try Draft.fetchOne(db, key: draftId) {
-                draft.state = .editing
-                draft.updatedAt = Date()
-                try draft.update(db)
-            }
-            return true
-        }
-    }
-
     // MARK: Attachments
 
     public static func setAttachmentPath(_ db: Database, _ attachment: MailAttachment, path: String) throws {

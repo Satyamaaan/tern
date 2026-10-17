@@ -39,14 +39,23 @@ public struct DraftStore: Sendable {
         public static let signatures = "compose.signatures"
         /// Account id new mail starts from when none is given.
         public static let defaultAccount = "compose.defaultAccount"
-        /// Signature HTML for one account.
+        /// Signature HTML for one account. The sync engine copies the default Gmail signature here
+        /// unless `customSignature` is set.
         public static func signature(_ accountId: String) -> String { "signature.\(accountId)" }
+        /// "1" once the user set the account's signature in Tern; Gmail's then no longer replaces it.
+        public static func customSignature(_ accountId: String) -> String { "signature.\(accountId).custom" }
+        /// The name outgoing mail shows next to the account's address, from Gmail's send-as settings.
+        public static func senderName(_ accountId: String) -> String { "sender.name.\(accountId)" }
     }
 
     public init(_ database: AppDatabase, filesDirectory: URL? = nil) {
         self.database = database
-        self.filesDirectory = filesDirectory
-            ?? AppDatabase.defaultURL().deletingLastPathComponent().appendingPathComponent("Draft Files", isDirectory: true)
+        self.filesDirectory = filesDirectory ?? Self.defaultFilesDirectory
+    }
+
+    /// Application Support/Tern/Draft Files.
+    public static var defaultFilesDirectory: URL {
+        AppDatabase.defaultURL().deletingLastPathComponent().appendingPathComponent("Draft Files", isDirectory: true)
     }
 
     // MARK: Opening
@@ -250,13 +259,14 @@ public struct DraftStore: Sendable {
     }
 
     /// Undo send / cancel a scheduled send: removes the `sendDraft` op if the engine hasn't picked it up,
-    /// and puts the draft back to `editing`. False when it's already on its way.
+    /// and puts the draft back to `editing`. False when it's already on its way: being sent, or a retry
+    /// of a send that may have gone out.
     @discardableResult
     public func cancelSend(_ draftId: String, now: Date = Date()) async throws -> Bool {
         try await database.writer.write { db in
             guard var draft = try Draft.fetchOne(db, key: draftId), draft.state == .queued else { return false }
             let ops = try Self.pendingOps(db, draftId: draftId, kinds: [.sendDraft])
-            guard !ops.isEmpty else { return false }
+            guard !ops.isEmpty, !ops.contains(where: Self.mayHaveGoneOut) else { return false }
             try Self.deleteOps(db, draftId: draftId, kinds: [.sendDraft])
             draft.state = .editing
             draft.scheduledAt = nil
@@ -268,7 +278,8 @@ public struct DraftStore: Sendable {
     }
 
     /// Deletes the draft, its pending ops and files; queues `deleteDraft` when Gmail has a copy. Also
-    /// removes the local `DRAFT` message so lists update at once. False when it is being sent.
+    /// removes the local `DRAFT` message so lists update at once. False when it is being sent or a
+    /// send of it may have gone out.
     @discardableResult
     public func discard(_ draftId: String) async throws -> Bool {
         let removed = try await database.writer.write { db -> Bool in
@@ -276,7 +287,8 @@ public struct DraftStore: Sendable {
             let sending = try PendingOp
                 .filter(sql: "kind = 'sendDraft' AND state = 'inflight' AND json_extract(payload, '$.draftId') = ?", arguments: [draftId])
                 .fetchCount(db)
-            guard draft.state != .sending, sending == 0 else { return false }
+            let retrying = try Self.pendingOps(db, draftId: draftId, kinds: [.sendDraft]).contains(where: Self.mayHaveGoneOut)
+            guard draft.state != .sending, sending == 0, !retrying else { return false }
             try Self.deleteOps(db, draftId: draftId, kinds: [.saveDraft, .sendDraft])
             if let gmailDraftId = draft.gmailDraftId {
                 try Self.queueOp(db, .deleteDraft, accountId: draft.accountId,
@@ -292,6 +304,11 @@ public struct DraftStore: Sendable {
         return removed
     }
 
+    /// A send op whose Gmail draft the engine has already staged (and maybe sent).
+    static func mayHaveGoneOut(_ op: PendingOp) -> Bool {
+        (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.sendingDraftId != nil
+    }
+
     // MARK: Settings
 
     public func undoSeconds() throws -> Int {
@@ -304,10 +321,21 @@ public struct DraftStore: Sendable {
         try database.reader.read { db in try Self.signatureHTML(db, accountId: accountId) }
     }
 
+    /// Sets the account's signature in Tern (nil for none). From then on Gmail's signature no longer
+    /// replaces it; `useGmailSignature` goes back.
     public func setSignature(_ html: String?, accountId: String) async throws {
         try await database.writer.write { db in
             let key = SettingKey.signature(accountId)
             if let html, !html.isEmpty { try Setting(key: key, value: html).upsert(db) } else { _ = try Setting.deleteOne(db, key: key) }
+            try Setting(key: SettingKey.customSignature(accountId), value: "1").upsert(db)
+        }
+    }
+
+    /// Follows the account's default Gmail signature again; the sync engine fills it in on its next
+    /// settings refresh.
+    public func useGmailSignature(accountId: String) async throws {
+        try await database.writer.write { db in
+            _ = try Setting.deleteOne(db, key: SettingKey.customSignature(accountId))
         }
     }
 
@@ -321,6 +349,11 @@ public struct DraftStore: Sendable {
 
     /// The folder holding a draft's own files.
     public func folder(for draftId: String) -> URL {
+        Self.folder(for: draftId, in: filesDirectory)
+    }
+
+    /// The folder holding a draft's own files under `filesDirectory`.
+    public static func folder(for draftId: String, in filesDirectory: URL) -> URL {
         filesDirectory.appendingPathComponent(draftId, isDirectory: true)
     }
 

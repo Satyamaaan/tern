@@ -85,6 +85,9 @@ public struct SyncConfiguration: Sendable {
     public var maxRequestRetries: Int = 5
     /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<filename>`.
     public var attachmentCacheDirectory: URL = SyncConfiguration.defaultAttachmentDirectory
+    /// `DraftStore.filesDirectory`: forwarded attachments are downloaded into a draft's folder
+    /// before it's sent, and the folder is removed once it has been.
+    public var draftFilesDirectory: URL = DraftStore.defaultFilesDirectory
     /// Wake snoozed threads and sync when the Mac wakes from sleep.
     public var observeSystemWake: Bool = true
 

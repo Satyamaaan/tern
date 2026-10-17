@@ -234,6 +234,28 @@ private func typed(_ content: DraftContent, _ text: String) -> Draft {
     #expect(try await store.discard(content.draft.id) == false)
 }
 
+@Test func aSendTheEngineHasStagedCanNoLongerBeUndoneOrDiscarded() async throws {
+    let store = try makeStore()
+    let content = try #require(try store.makeDraft(.new(accountId: home.id, to: [maya])))
+    try await store.send(typed(content, "Hi"), now: t0)
+    // A retry after a lost drafts.send response: back to pending, but the Gmail draft is staged.
+    let staged = String(decoding: try JSONEncoder().encode(DraftOpPayload(draftId: content.draft.id, sendingDraftId: "r-1")), as: UTF8.self)
+    try await store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET payload = ?", arguments: [staged]) }
+    #expect(try await store.cancelSend(content.draft.id) == false)
+    #expect(try await store.discard(content.draft.id) == false)
+    #expect(try store.draft(id: content.draft.id)?.state == .queued)
+}
+
+@Test func aSignatureSetInTernStaysTernsOwn() async throws {
+    let store = try makeStore()
+    try await store.setSignature("<b>Mia</b>", accountId: home.id)
+    let key = DraftStore.SettingKey.customSignature(home.id)
+    #expect(try await store.database.reader.read { db in try Setting.fetchOne(db, key: key)?.value } == "1")
+    try await store.useGmailSignature(accountId: home.id)
+    #expect(try await store.database.reader.read { db in try Setting.fetchOne(db, key: key) } == nil)
+    #expect(try store.signature(accountId: home.id) == "<b>Mia</b>", "kept until Gmail's replaces it")
+}
+
 @Test func scheduleSendWaitsForTheDate() async throws {
     let store = try makeStore()
     let content = try #require(try store.makeDraft(.new(accountId: home.id, to: [maya])))
