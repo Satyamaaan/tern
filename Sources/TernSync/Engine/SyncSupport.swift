@@ -93,6 +93,11 @@ public struct SyncConfiguration: Sendable {
     /// First retry delay for a failed op or request; doubles each attempt.
     public var retryBaseDelay: Double = 2
     public var retryMaxDelay: Double = 300
+    /// When drafts.send answers that a staged draft is gone but Sent doesn't show the message (its
+    /// search can lag a send, and the draft may also have been deleted in another client), Sent is
+    /// checked again after each of these delays. If it never shows up, the draft is kept, marked
+    /// failed, and not sent again unless the user sends it.
+    public var sendConfirmationDelays: [Double] = [10, 30, 90]
     /// Retries for a read request (5xx, network) before the sync step gives up for now.
     public var maxRequestRetries: Int = 5
     /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<filename>`.

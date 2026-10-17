@@ -666,11 +666,16 @@ public struct DraftOpPayload: Codable, Hashable, Sendable {
     /// Set on `sendDraft` by the sync engine once the Gmail draft it sends exists. From then on the
     /// send may already have gone out, so it can no longer be undone or discarded.
     public var sendingDraftId: String?
+    /// Set on `sendDraft` by the sync engine when drafts.send answered that the staged draft is gone
+    /// but Sent didn't show the message: how many times Sent has been checked again since. The send
+    /// is never tried again from then on.
+    public var confirmChecks: Int?
 
-    public init(draftId: String, gmailDraftId: String? = nil, sendingDraftId: String? = nil) {
+    public init(draftId: String, gmailDraftId: String? = nil, sendingDraftId: String? = nil, confirmChecks: Int? = nil) {
         self.draftId = draftId
         self.gmailDraftId = gmailDraftId
         self.sendingDraftId = sendingDraftId
+        self.confirmChecks = confirmChecks
     }
 }
 

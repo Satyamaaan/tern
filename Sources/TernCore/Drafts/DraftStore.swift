@@ -30,6 +30,9 @@ public struct DraftStore: Sendable {
     /// A Gmail draft is updated at most this often while typing.
     public static let saveInterval: TimeInterval = 10
     public static let defaultUndoSeconds = 5
+    /// `Draft.lastError` of a send that may or may not have gone out: Gmail no longer has the draft
+    /// and Sent doesn't show the message. The sync engine keeps the draft and won't send it again.
+    public static let unconfirmedSendError = "Couldn't confirm this was sent. Check Sent in Gmail before sending again."
 
     /// `setting` keys.
     public enum SettingKey {

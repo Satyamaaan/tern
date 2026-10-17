@@ -142,8 +142,9 @@ extension AccountSync {
     // `DraftStore` writes drafts and their ops; the engine sends what it wrote. While a send runs the
     // draft is `sending` and its op `inflight`, so the composer can't change or undo it. Once the
     // Gmail draft to send exists its id goes into the op payload (`sendingDraftId`): from then on
-    // retries only call drafts.send for it (`notFound` meaning an earlier attempt already sent it)
-    // and the send can't be undone, so a lost response or a crash never sends twice.
+    // retries look in Sent first and only call drafts.send for it, and the send can't be undone, so a
+    // lost response or a crash never sends twice. When drafts.send answers `notFound` and Sent
+    // doesn't show the message, the send is unconfirmed (`unconfirmedSend`): it is never tried again.
 
     private enum DraftClaim: Sendable {
         case gone
@@ -291,11 +292,15 @@ extension AccountSync {
         let isRetry = payload.sendingDraftId != nil || op.attempts > 0 || op.lastError != nil
         if isRetry, let sent = try await findSent(messageId: AccountSync.messageId(for: draft, account: account)) {
             ref = sent
+        } else if let checks = payload.confirmChecks {
+            return try unconfirmedSend(op, payload, checks: checks + 1, now: now)
         } else if let staged = payload.sendingDraftId {
             do {
                 ref = try await api.sendDraft(id: staged)
             } catch GmailAPIError.notFound {
-                ref = nil
+                // Gmail deletes a draft when it sends it, so an earlier attempt most likely went out
+                // and Sent's search hasn't caught up; but the draft may have been deleted elsewhere.
+                return try unconfirmedSend(op, payload, checks: 0, now: now)
             }
         } else {
             let raw = try await encoded(draft, account)
@@ -347,6 +352,43 @@ extension AccountSync {
         }
         try? FileManager.default.removeItem(at: DraftStore.folder(for: draftId, in: configuration.draftFilesDirectory))
         return .done
+    }
+
+    /// A staged send whose Gmail draft is gone while Sent doesn't show the message, after `checks`
+    /// further looks at Sent. Sent is checked again after each `sendConfirmationDelays` (the draft
+    /// stays `queued`, so it can't be edited, undone or discarded meanwhile); drafts.send is never
+    /// called again. If it never shows up, the op is dropped and the draft, with its files, is kept
+    /// as `failed` with `DraftStore.unconfirmedSendError`: only the user can send it again.
+    private func unconfirmedSend(_ op: PendingOp, _ payload: DraftOpPayload, checks: Int, now: Date) throws -> OpOutcome {
+        guard let opId = op.id else { return .done }
+        let draftId = payload.draftId
+        let delays = configuration.sendConfirmationDelays
+        guard checks < delays.count else {
+            try writeNow { db in
+                _ = try PendingOp.deleteOne(db, key: opId)
+                guard var draft = try Draft.fetchOne(db, key: draftId), draft.state != .sent else { return }
+                draft.state = .failed
+                draft.lastError = DraftStore.unconfirmedSendError
+                try draft.update(db)
+            }
+            return .done
+        }
+        var waiting = payload
+        waiting.confirmChecks = checks
+        let json = String(decoding: try JSONEncoder().encode(waiting), as: UTF8.self)
+        let retryAt = now.addingTimeInterval(delays[checks])
+        try writeNow { db in
+            guard var row = try PendingOp.fetchOne(db, key: opId) else { return }
+            row.payload = json
+            row.state = .pending
+            row.notBefore = retryAt
+            try row.update(db)
+            guard var draft = try Draft.fetchOne(db, key: draftId), draft.state != .sent else { return }
+            draft.state = .queued
+            draft.lastError = nil
+            try draft.update(db)
+        }
+        return .deferred(retryAt)
     }
 
     /// Creates or updates the Gmail copy of a draft being written and records its ids on the row.
