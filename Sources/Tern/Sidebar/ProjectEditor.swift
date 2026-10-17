@@ -79,8 +79,10 @@ struct ProjectEditor: View {
                         draft.rules.removeAll { $0.id == rule.id }
                     } label: {
                         IconView(icon: .plus, size: 12, color: Color(Theme.text3)).rotationEffect(.degrees(45))
+                            .frame(width: Theme.Control.small, height: Theme.Control.small)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(IconButtonStyle())
+                    .help("Remove rule")
                 }
                 .frame(height: 32)
                 Hairline()
