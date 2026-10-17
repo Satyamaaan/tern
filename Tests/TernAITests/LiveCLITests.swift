@@ -31,8 +31,17 @@ private let fakeThreads = """
     """
 
 private func check(_ provider: any AIProvider) async throws {
-    #expect(await provider.availability(refresh: true) == .ready)
     let request = Prompts.triage([], refs: [], owner: ["owner@example.com"], projects: nil, today: Date())
+    let availability = await provider.availability(refresh: true)
+    print("live \(provider.id): \(availability)")
+    guard availability == .ready else {
+        // A signed-out CLI must fail fast as notSignedIn, so triage pauses instead of retrying.
+        #expect(availability == .signedOut)
+        await #expect(throws: AIError.notSignedIn(provider: provider.displayName)) {
+            try await provider.complete(AIRequest(instructions: request.instructions, input: "<thread ref=\"1\">\nSubject: Hi\n</thread>", schema: request.schema))
+        }
+        return
+    }
     let answer = try await provider.complete(AIRequest(instructions: request.instructions, input: fakeThreads, schema: request.schema))
     let verdicts = try #require(TriageVerdict.parse(answer, refs: ["1", "2"], projects: []))
     let byRef = Dictionary(uniqueKeysWithValues: verdicts.map { ($0.ref, $0) })

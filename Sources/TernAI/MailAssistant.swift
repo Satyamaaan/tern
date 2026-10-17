@@ -95,7 +95,7 @@ public actor MailAssistant {
         let settings = try await database.reader.read { db in try AISettings.read(db) }
         let provider = try await providers.resolve(settings)
         var request = request
-        request.model = settings.model
+        request.model = settings.model(for: provider)
         for _ in 1...2 {
             let answer = try await provider.complete(request)
             if let object = ModelJSON.parse(answer) as? [String: Any] { return object }

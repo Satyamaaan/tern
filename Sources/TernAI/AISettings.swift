@@ -45,6 +45,11 @@ public struct AISettings: Hashable, Sendable {
         }
     }
 
+    /// `model` only applies to the provider it was picked for.
+    public func model(for provider: any AIProvider) -> String? {
+        self.provider == provider.id ? model : nil
+    }
+
     private static func flag(_ value: String?) -> Bool {
         guard let value else { return false }
         return ["true", "1", "yes", "on"].contains(value.lowercased())

@@ -191,7 +191,7 @@ public actor TriageQueue {
         setState(.working)
         let refs = batch.threads.indices.map { String($0 + 1) }
         var request = Prompts.triage(batch.threads, refs: refs, owner: batch.owner, projects: batch.projects, today: now())
-        request.model = settings.model
+        request.model = settings.model(for: provider)
         let verdicts = try await ask(provider, request, refs: Set(refs), projects: batch.projects ?? [])
         let threadsByRef = Dictionary(uniqueKeysWithValues: zip(refs, batch.threads))
         let classifiedAt = now()

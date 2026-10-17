@@ -80,12 +80,14 @@ actor CLIBackend {
         availability = nil
         resolved = nil
         help = nil
+        memo = [:]
     }
 
+    /// Computed once until `invalidate()`, including an empty answer (e.g. a version without the command).
     func memoized(_ key: String, _ make: () async -> [String]) async -> [String] {
         if let value = memo[key] { return value }
         let value = await make()
-        if !value.isEmpty { memo[key] = value }
+        memo[key] = value
         return value
     }
 
@@ -146,8 +148,8 @@ enum CLIFailure {
     static func error(provider: String, exitCode: Int32, output: String) -> AIError {
         let lines = errorLines(in: output)
         let lower = (lines.isEmpty ? output : lines.joined(separator: "\n")).lowercased()
-        if ["not logged in", "please run /login", "codex login", "invalid api key", "401", "unauthorized",
-            "authentication", "oauth token has expired", "not authenticated", "logged out"]
+        if ["not logged in", "/login", "codex login", "invalid api key", "401", "unauthorized", "authenticate",
+            "authentication", "session expired", "token has expired", "not authenticated", "logged out"]
             .contains(where: lower.contains) {
             return .notSignedIn(provider: provider)
         }

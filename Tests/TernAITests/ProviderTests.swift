@@ -206,9 +206,11 @@ private func directoryIsEmpty(_ path: String) -> Bool {
     #expect(throws: AIError.rateLimited("Error: Claude AI usage limit reached|1800000000")) {
         try ClaudeCLIProvider.answer(from: limited, provider: "Claude Code")
     }
-    let signedOut = ProcessResult(exitCode: 1, stdout: #"{"is_error":true,"result":"Invalid API key · Please run /login"}"#)
-    #expect(throws: AIError.notSignedIn(provider: "Claude Code")) {
-        try ClaudeCLIProvider.answer(from: signedOut, provider: "Claude Code")
+    for message in ["Invalid API key · Please run /login", "Failed to authenticate: OAuth session expired and could not be refreshed"] {
+        let signedOut = ProcessResult(exitCode: 1, stdout: Data(#"{"is_error":true,"result":"\#(message)"}"#.utf8))
+        #expect(throws: AIError.notSignedIn(provider: "Claude Code")) {
+            try ClaudeCLIProvider.answer(from: signedOut, provider: "Claude Code")
+        }
     }
 }
 
@@ -267,6 +269,8 @@ private func directoryIsEmpty(_ path: String) -> Bool {
     await #expect(throws: AIError.notSignedIn(provider: "codex")) { try await providers.resolve(AISettings(enabled: true, provider: "codex")) }
     #expect(try await providers.resolve(AISettings(enabled: true)).id == "claude")
     #expect(try await providers.resolve(AISettings(enabled: true, provider: "claude")).id == "claude")
+    #expect(AISettings(enabled: true, provider: "claude", model: "sonnet").model(for: claude) == "sonnet")
+    #expect(AISettings(enabled: true, provider: "codex", model: "gpt-x").model(for: claude) == nil)
 }
 
 @Test func settingsRoundTrip() throws {
