@@ -17,6 +17,9 @@ final class AppServices {
     var perform: (MailAction, [ThreadKey]) -> Void = { _, _ in }
     /// Opens the composer (new window or inline, decided by the request).
     var compose: (ComposeRequest) -> Void = { _ in }
+    /// Opens a Gmail draft stored as a DRAFT message in a composer window, fetching its body first
+    /// when only its headers are stored.
+    var openDraftMessage: (MessageKey) -> Void = { _ in }
     /// Downloads an attachment (or inline image) to a local file. Wired to the sync engine.
     var loadAttachment: (MailAttachment) async throws -> URL = { _ in throw CocoaError(.featureUnsupported) }
     /// AI helpers; nil when AI is off or unavailable.

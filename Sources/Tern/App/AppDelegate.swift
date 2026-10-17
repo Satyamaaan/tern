@@ -123,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             guard let services else { return }
             Composer.open(request, services: services)
         }
+        services.openDraftMessage = { [weak services] key in
+            guard let services else { return }
+            Composer.openDraftMessage(key, services: services)
+        }
         services.showThread = { [weak self] key in
             guard let self else { return }
             self.showMainWindow()

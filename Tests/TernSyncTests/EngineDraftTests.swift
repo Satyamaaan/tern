@@ -285,6 +285,52 @@ extension Harness {
     #expect(await h.fake.draftIds.count == 1)
 }
 
+@Test func aDraftIsListedInDraftsOnceWhileGmailReplacesItsCopy() async throws {
+    let h = try Harness()
+    try await h.syncFully()
+    var draft = Draft(accountId: testEmail, toList: [Participant(email: "ann@example.com")], subject: "Plans", bodyHtml: "<p>First</p>")
+    func listed() throws -> [ThreadKey] { try h.store.threadRows(in: Mailbox(.drafts)).map(\.id) }
+    let local = h.thread(MailThread.localDraftPrefix + draft.id)
+
+    try await h.queueSave(draft)
+    #expect(try listed() == [local], "listed before Gmail has a copy")
+    try await h.sync.drainOps()
+    try await h.sync.pollHistory()
+    let first = try #require(try draftRow(h, draft.id)?.gmailMessageId)
+    let threadId = try #require(try await h.store.database.reader.read { db in
+        try String.fetchOne(db, sql: "SELECT threadId FROM message WHERE id = ?", arguments: [first])
+    })
+    #expect(try listed() == [h.thread(threadId)], "by its thread once Gmail's copy is stored")
+
+    draft = try #require(try draftRow(h, draft.id))
+    draft.bodyHtml = "<p>Second</p>"
+    try await h.queueSave(draft)
+    try await h.sync.drainOps()
+    #expect(try draftRow(h, draft.id)?.gmailMessageId != first)
+    #expect(try listed() == [local], "Gmail swapped its copy for a new message: still listed once")
+    try await h.sync.pollHistory()
+    let stored = try #require(try draftRow(h, draft.id)?.gmailMessageId)
+    let newThread = try #require(try await h.store.database.reader.read { db in
+        try String.fetchOne(db, sql: "SELECT threadId FROM message WHERE id = ? AND isDraft = 1", arguments: [stored])
+    })
+    #expect(try listed() == [h.thread(newThread)], "by its thread again once history stores the new copy")
+    #expect(try h.store.scopeCounts(accountId: nil).drafts == 1)
+}
+
+@Test func aLocalDraftsRowFetchesNothingFromGmail() async throws {
+    let h = try Harness()
+    await seed(h.fake, count: 3)
+    try await h.syncFully()
+    let draft = Draft(accountId: testEmail, subject: "Never saved")
+    try await h.queueSave(draft)
+    let row = h.thread(MailThread.localDraftPrefix + draft.id)
+    await h.fake.resetCallLog()
+
+    try await h.sync.fetchBodies(row)
+    await h.sync.prefetchAdjacent([row])
+    #expect(await h.fake.unitsSpent == 0)
+}
+
 @Test func aSendHiddenFromALaggingSearchIndexIsStillNotResent() async throws {
     let h = try Harness()
     let seeded = await seed(h.fake, count: 2)

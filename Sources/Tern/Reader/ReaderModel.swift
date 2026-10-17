@@ -498,6 +498,8 @@ final class ReaderModel {
         guard let key else { return }
         if let draft = try? services?.drafts.editingDraft(inThread: key), draft.kind == .reply || draft.kind == .replyAll {
             composing = .draft(id: draft.id)
+        } else if let services, let gmailDraft = try? services.drafts.gmailReplyDraft(inThread: key) {
+            services.openDraftMessage(gmailDraft)
         } else {
             composing = .reply(key, all: all)
         }

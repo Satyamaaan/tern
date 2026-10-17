@@ -200,7 +200,9 @@ public struct MailStore: Sendable {
         }
 
         _ = arguments.append(contentsOf: [limit])
-        return try ThreadRow.fetchAll(db, sql: sql, arguments: arguments)
+        let rows = try ThreadRow.fetchAll(db, sql: sql, arguments: arguments)
+        guard case .drafts = mailbox.kind else { return rows }
+        return merging(try localDraftRows(db, accountId: mailbox.accountId, limit: limit, before: before), into: rows, limit: limit)
     }
 
     /// Rows for specific threads, in the order given. Used by search and the command palette.

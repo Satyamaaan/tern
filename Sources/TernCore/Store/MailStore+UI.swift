@@ -161,8 +161,9 @@ extension MailStore {
 
         counts.snoozed = try Int.fetchOne(
             db, sql: "SELECT count(*) FROM snooze i WHERE 1\(scoped)", arguments: scopeArguments) ?? 0
-        counts.drafts = try Int.fetchOne(
-            db, sql: "SELECT count(*) FROM thread_label i WHERE i.labelId = 'DRAFT'\(scoped)", arguments: scopeArguments) ?? 0
+        counts.drafts = try (Int.fetchOne(
+            db, sql: "SELECT count(*) FROM thread_label i WHERE i.labelId = 'DRAFT'\(scoped)", arguments: scopeArguments) ?? 0)
+            + localDraftCount(db, accountId: accountId)
 
         for row in try Row.fetchAll(db, sql: """
             SELECT p.projectId, count(*) AS n FROM thread_project p

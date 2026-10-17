@@ -424,6 +424,13 @@ extension AccountSync {
         try writeNow { db in
             if var row = try Draft.fetchOne(db, key: draftId), row.accountId == accountId, row.state != .sent {
                 row.gmailDraftId = saved.id
+                if let messageId = saved.message?.id, let replaced = row.gmailMessageId, replaced != messageId,
+                   try Bool.fetchOne(db, sql: "SELECT 1 FROM message WHERE accountId = ? AND id = ? AND isDraft = 1",
+                                     arguments: [accountId, replaced]) == true {
+                    // Gmail replaced the draft's message with a new one. The old one goes now rather than
+                    // when history says so, so the Drafts list never shows the draft twice meanwhile.
+                    try MailStore.deleteServerMessages(db, accountId: accountId, ids: [replaced])
+                }
                 if let messageId = saved.message?.id { row.gmailMessageId = messageId }
                 row.lastError = nil
                 try row.update(db)

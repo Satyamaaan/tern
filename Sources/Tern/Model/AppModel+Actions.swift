@@ -7,6 +7,8 @@ import TernCore
 extension AppModel {
     /// Runs a mail action with a toast and undo. `toast: nil` runs silently (mark read on open).
     func perform(_ action: MailAction, on keys: [ThreadKey], toast: String? = "") {
+        // Rows for drafts Gmail has no copy of aren't threads; mail actions pass them by.
+        let keys = keys.filter { MailThread.localDraftId(in: $0) == nil }
         guard !keys.isEmpty else { return }
         let leaving = keys.filter { leavesList(action) && snapshot.rows[$0] != nil }
         if !leaving.isEmpty { hide(leaving) }
@@ -295,7 +297,13 @@ extension AppModel {
     /// r / a: answers inline in the reader when it shows the thread, else in a composer window.
     func reply(all: Bool) {
         guard let key = readerKey else { return }
-        if openInReader(key) { services.reader.reply(all: all) } else { services.compose(.reply(key, all: all)) }
+        if openInReader(key) {
+            services.reader.reply(all: all)
+        } else if let gmailDraft = try? services.drafts.gmailReplyDraft(inThread: key) {
+            services.openDraftMessage(gmailDraft)
+        } else {
+            services.compose(.reply(key, all: all))
+        }
     }
 
     /// f: forwards inline in the reader when it shows the thread, else in a composer window.

@@ -280,7 +280,8 @@ public actor AccountSync {
 
     /// Asks for the bodies of threads next to the selection; fetched when the quota allows.
     public func prefetchAdjacent(_ threads: [ThreadKey]) {
-        adjacentQueue = Array(threads.filter { $0.accountId == accountId }.map(\.threadId).prefix(configuration.adjacentPrefetchLimit))
+        adjacentQueue = Array(threads.filter { $0.accountId == accountId && MailThread.localDraftId(in: $0) == nil }
+            .map(\.threadId).prefix(configuration.adjacentPrefetchLimit))
         if !adjacentQueue.isEmpty { wake() }
     }
 
