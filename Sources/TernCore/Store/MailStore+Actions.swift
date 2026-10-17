@@ -160,14 +160,16 @@ extension MailStore {
             // Newest first, so each op is checked against the labels it left behind.
             for queued in token.ops.reversed() {
                 let current = try Self.messageLabels(db, accountId: queued.accountId, messageIds: Array(queued.labelsAfter.keys))
+                let muted = try Setting.fetchOne(db, key: Self.muteLabelKey(queued.accountId))?.value
+                let changes = queued.changes.map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
                 let untouched = queued.labelsAfter.allSatisfy { id, after in current[id].map(Set.init) == Set(after) }
                 if untouched, let op = try PendingOp.fetchOne(db, key: queued.opId), op.state == .pending, !op.dispatched {
                     try op.delete(db)
                 } else {
-                    reverse[queued.accountId, default: []] += queued.changes.map(\.reversed)
+                    reverse[queued.accountId, default: []] += changes.map(\.reversed)
                 }
                 var restore: [String: [String]] = [:]
-                for change in queued.changes {
+                for change in changes {
                     guard var labels = current[change.messageId].map(Set.init) else { continue }
                     labels.subtract(change.add)
                     labels.formUnion(change.remove)

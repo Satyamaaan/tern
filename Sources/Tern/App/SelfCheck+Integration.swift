@@ -17,6 +17,7 @@ extension SelfCheck {
         notificationPlanner()
         googleClientText()
         offlineSync()
+        muteThenUndo()
     }
 
     private var services: AppServices { model.services }

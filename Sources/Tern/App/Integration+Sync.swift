@@ -30,10 +30,7 @@ extension Integration {
         services.fetchBodies = { [weak coordinator] key in try await coordinator?.fetchBodies(for: key) }
         services.prefetchBodies = { [weak coordinator] keys in coordinator?.prefetchBodies(adjacentTo: keys) }
         services.serverSearch = { [weak self] text in try await self?.searchGmail(text) ?? 0 }
-        services.muteThreads = { [weak coordinator] keys in
-            guard let coordinator else { throw CocoaError(.featureUnsupported) }
-            return try await coordinator.mute(keys)
-        }
+        services.muteThreads = { keys in try AccountSync.mute(keys, in: store) }
         services.mute = { [weak model] _ in model?.mute() }
 
         observeActivity()

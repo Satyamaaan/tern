@@ -237,23 +237,19 @@ public final class SyncCoordinator {
 
     // MARK: Mute
 
-    /// Mutes threads: archives them and labels them "Muted" (a user label Tern creates in each account
-    /// the first time, one Gmail request), through `MailStore.perform`, so it's instant and undoable.
-    /// New mail in a muted thread is archived again as it arrives. Returns the undo.
+    /// Mutes threads: archives them and labels them "Muted" through `MailStore.perform`
+    /// (`AccountSync.mute`), so it's instant, works offline and is undoable. The first time in an
+    /// account the engine finds or creates the label in Gmail when it sends the change. New mail in a
+    /// muted thread is archived again as it arrives. Returns the undo.
     @discardableResult
     public func mute(_ keys: [ThreadKey]) async throws -> UndoToken {
-        var actions: [(action: MailAction, threads: [ThreadKey])] = []
-        for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
-            guard let sync = syncs[accountId] else { throw SyncError.unknownAccount(accountId) }
-            actions.append((.moveToLabel(try await sync.muteLabelId()), threads))
-        }
+        for accountId in Set(keys.map(\.accountId)) where syncs[accountId] == nil { throw SyncError.unknownAccount(accountId) }
         let store = self.store
-        let planned = actions
-        return try await Task.detached(priority: .userInitiated) { try store.perform(planned) }.value
+        return try await Task.detached(priority: .userInitiated) { try AccountSync.mute(keys, in: store) }.value
     }
 
-    /// Unmutes threads: removes the "Muted" label (they stay where they are, like Gmail's unmute).
-    /// No network wait. Returns the undo.
+    /// Unmutes threads: removes the "Muted" label, or its stand-in before the label is known (they
+    /// stay where they are, like Gmail's unmute). No network wait. Returns the undo.
     @discardableResult
     public func unmute(_ keys: [ThreadKey]) async throws -> UndoToken {
         let store = self.store
@@ -261,8 +257,10 @@ public final class SyncCoordinator {
             try store.database.writer.write { db in
                 var actions: [(action: MailAction, threads: [ThreadKey])] = []
                 for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
-                    guard let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value else { continue }
-                    actions.append((.removeLabel(label), threads))
+                    if let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value {
+                        actions.append((.removeLabel(label), threads))
+                    }
+                    actions.append((.removeLabel(MailStore.pendingMuteLabel), threads))
                 }
                 return try MailStore.perform(db, actions)
             }

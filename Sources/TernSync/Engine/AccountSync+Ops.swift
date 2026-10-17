@@ -90,10 +90,11 @@ extension AccountSync {
     /// One batchModify per distinct (add, remove) pair, at most `maxBatchModifyIds` ids each.
     private func sendLabelChanges(_ op: PendingOp) async throws {
         guard let opId = op.id, let claimed = try claimOp(opId) else { return }
-        guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(claimed.payload.utf8)) else {
+        guard var payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(claimed.payload.utf8)) else {
             try deleteOpNow(opId)
             return
         }
+        if AccountSync.mentionsPendingMute(payload) { payload = try await resolvePendingMuteLabel(payload) }
         // Messages Gmail has deleted since (history removed them here) would fail the whole call.
         let accountId = self.accountId
         let ids = payload.changes.map(\.messageId)

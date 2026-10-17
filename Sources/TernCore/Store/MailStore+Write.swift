@@ -45,11 +45,10 @@ extension MailStore {
         return files
     }
 
-    /// The `setting` keys kept for one account: its signature, sender name and Muted label (the sync
-    /// engine's `SyncSettingKey.muteLabel`).
+    /// The `setting` keys kept for one account: its signature, sender name and Muted label.
     public static func accountSettingKeys(_ accountId: String) -> [String] {
         [DraftStore.SettingKey.signature(accountId), DraftStore.SettingKey.customSignature(accountId),
-         DraftStore.SettingKey.senderName(accountId), "mute.label.\(accountId)"]
+         DraftStore.SettingKey.senderName(accountId), muteLabelKey(accountId)]
     }
 
     /// Replaces an account's label list with what Gmail reports.
