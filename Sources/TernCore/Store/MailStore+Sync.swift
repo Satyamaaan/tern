@@ -171,26 +171,12 @@ extension MailStore {
         return counts
     }
 
-    /// After a crash or quit: ops left inflight go back to pending, except sends, which may already
-    /// have reached Gmail. Those are marked failed (and their draft too) so nothing is sent twice.
-    public static func recoverInterruptedOps(_ db: Database, accountId: String, sendError: String) throws {
+    /// After a crash or quit, ops left inflight go back to pending. Label changes are idempotent, and
+    /// a send records its progress in the payload so resending it can't deliver it twice.
+    public static func recoverInterruptedOps(_ db: Database, accountId: String) throws {
         try db.execute(sql: """
-            UPDATE pending_op SET state = 'pending' WHERE accountId = ? AND state = 'inflight' AND kind != 'sendDraft'
+            UPDATE pending_op SET state = 'pending' WHERE accountId = ? AND state = 'inflight'
             """, arguments: [accountId])
-        let sends = try PendingOp
-            .filter(Column("accountId") == accountId && Column("state") == PendingOp.State.inflight.rawValue)
-            .fetchAll(db)
-        for var op in sends {
-            op.state = .failed
-            op.lastError = sendError
-            try op.update(db)
-            if let payload = try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)),
-               var draft = try Draft.fetchOne(db, key: payload.draftId) {
-                draft.state = .failed
-                draft.lastError = sendError
-                try draft.update(db)
-            }
-        }
     }
 
     /// Draft ops (save, send, delete) that reference `draftId`.
@@ -237,11 +223,15 @@ extension MailStore {
     }
 
     /// Undo send: drops a send that hasn't started and puts the draft back to editing.
-    /// Returns false when it's too late (already sending or sent).
+    /// Returns false when it's too late (sending, sent, or a retry of a send that may have gone out).
     @discardableResult
     public func cancelPendingSend(draftId: String) throws -> Bool {
-        try database.writer.write { db in
-            let sends = try Self.draftOps(db, draftId: draftId).filter { $0.kind == .sendDraft && $0.state == .pending }
+        struct Progress: Decodable { var sendingDraftId: String? }
+        return try database.writer.write { db in
+            let sends = try Self.draftOps(db, draftId: draftId).filter {
+                $0.kind == .sendDraft && $0.state == .pending
+                    && (try? JSONDecoder().decode(Progress.self, from: Data($0.payload.utf8)))?.sendingDraftId == nil
+            }
             guard !sends.isEmpty else { return false }
             _ = try PendingOp.deleteAll(db, keys: sends.compactMap(\.id))
             if var draft = try Draft.fetchOne(db, key: draftId) {

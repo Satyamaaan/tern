@@ -4,7 +4,8 @@ import TernCore
 extension MailParsing {
     /// Parses an RFC 5322 address list: quoted names containing commas, groups (`Team: a@x, b@y;`),
     /// comments (`a@x (Ann)`), bare and angle-only addresses, and encoded-word names. Entries without
-    /// an address are skipped; an unquoted `Doe, John <j@x>` is read as one mailbox.
+    /// an address are skipped; an unquoted `Doe, John <j@x>` is read as one mailbox, while a bare
+    /// `Sales Team, bob@x` keeps only the address.
     public static func addresses(_ raw: String) -> [Participant] {
         let value = unfold(raw)
         var items: [String] = []
@@ -44,19 +45,21 @@ extension MailParsing {
         items.append(current)
 
         var result: [Participant] = []
+        // Name pieces split off by an unquoted comma, joined to the next angle address.
         var carry = ""
         for item in items {
             let trimmed = item.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
-            let candidate = carry.isEmpty ? trimmed : carry + ", " + trimmed
-            if let participant = mailbox(candidate) {
-                result.append(participant)
-                carry = ""
-            } else if !trimmed.contains("@") {
-                carry = candidate
-            } else {
-                carry = ""
+            guard trimmed.contains("@") || trimmed.contains("<") else {
+                carry = carry.isEmpty ? trimmed : carry + ", " + trimmed
+                continue
             }
+            if !carry.isEmpty, trimmed.contains("<"), let participant = mailbox(carry + ", " + trimmed) {
+                result.append(participant)
+            } else if let participant = mailbox(trimmed) {
+                result.append(participant)
+            }
+            carry = ""
         }
         return result
     }

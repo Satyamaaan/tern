@@ -218,3 +218,36 @@ import TernCore
     #expect(try h.ops().isEmpty)
     try await h.expectMirrorsGmail()
 }
+
+@Test func batchModifyRecoversWhenGmailRejectsDeletedIds() async throws {
+    let h = try Harness()
+    let first = await h.fake.deliver(FakeEmail(subject: "Thread", date: Date(timeIntervalSince1970: 1_700_000_000)))
+    let second = await h.fake.deliver(FakeEmail(subject: "Re: Thread", date: Date(timeIntervalSince1970: 1_700_000_100),
+                                                threadId: first.threadId))
+    try await h.syncFully()
+    await h.fake.setRejectsUnknownIds(true)
+
+    try h.store.perform(.archive, on: [h.thread(first.threadId)])
+    // Deleted on the phone; history hasn't told us yet.
+    await h.fake.remoteDelete([first.id])
+    try await h.sync.drainOps()
+
+    #expect(try h.ops().isEmpty)
+    #expect(await h.fake.labels(of: second.id)?.contains(SystemLabel.inbox) == false)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
+}
+
+@Test func aLostBatchModifyResponseIsRetriedHarmlessly() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 4)
+    try await h.syncFully()
+    await h.fake.loseNextResponse(on: .batchModify)
+    try h.store.perform(.markRead, on: [h.thread(seeded[0].threadId)])
+    try await h.sync.drainOps()
+    h.clock.advance(60)
+    try await h.sync.drainOps()
+    #expect(try h.ops().isEmpty)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
+}

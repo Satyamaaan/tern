@@ -265,6 +265,8 @@ private func parse(_ gmail: GmailMessage, format: GmailMessageFormat = .full) ->
 }
 
 @Test func addressListEdgeCases() {
+    #expect(MailParsing.addresses("Sales Team, bob@example.com") == [Participant(email: "bob@example.com")])
+    #expect(MailParsing.addresses("Doe, John, Jr. <john@x.com>") == [Participant(name: "Doe, John, Jr.", email: "john@x.com")])
     #expect(MailParsing.addresses("Doe, John <john@x.com>, ann@y.com") ==
             [Participant(name: "Doe, John", email: "john@x.com"), Participant(email: "ann@y.com")])
     #expect(MailParsing.addresses("\"Quote \\\"Q\\\" Person\" <q@x.com>") == [Participant(name: "Quote \"Q\" Person", email: "q@x.com")])

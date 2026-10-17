@@ -32,10 +32,10 @@ public actor AccountSync {
     /// When the earliest deferred op becomes due.
     var nextOpAt: Date?
     var consecutiveFailures = 0
+    /// Bumped whenever history changes are applied, so a fetch that overlapped one can tell.
+    var historyGeneration = 0
     private var wakeRequested = false
     private var wakeContinuation: CheckedContinuation<Void, Never>?
-
-    static let interruptedSendError = "Tern quit while sending this message. Check Sent before sending it again."
 
     /// - Parameters:
     ///   - encodeDraft: Builds the RFC 822 message for a draft (the MIME builder lives in Google/).
@@ -95,6 +95,8 @@ public actor AccountSync {
 
     /// Runs until the task is cancelled.
     public func run() async {
+        // A previous run may have been cancelled mid-op; recover its inflight ops before draining.
+        prepared = false
         while !Task.isCancelled {
             if paused {
                 // Kicks while paused don't count; only `resume` wakes a paused account.
@@ -153,7 +155,7 @@ public actor AccountSync {
         let accountId = self.accountId
         account = try await write { db in
             if try Account.fetchOne(db, key: accountId) == nil { try given.insert(db) }
-            try MailStore.recoverInterruptedOps(db, accountId: accountId, sendError: AccountSync.interruptedSendError)
+            try MailStore.recoverInterruptedOps(db, accountId: accountId)
             var stored = try Account.fetchOne(db, key: accountId)!
             let resumed = AccountSync.resumedState(stored)
             if stored.syncState != resumed {
@@ -285,6 +287,12 @@ public actor AccountSync {
 
     func write<T: Sendable>(_ updates: @escaping @Sendable (Database) throws -> T) async throws -> T {
         try await store.database.writer.write(updates)
+    }
+
+    /// A short synchronous write for op bookkeeping that must land even while the task is being
+    /// cancelled (the async write throws `CancellationError` then, leaving ops stuck inflight).
+    func writeNow<T>(_ updates: (Database) throws -> T) throws -> T {
+        try store.database.writer.write(updates)
     }
 
     func read<T: Sendable>(_ value: @escaping @Sendable (Database) throws -> T) async throws -> T {

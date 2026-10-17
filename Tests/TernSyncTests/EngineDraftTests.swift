@@ -22,7 +22,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
 
     try h.store.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
     try await h.sync.drainOps()
-    #expect(await h.fake.callCount(.send) == 0)
+    #expect(await h.fake.callCount(.sendDraft) == 0)
     #expect(await h.sync.nextOpAt == h.clock.now().addingTimeInterval(10))
 
     // Undo within the window.
@@ -34,15 +34,16 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try h.store.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
     h.clock.advance(5)
     try await h.sync.drainOps()
-    #expect(await h.fake.callCount(.send) == 0)
+    #expect(await h.fake.callCount(.sendDraft) == 0)
     h.clock.advance(6)
     try await h.sync.drainOps()
-    #expect(await h.fake.callCount(.send) == 1)
+    #expect(await h.fake.callCount(.sendDraft) == 1)
     #expect(!(try h.store.cancelPendingSend(draftId: draft.id)), "too late to undo")
 
     #expect(try draftRow(h, draft.id) == nil)
     #expect(try h.ops().isEmpty)
-    let raw = String(decoding: try #require(await h.fake.sentRaw.first), as: UTF8.self)
+    #expect(await h.fake.draftIds.isEmpty)
+    let raw = String(decoding: try #require(await h.fake.draftRaw.last), as: UTF8.self)
     #expect(raw.contains("Subject: Re: Hello"))
     let detail = try #require(try h.store.threadDetail(h.thread(original.threadId)))
     #expect(detail.messages.count == 2)
@@ -64,13 +65,13 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
 
     try h.store.queueSend(draft, notBefore: nil)
     try await h.sync.drainOps()
-    #expect(await h.fake.callCount(.send) == 0)
+    #expect(await h.fake.callCount(.sendDraft) == 0)
     #expect(await h.sync.nextOpAt == draft.scheduledAt)
     #expect(try draftRow(h, draft.id)?.state == .queued)
 
     h.clock.advance(3601)
     try await h.sync.drainOps()
-    #expect(await h.fake.callCount(.send) == 1)
+    #expect(await h.fake.callCount(.sendDraft) == 1)
     #expect(try draftRow(h, draft.id) == nil)
 }
 
@@ -99,7 +100,8 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
 
     try h.store.queueSend(try #require(try draftRow(h, draft.id)), notBefore: nil)
     try await h.sync.drainOps()
-    #expect(await h.fake.draftIds.isEmpty, "the Gmail draft is deleted after sending")
+    #expect(await h.fake.callCount(.createDraft) == 1, "the existing Gmail draft is updated and sent")
+    #expect(await h.fake.draftIds.isEmpty, "sending consumes the Gmail draft")
     #expect(try draftRow(h, draft.id) == nil)
     try await h.sync.pollHistory()
     try await h.expectMirrorsGmail()
@@ -126,30 +128,65 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await h.expectMirrorsGmail()
 }
 
-@Test func aSendInterruptedByQuitIsNotResent() async throws {
+@Test func aLostSendResponseDoesNotSendTwice() async throws {
     let h = try Harness()
     let seeded = await seed(h.fake, count: 2)
     try await h.syncFully()
+    await h.fake.loseNextResponse(on: .sendDraft)
     let draft = reply(to: seeded[0])
     try h.store.queueSend(draft, notBefore: nil)
-    try await h.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight'") }
 
-    let relaunched = h.relaunched()
+    try await h.sync.drainOps()
+    #expect(try h.ops().first?.state == .pending, "a lost response is retried")
+    #expect(!(try h.store.cancelPendingSend(draftId: draft.id)), "it may already have gone out")
+    h.clock.advance(60)
+    try await h.sync.drainOps()
+
+    #expect(await h.fake.callCount(.sendDraft) == 2)
+    #expect(await h.fake.allMessageIds.count == 3, "two received messages and exactly one sent")
+    #expect(try draftRow(h, draft.id) == nil)
+    #expect(try h.ops().isEmpty)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
+}
+
+@Test func aSendInterruptedByQuitGoesOutExactlyOnce() async throws {
+    // Quit before drafts.send: the relaunch sends it.
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 2)
+    try await h.syncFully()
+    let early = reply(to: seeded[0])
+    try h.store.queueSend(early, notBefore: nil)
+    try await h.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight'") }
+    var relaunched = h.relaunched()
     try await relaunched.prepare()
     try await relaunched.drainOps()
+    #expect(await h.fake.callCount(.sendDraft) == 1)
+    #expect(try draftRow(h, early.id) == nil)
 
-    #expect(await h.fake.callCount(.send) == 0)
-    let op = try #require(try h.ops().first)
-    #expect(op.state == .failed)
-    #expect(try draftRow(h, draft.id)?.state == .failed)
-    #expect(try draftRow(h, draft.id)?.lastError == AccountSync.interruptedSendError)
+    // Quit right after drafts.send went through: the relaunch sees the draft is gone and doesn't resend.
+    let late = reply(to: seeded[1], body: "<p>Late</p>")
+    try h.store.queueSend(late, notBefore: nil)
+    await h.fake.loseNextResponse(on: .sendDraft)
+    try await relaunched.drainOps()
+    try await h.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight'") }
+    relaunched = h.relaunched()
+    try await relaunched.prepare()
+    h.clock.advance(60)
+    try await relaunched.drainOps()
+    #expect(await h.fake.callCount(.sendDraft) == 3)
+    #expect(try draftRow(h, late.id) == nil)
+    #expect(try h.ops().isEmpty)
+    try await relaunched.pollHistory()
+    try await h.expectMirrorsGmail()
+    #expect(await h.fake.allMessageIds.count == 4, "two received, two sent")
 }
 
 @Test func aSendThatKeepsFailingMarksTheDraftFailed() async throws {
     let h = try Harness()
     let seeded = await seed(h.fake, count: 2)
     try await h.syncFully()
-    await h.fake.failNext(100, with: .server(status: 400, message: "Invalid To header"), on: .send)
+    await h.fake.failNext(100, with: .server(status: 400, message: "Invalid To header"), on: .sendDraft)
     let draft = reply(to: seeded[0])
     try h.store.queueSend(draft, notBefore: nil)
 
@@ -160,7 +197,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
         h.clock.advance(1000)
         try await h.sync.drainOps()
     }
-    #expect(await h.fake.callCount(.send) == 8)
+    #expect(await h.fake.callCount(.sendDraft) == 8)
     #expect(try draftRow(h, draft.id)?.state == .failed)
     #expect(try h.ops().first?.state == .failed)
 }

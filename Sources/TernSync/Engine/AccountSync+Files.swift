@@ -97,7 +97,7 @@ extension AccountSync {
         let accountId = self.accountId
         let ids = refs.map(\.id)
         let stored = try await read { db in try MailStore.storedMessageIds(db, accountId: accountId, among: ids) }
-        let missing = try await fetchAndStore(ids.filter { !stored.contains($0) }, format: .full)
+        let missing = try await fetchAndStore(ids.filter { !stored.contains($0) }, format: .full, guardHistory: true)
         let gone = Set(missing)
         var seen = Set<String>()
         return refs.compactMap { ref in

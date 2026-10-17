@@ -10,12 +10,17 @@ extension AccountSync {
         guard let start = account.historyId else { return }
         if clock.now() >= nextLabelRefreshAt { try await syncLabels() }
         var pageToken: String?
+        var isFirstPage = true
         repeat {
             let token = pageToken
             let page = try await withRetry { [api] in try await api.history(startHistoryId: start, pageToken: token) }
             let records = page.history ?? []
             pageToken = page.nextPageToken
-            try await apply(records, reaching: pageToken == nil ? (page.historyId ?? records.last?.id) : records.last?.id)
+            // The mailbox's current historyId is only safe to store when everything fit in one page;
+            // across pages, records written in between could otherwise be skipped.
+            let singlePage = isFirstPage && pageToken == nil
+            try await apply(records, reaching: singlePage ? (page.historyId ?? records.last?.id) : records.last?.id)
+            isFirstPage = false
         } while pageToken != nil
         publishAccount(phase: account.backfillDone ? "Up to date" : nil)
     }
@@ -55,7 +60,14 @@ extension AccountSync {
             for change in (record.labelsAdded ?? []) + (record.labelsRemoved ?? []) {
                 let id = change.message.id
                 guard !deleted.contains(id), !fetchSet.contains(id) else { continue }
-                labels[id] = change.message.labelIds ?? []
+                if let labelIds = change.message.labelIds {
+                    labels[id] = labelIds
+                } else {
+                    // No labels in the event: fetch the message rather than clear them.
+                    labels[id] = nil
+                    fetchSet.insert(id)
+                    fetchOrder.append(id)
+                }
             }
         }
 
@@ -71,6 +83,7 @@ extension AccountSync {
             }
         }
 
+        historyGeneration += 1
         let labelUpdates = labels
         let deletions = Array(deleted)
         let now = clock.now()

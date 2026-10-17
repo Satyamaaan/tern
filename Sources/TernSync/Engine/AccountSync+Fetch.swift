@@ -173,8 +173,12 @@ extension AccountSync {
     /// Fetches messages in batches and writes them in transactions of `writeBatchSize`, replaying
     /// unconfirmed local changes on top. `finally` runs inside the last write (even when `ids` is
     /// empty) with the ids Gmail no longer has. Returns those ids.
+    ///
+    /// `guardHistory` is for callers outside the sync loop (server search): each batch is written
+    /// right after its fetch, and refetched first when history was applied in between, so a delete
+    /// or label change that history skipped (the message wasn't stored yet) isn't overwritten.
     @discardableResult
-    func fetchAndStore(_ ids: [String], format: GmailMessageFormat, countsProgress: Bool = false,
+    func fetchAndStore(_ ids: [String], format: GmailMessageFormat, countsProgress: Bool = false, guardHistory: Bool = false,
                        finally: (@Sendable (Database, [String]) throws -> Void)? = nil) async throws -> [String] {
         let accountId = self.accountId
         let email = account.email
@@ -186,13 +190,26 @@ extension AccountSync {
         var missing: [String] = []
         var buffer: [ParsedMessage] = []
         for (index, chunk) in chunks.enumerated() {
-            let fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: format) }
+            var fetched: [GmailMessage] = []
+            for attempt in 0..<3 {
+                let generation = historyGeneration
+                fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: format) }
+                if !guardHistory || generation == historyGeneration || attempt == 2 { break }
+            }
             let returned = Set(fetched.map(\.id))
             missing += chunk.filter { !returned.contains($0) }
-            buffer += fetched.map { GmailMessageParser.parse($0, accountId: accountId, accountEmail: email, format: format) }
+            for message in fetched {
+                if format == .full, let complete = await withExternalBodies(message) {
+                    buffer.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
+                } else {
+                    // A body part couldn't be fetched: store headers now, the prefetch tries again.
+                    buffer.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
+                                                           format: format == .full ? .metadata : format))
+                }
+            }
 
             let isLast = index == chunks.count - 1
-            guard isLast || buffer.count >= configuration.writeBatchSize else { continue }
+            guard isLast || guardHistory || buffer.count >= configuration.writeBatchSize else { continue }
             let batch = buffer
             let gone = missing
             buffer = []
@@ -203,6 +220,47 @@ extension AccountSync {
             if countsProgress { publish { $0.fetched += batch.count } }
         }
         return missing
+    }
+
+    /// Gmail returns large text bodies by attachment id instead of inline data. Fetches them into
+    /// the payload so the parser sees the whole body. Nil when one couldn't be fetched.
+    func withExternalBodies(_ message: GmailMessage) async -> GmailMessage? {
+        guard var payload = message.payload else { return message }
+        let paths = AccountSync.externalBodyPaths(payload)
+        guard !paths.isEmpty else { return message }
+        for (path, attachmentId) in paths {
+            guard let data = try? await withRetry({ [api] in try await api.attachment(messageId: message.id, attachmentId: attachmentId) })
+            else { return nil }
+            AccountSync.setBodyData(&payload, path: path[...], data: MailParsing.base64URLEncode(data))
+        }
+        var complete = message
+        complete.payload = payload
+        return complete
+    }
+
+    /// Text body parts (not attachments) whose data Gmail left out, as child-index paths.
+    static func externalBodyPaths(_ part: GmailMessagePart, path: [Int] = []) -> [([Int], String)] {
+        var found: [([Int], String)] = []
+        let type = (part.mimeType ?? "").lowercased()
+        if type == "text/plain" || type == "text/html", part.body?.data == nil, let attachmentId = part.body?.attachmentId,
+           (part.filename ?? "").isEmpty,
+           part.header("Content-Disposition").map(MailParsing.parameterizedValue)?.value != "attachment" {
+            found.append((path, attachmentId))
+        }
+        for (index, child) in (part.parts ?? []).enumerated() {
+            found += externalBodyPaths(child, path: path + [index])
+        }
+        return found
+    }
+
+    static func setBodyData(_ part: inout GmailMessagePart, path: ArraySlice<Int>, data: String) {
+        guard let index = path.first else {
+            part.body?.data = data
+            return
+        }
+        guard var children = part.parts, children.indices.contains(index) else { return }
+        setBodyData(&children[index], path: path.dropFirst(), data: data)
+        part.parts = children
     }
 
     func publishBackfillProgress() async {

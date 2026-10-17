@@ -80,3 +80,32 @@ import TernCore
     #expect(try h.message(old.id)?.bodyText == "Flights and hotels")
     #expect(try await h.sync.serverSearch(query: "nothing-matches-this", limit: 20).isEmpty)
 }
+
+@Test func largeBodiesSentByAttachmentIdAreFetched() async throws {
+    let h = try Harness()
+    let html = "<html><body><p>" + String(repeating: "Big newsletter. ", count: 200) + "</p></body></html>"
+    let payload = GmailMessagePart(
+        partId: "", mimeType: "multipart/alternative", filename: "",
+        headers: [GmailHeader(name: "From", value: "news@example.com"), GmailHeader(name: "Subject", value: "Weekly")],
+        parts: [
+            GmailMessagePart(partId: "0", mimeType: "text/plain", filename: "",
+                             headers: [GmailHeader(name: "Content-Type", value: "text/plain; charset=utf-8")],
+                             body: GmailPartBody(attachmentId: "body-plain", size: 3200)),
+            GmailMessagePart(partId: "1", mimeType: "text/html", filename: "",
+                             headers: [GmailHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+                             body: GmailPartBody(attachmentId: "body-html", size: html.utf8.count)),
+        ])
+    await h.fake.insert(GmailMessage(id: "n1", threadId: "n1", labelIds: [SystemLabel.inbox], internalDate: "1700000000000",
+                                     payload: payload),
+                        attachments: ["body-plain": Data("Big newsletter.".utf8), "body-html": Data(html.utf8)])
+    await h.fake.insert(GmailMessage(id: "n2", threadId: "n2", labelIds: [SystemLabel.inbox], internalDate: "1700000000001",
+                                     payload: payload))
+    try await h.syncFully()
+
+    let message = try #require(try h.message("n1"))
+    #expect(message.bodyState == .full)
+    #expect(message.bodyHtml == html)
+    #expect(message.bodyText == "Big newsletter.")
+    #expect(try h.message("n1").map { !$0.hasAttachments } == true)
+    #expect(try h.message("n2")?.bodyState == .metadata, "a body that can't be fetched is left for the prefetch")
+}

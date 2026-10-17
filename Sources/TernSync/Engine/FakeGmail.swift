@@ -90,7 +90,9 @@ public actor FakeGmail: GmailAPI {
     public private(set) var listCalls: [ListCall] = []
     public private(set) var fetchCalls: [FetchCall] = []
     public private(set) var modifyCalls: [ModifyCall] = []
+    /// Raw messages passed to send, createDraft and updateDraft.
     public private(set) var sentRaw: [Data] = []
+    public private(set) var draftRaw: [Data] = []
 
     private var latency: Double
     private var historyPageSize: Int
@@ -105,6 +107,8 @@ public actor FakeGmail: GmailAPI {
     private var drafts: [String: String] = [:]
     private var attachmentData: [String: Data] = [:]
     private var failures: [Failure] = []
+    private var lostResponses: [Operation: Int] = [:]
+    private var rejectsUnknownIds = false
     private var counter = 0
 
     /// - Parameters:
@@ -148,7 +152,19 @@ public actor FakeGmail: GmailAPI {
         failures.append(Failure(operation: operation, error: error, remaining: count, skip: after))
     }
 
-    public func clearFailures() { failures.removeAll() }
+    public func clearFailures() {
+        failures.removeAll()
+        lostResponses.removeAll()
+    }
+
+    /// The next `count` calls to `operation` take effect, but the response is lost (`.network`),
+    /// like a timeout after Gmail accepted the request.
+    public func loseNextResponse(_ count: Int = 1, on operation: Operation) {
+        lostResponses[operation, default: 0] += count
+    }
+
+    /// batchModify rejects the whole call with `.notFound` when any id doesn't exist.
+    public func setRejectsUnknownIds(_ rejects: Bool) { rejectsUnknownIds = rejects }
 
     public func callCount(_ operation: Operation) -> Int { callCounts[operation] ?? 0 }
 
@@ -288,7 +304,9 @@ public actor FakeGmail: GmailAPI {
         if let unknown = (add + remove).first(where: { !known.contains($0) }) {
             throw GmailAPIError.server(status: 400, message: "Invalid label: \(unknown)")
         }
+        if rejectsUnknownIds, messageIds.contains(where: { store[$0] == nil }) { throw GmailAPIError.notFound }
         modify(messageIds, add: add, remove: remove)
+        try finish(.batchModify)
     }
 
     public func trashThread(id: String) async throws {
@@ -315,23 +333,28 @@ public actor FakeGmail: GmailAPI {
         try await begin(.send)
         sentRaw.append(raw)
         let message = add(messageFromRaw(raw, threadId: threadId, labels: [SystemLabel.sent]))
+        try finish(.send)
         return GmailMessageRef(id: message.id, threadId: message.threadId)
     }
 
     public func createDraft(raw: Data, threadId: String?) async throws -> GmailDraft {
         try await begin(.createDraft)
+        draftRaw.append(raw)
         let message = add(messageFromRaw(raw, threadId: threadId, labels: [SystemLabel.draft]))
         let draftId = "r\(nextCounter())"
         drafts[draftId] = message.id
+        try finish(.createDraft)
         return GmailDraft(id: draftId, message: GmailMessage(id: message.id, threadId: message.threadId, labelIds: message.labelIds))
     }
 
     public func updateDraft(id: String, raw: Data, threadId: String?) async throws -> GmailDraft {
         try await begin(.updateDraft)
         guard let old = drafts[id], let previous = store[old] else { throw GmailAPIError.notFound }
+        draftRaw.append(raw)
         remove(old)
         let message = add(messageFromRaw(raw, threadId: threadId ?? previous.threadId, labels: [SystemLabel.draft]))
         drafts[id] = message.id
+        try finish(.updateDraft)
         return GmailDraft(id: id, message: GmailMessage(id: message.id, threadId: message.threadId, labelIds: message.labelIds))
     }
 
@@ -339,6 +362,7 @@ public actor FakeGmail: GmailAPI {
         try await begin(.deleteDraft)
         guard let messageId = drafts.removeValue(forKey: id) else { throw GmailAPIError.notFound }
         remove(messageId)
+        try finish(.deleteDraft)
     }
 
     public func sendDraft(id: String) async throws -> GmailMessageRef {
@@ -348,6 +372,7 @@ public actor FakeGmail: GmailAPI {
         message.id = nextId()
         message.labelIds = [SystemLabel.sent]
         let sent = add(message)
+        try finish(.sendDraft)
         return GmailMessageRef(id: sent.id, threadId: sent.threadId)
     }
 
@@ -370,6 +395,12 @@ public actor FakeGmail: GmailAPI {
         failures[index].remaining -= 1
         if failures[index].remaining <= 0 { failures.remove(at: index) }
         throw error
+    }
+
+    private func finish(_ operation: Operation) throws {
+        guard let lost = lostResponses[operation], lost > 0 else { return }
+        lostResponses[operation] = lost - 1
+        throw GmailAPIError.network("The response was lost")
     }
 
     @discardableResult
