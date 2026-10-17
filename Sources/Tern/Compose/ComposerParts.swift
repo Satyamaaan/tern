@@ -189,7 +189,7 @@ struct ComposerBottomArea: View {
             HStack(spacing: 4) {
                 SendButton(model: model)
                     .padding(.trailing, 6)
-                IconButton(symbol: "paperclip", help: "Attach files  ⌘⇧A") { model.attach() }
+                ComposerIconButton(symbol: "paperclip", help: "Attach files  ⌘⇧A") { model.attach() }
                 if model.aiAvailable {
                     Button { model.toggleAI() } label: {
                         HStack(spacing: 5) {
@@ -219,7 +219,7 @@ struct ComposerBottomArea: View {
                     Button("Discard") { model.discard() }
                         .buttonStyle(.plain).font(.ui(12, .medium)).foregroundStyle(Color(Theme.accentInk))
                 } else {
-                    IconButton(symbol: "trash", help: "Discard draft  ⌘⇧D") { model.requestDiscard() }
+                    ComposerIconButton(symbol: "trash", help: "Discard draft  ⌘⇧D") { model.requestDiscard() }
                 }
             }
             .padding(.horizontal, model.mode == .window ? 14 : 10)
@@ -381,7 +381,7 @@ struct AIInstructionBar: View {
 }
 
 /// A 28 pt icon button that fills on hover.
-struct IconButton: View {
+struct ComposerIconButton: View {
     let symbol: String
     let help: String
     let action: () -> Void

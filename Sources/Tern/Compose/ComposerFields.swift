@@ -41,12 +41,6 @@ struct ComposerFields: View {
     }
 }
 
-struct Hairline: View {
-    var body: some View {
-        Rectangle().fill(Color(Theme.hairline)).frame(height: 1)
-    }
-}
-
 /// A label column and the row's content, top-aligned so the label sits on the first line of pills.
 struct FieldRow<Content: View, Trailing: View>: View {
     let label: String
