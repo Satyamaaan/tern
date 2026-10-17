@@ -29,6 +29,41 @@ enum ReaderResources {
         return data
     }
 
+    /// A small mail that exercises the sanitizer's main paths.
+    nonisolated static let warmupMail = """
+        <html><head><style>body { color: #222 } .x { background: #f4f4f4 }</style></head><body bgcolor="#ffffff">
+        <table width="600"><tr><td style="color:#333;padding:8px"><p>Warm <a href="https://example.com">up</a></p>
+        <img src="https://example.com/a.png" width="10" height="10"></td></tr></table>
+        <div class="gmail_quote"><div class="gmail_attr">On Mon, A wrote:</div><blockquote class="gmail_quote">q</blockquote></div></body></html>
+        """
+
+    /// A throwaway thread rendered once at launch.
+    static let warmupPayload: [String: Any] = {
+        func message(_ id: String, expanded: Bool, body: [String: Any]?) -> [String: Any] {
+            var item: [String: Any] = [
+                "id": id, "from": "Tern", "email": "warm@tern.local", "initials": "T", "hue": "#4F7CAC",
+                "toLine": "to me", "details": [["From", "Tern"]], "date": "9:41", "dateLong": "9:41", "dateFull": "",
+                "snippet": "Warm up", "unread": false, "draft": false, "imagesAllowed": false, "bodyVersion": "1",
+                "attachments": [["id": "\(id)-a", "name": "a.pdf", "size": "1 KB", "kind": "file"]],
+                "expanded": expanded, "target": expanded,
+            ]
+            if let body { item["body"] = body }
+            return item
+        }
+        let rich: [String: Any] = [
+            "html": "<table width=\"900\"><tr><td><p>Warm <a href=\"https://example.com\">up</a></p></td></tr></table><div class=\"tern-quote-toggle\">•••</div><div class=\"tern-quote\" hidden>q</div>",
+            "css": "p { margin: 0 }", "bodyStyle": "", "mode": "rich", "blocked": 1,
+        ]
+        let plain: [String: Any] = ["html": "<div class=\"tern-plain\">Warm up</div>", "css": "", "bodyStyle": "", "mode": "plain", "blocked": 0]
+        return [
+            "key": "warmup", "subject": "Warm up",
+            "chips": [["text": "Needs reply", "kind": "needs"], ["text": "Newsletter", "kind": "cat", "color": "var(--cat-newsletter)"]],
+            "summary": ["state": "line", "text": "Warm up", "expandable": true],
+            "messages": [message("w1", expanded: false, body: nil)] + (2...6).map { message("w\($0)", expanded: false, body: nil) }
+                + [message("w7", expanded: true, body: plain), message("w8", expanded: true, body: rich)],
+        ]
+    }()
+
     /// Shown in place of an inline image whose data isn't available.
     static let missingImage = Data("""
         <svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80" preserveAspectRatio="xMidYMid meet">\

@@ -220,7 +220,9 @@ final class ReaderBodies: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [Key: SanitizedMail] = [:]
     private var order: [Key] = []
-    private let capacity = 600
+    private var bytes = 0
+    /// Bodies are kept until they add up to this many bytes of markup.
+    private let budget = 48 * 1_024 * 1_024
 
     func body(for message: MailMessage, trusted: Bool) -> SanitizedMail {
         let key = Key(
@@ -236,15 +238,17 @@ final class ReaderBodies: @unchecked Sendable {
         lock.lock()
         if storage.updateValue(mail, forKey: key) == nil {
             order.append(key)
-            if order.count > capacity {
-                let evicted = order.prefix(order.count - capacity)
-                for old in evicted { storage.removeValue(forKey: old) }
-                order.removeFirst(evicted.count)
+            bytes += Self.cost(mail)
+            while bytes > budget, order.count > 1 {
+                let old = order.removeFirst()
+                if let evicted = storage.removeValue(forKey: old) { bytes -= Self.cost(evicted) }
             }
         }
         lock.unlock()
         return mail
     }
+
+    private static func cost(_ mail: SanitizedMail) -> Int { mail.html.utf8.count + mail.css.utf8.count + 256 }
 
     static func sanitize(_ message: MailMessage, trusted: Bool) -> SanitizedMail {
         if let html = message.bodyHtml, !html.isEmpty {

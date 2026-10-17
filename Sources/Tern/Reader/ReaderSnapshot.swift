@@ -132,11 +132,33 @@ enum ReaderSnapshot {
                     }
                     if fixture.name == "hostile" { await checkHostile() }
                     await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
+                    if fixture.name == "hostile", appearance == .aqua {
+                        _ = try? await js("""
+                            const link = [...document.querySelectorAll('.mbody')].map((h) => h.shadowRoot).filter(Boolean)
+                              .flatMap((r) => [...r.querySelectorAll('a')]).find((a) => a.textContent.includes('paypal.com'));
+                            link.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, composed: true }));
+                            return true;
+                            """)
+                        try? await Task.sleep(for: .milliseconds(250))
+                        await save(hosting, name: "hostile-hover-light")
+                        _ = try? await js("document.body.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return true;")
+                    }
+                    if fixture.name == "remote-images", appearance == .aqua {
+                        try? await Task.sleep(for: .seconds(2))
+                        note("remote-images: shown blocked for 2 s, clicking Load images at \(Date().formatted(.dateTime.hour().minute().second()))")
+                        _ = try? await js("document.querySelector('.imgnote .load').click(); return true;")
+                        try? await Task.sleep(for: .milliseconds(1_200))
+                        note("remote-images: loaded shot at \(Date().formatted(.dateTime.hour().minute().second()))")
+                        await save(hosting, name: "remote-images-loaded-light")
+                    }
                     note("\(fixture.name) (\(suffix(appearance))): opened in \(String(format: "%.1f", milliseconds)) ms")
                 }
             }
             window.appearance = NSAppearance(named: .aqua)
             window.setContentSize(NSSize(width: 760, height: 1_000))
+            if let chain = fixtures.first(where: { $0.name == "reply-chain" }) {
+                await interactionChecks(chain.key, selection: selection, services: services)
+            }
             await measure(store: store, selection: selection)
             try? log.joined(separator: "\n").write(to: output.appendingPathComponent("timings.txt"), atomically: true, encoding: .utf8)
             print(log.joined(separator: "\n"))
@@ -181,17 +203,64 @@ enum ReaderSnapshot {
             guard rows.count > 2 else { return }
             for pass in ["first visit", "second visit"] {
                 var times: [Double] = []
+                var builds: [Double] = []
                 for (index, key) in rows.enumerated() {
                     selection.prefetch = Array(rows[(index + 1)..<min(rows.count, index + 3)])
                     selection.key = key
-                    if let milliseconds = await waitForRender(key) { times.append(milliseconds) }
+                    if let milliseconds = await waitForRender(key) {
+                        times.append(milliseconds)
+                        builds.append(ReaderModel.lastBuildMilliseconds)
+                    }
                 }
                 times.sort()
                 guard !times.isEmpty else { continue }
                 let median = times[times.count / 2], p95 = times[min(times.count - 1, Int(Double(times.count) * 0.95))]
-                note(String(format: "j/k through %d inbox threads, %@: median %.1f ms, p95 %.1f ms, max %.1f ms",
-                            times.count, pass, median, p95, times.last ?? 0))
+                builds.sort()
+                note(String(format: "j/k through %d inbox threads, %@: key change → painted frame median %.1f ms, p95 %.1f ms, max %.1f ms; DOM build median %.1f ms, max %.1f ms",
+                            times.count, pass, median, p95, times.last ?? 0, builds[builds.count / 2], builds.last ?? 0))
             }
+        }
+
+        func js(_ body: String) async throws -> Any? {
+            try await ReaderWebEngine.shared.webView.callAsyncJavaScript(
+                body, arguments: [:], in: nil, contentWorld: ReaderWebEngine.shared.world)
+        }
+
+        /// Find, n/p, quote toggles and expand-all, driven through the same entry points the UI uses.
+        func interactionChecks(_ key: ThreadKey, selection: Selection, services: AppServices) async {
+            selection.key = nil
+            _ = await waitForRender(nil)
+            selection.key = key
+            _ = await waitForRender(key)
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let model = services.reader.model else { return }
+            let unread = try? services.store.threadDetail(key)?.thread.unreadCount
+            note("checks: unread after open = \(unread.map(String.init) ?? "?") (marked read on open)")
+
+            services.reader.nextMessage()
+            services.reader.nextMessage()
+            try? await Task.sleep(for: .milliseconds(80))
+            let focused = try? await js("return document.querySelector('.msg.focused')?.dataset.id ?? 'none'")
+            note("checks: n, n focuses message \(focused.map { "\($0)" } ?? "?")")
+
+            let quote = try? await js("""
+                const root = document.querySelector('.msg.open .mbody').shadowRoot;
+                const toggle = root.querySelector('.tern-quote-toggle');
+                const before = toggle.nextElementSibling.hidden;
+                toggle.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+                return `${before} -> ${toggle.nextElementSibling.hidden}`;
+                """)
+            note("checks: quote hidden before -> after click: \(quote.map { "\($0)" } ?? "?")")
+
+            for text in ["40/30/30", "first draft of the statement", "no such words here"] {
+                model.findText = text
+                model.find()
+                try? await Task.sleep(for: .milliseconds(400))
+                note("checks: find “\(text)” → \(model.findFailed ? "no match" : "found")")
+            }
+            let open = try? await js("return document.querySelectorAll('.msg.open').length + ' of ' + document.querySelectorAll('.msg').length")
+            note("checks: messages open after find (expand all) = \(open.map { "\($0)" } ?? "?")")
+            model.closeFind()
         }
 
         /// Proves the hostile fixture ran nothing and kept nothing dangerous.

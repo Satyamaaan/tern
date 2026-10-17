@@ -49,6 +49,8 @@ final class ReaderModel {
     @ObservationIgnored private var labelsByAccount: [String: [MailLabel]] = [:]
     /// Called after each thread is painted, with its open time (snapshot harness, speed checks).
     static var renderObserver: ((ThreadKey, Double) -> Void)?
+    /// Time the page spent building the last thread's DOM, in milliseconds.
+    private(set) static var lastBuildMilliseconds: Double = 0
 
     /// Senders whose remote images load, shared by every reader.
     private static var trustedSenders: Set<String>?
@@ -230,6 +232,7 @@ final class ReaderModel {
         openInterval = nil
         lastOpenMilliseconds = milliseconds
         let build = message["buildMs"] as? Double ?? 0
+        Self.lastBuildMilliseconds = build
         Self.log.debug("Opened \(key.description, privacy: .private) in \(milliseconds, format: .fixed(precision: 1)) ms (DOM \(build, format: .fixed(precision: 1)) ms)")
         Self.renderObserver?(key, milliseconds)
     }

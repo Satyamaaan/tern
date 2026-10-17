@@ -128,8 +128,17 @@ final class ReaderWebEngine: NSObject {
         delegate?.readerWeb(received: message)
     }
 
+    /// Waits for the fonts, then renders and clears a throwaway thread so the first real open
+    /// doesn't pay for cold script, style and layout paths.
     private func pageLoaded() {
-        webView.callAsyncJavaScript("return await Tern.fontsReady()", arguments: [:], in: nil, in: world) { [weak self] _ in
+        let warmup = """
+            await Tern.fontsReady();
+            Tern.render(p);
+            Tern.setBodies(p.key, {});
+            Tern.clear();
+            return true;
+            """
+        webView.callAsyncJavaScript(warmup, arguments: ["p": ReaderResources.warmupPayload], in: nil, in: world) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.isReady = true
@@ -137,6 +146,10 @@ final class ReaderWebEngine: NSObject {
                 self.queued = []
                 pending.forEach { $0() }
             }
+        }
+        Task.detached(priority: .utility) {
+            _ = MailSanitizer.sanitize(html: ReaderResources.warmupMail)
+            _ = PlainTextMail.html("Warm up https://example.com\n\nOn Mon, A wrote:\n> q")
         }
     }
 

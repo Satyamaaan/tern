@@ -277,8 +277,8 @@
     if (!ids.length) return;
     if (state.focus < 0) {
       const target = state.payload.messages.find((m) => m.target);
-      state.focus = Math.max(0, target ? ids.indexOf(target.id) : ids.length - 1);
-      if (delta < 0 || ids.length === 1) { applyFocus(true); return; }
+      const index = target ? ids.indexOf(target.id) : -1;
+      state.focus = index >= 0 ? index : ids.length - 1;
     }
     state.focus = Math.min(ids.length - 1, Math.max(0, state.focus + delta));
     applyFocus(true);
@@ -320,6 +320,7 @@
       if (href.startsWith('#')) {
         const shadow = link.getRootNode();
         const name = decodeURIComponent(href.slice(1));
+        if (!name) return;
         const target = shadow.getElementById ? (shadow.getElementById(name) || shadow.querySelector(`[name="${CSS.escape(name)}"]`)) : null;
         if (target) target.scrollIntoView({ block: 'start' });
         return;

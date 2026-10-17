@@ -127,6 +127,16 @@ enum ReaderSnapshotFixtures {
                 """)
         fixtures.append(Fixture(name: "simple-colored", key: key("fx-simple")))
 
+        // Remote images from a local test server (the run script starts it on port 18766).
+        message("fx-remote", thread: "fx-remote", from: Participant(name: "Local Images", email: "news@images.test"), to: [me],
+                subject: "Remote images from a local server", minutesAgo: 50, html: """
+                <p>Two remote images and a tracking pixel, served from 127.0.0.1.</p>
+                <p><img src="http://127.0.0.1:18766/hero.png" width="320" height="120" alt="Hero image"></p>
+                <div style="background: #ffffff url(http://127.0.0.1:18766/background.png); width: 320px; height: 40px">CSS background</div>
+                <img src="http://127.0.0.1:18766/pixel.png" width="1" height="1" alt="">
+                """)
+        fixtures.append(Fixture(name: "remote-images", key: key("fx-remote")))
+
         try store.upsertMessages(messages, attachments: attachments)
         try store.database.writer.write { db in for item in ai { try item.upsert(db) } }
         try store.setProject("proj-lumen", on: [key("fx-chain")], assigned: true)

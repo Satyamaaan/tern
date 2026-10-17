@@ -126,6 +126,11 @@ private func clean(_ html: String, images: Bool = false) -> SanitizedMail {
     #expect(mail.html.contains("title=\"a&quot;b\""))
 }
 
+@Test func rejectsMalformedAttributeNames() {
+    let mail = clean(#"<p aria-label="ok" aria-x"onclick=alert(1) aria-y'z=1 style"onmouseover=x>t</p>"#)
+    #expect(mail.html == "<p aria-label=\"ok\">t</p>")
+}
+
 @Test func dropsCommentsAndConditionalBlocks() {
     let mail = clean("<p>a</p><!--[if mso]><table><tr><td>MSO only</td></tr></table><![endif]--><!--<script>x</script>--><p>b</p>")
     #expect(mail.html == "<p>a</p><p>b</p>")

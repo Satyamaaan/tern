@@ -231,7 +231,9 @@ private struct Writer {
                 guard !trimmed.isEmpty, trimmed.allSatisfy({ $0.isNumber || $0 == "." || $0 == "%" || $0 == "p" || $0 == "x" }) else { continue }
                 output += " \(key)=\"\(trimmed)\""
             default:
-                guard MailHTMLPolicy.globalAttributes.contains(key) || key.hasPrefix("aria-") else { continue }
+                guard MailHTMLPolicy.globalAttributes.contains(key)
+                    || (key.hasPrefix("aria-") && key.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") })
+                else { continue }
                 output += " \(key)=\"\(HTMLEntities.escape(value))\""
             }
         }
