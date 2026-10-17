@@ -111,3 +111,21 @@ private struct MuteHarness {
     try await h.sync.drainOps()
     #expect(await h.fake.labels(of: thread.id)?.contains(fresh) == true)
 }
+
+@MainActor
+@Test func aMutedLabelDeletedInGmailDoesNotHoldUpTheQueue() async throws {
+    let h = try MuteHarness()
+    let thread = await h.fake.deliver(FakeEmail(subject: "Old thread", date: testNow.addingTimeInterval(-600)))
+    try await h.sync.initialSync()
+    try await h.coordinator.mute([ThreadKey(accountId: testEmail, threadId: thread.threadId)])
+    try await h.sync.drainOps()
+    let label = try #require(try h.muteLabel())
+
+    try await h.fake.deleteLabel(id: label)
+    try await h.sync.syncLabels()
+    let reply = await h.fake.deliver(FakeEmail(subject: "Re: Old thread", date: testNow, threadId: thread.threadId))
+    try await h.sync.pollHistory()
+    #expect(try h.inInbox(thread.threadId), "no longer muted in Gmail: left in the inbox")
+    #expect(try await h.store.database.reader.read { db in try PendingOp.fetchCount(db) } == 0)
+    #expect(await h.fake.labels(of: reply.id)?.contains(SystemLabel.inbox) == true)
+}

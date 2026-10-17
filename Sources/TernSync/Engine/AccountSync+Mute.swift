@@ -47,7 +47,9 @@ extension AccountSync {
     /// are in the inbox again are archived (and labelled Muted throughout) through `MailStore.perform`,
     /// so the change is queued for Gmail and the thread never shows in the inbox.
     static func rearchiveMuted(_ db: Database, accountId: String, messageIds: [String]) throws {
-        guard !messageIds.isEmpty, let muted = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value else { return }
+        guard !messageIds.isEmpty, let muted = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value,
+              // Deleted in Gmail: archiving to a label Gmail no longer has would fail and hold up the queue.
+              try MailLabel.fetchOne(db, key: ["accountId": accountId, "id": muted]) != nil else { return }
         var threads = Set<String>()
         for chunk in messageIds.syncChunks(500) {
             threads.formUnion(try String.fetchAll(db, sql: """

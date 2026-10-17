@@ -331,3 +331,67 @@ private func fakeAttachment(_ fake: FakeGmail, messageId: String, filename: Stri
     let saved = await personal.draftIds
     #expect(row.accountId == testEmail && row.gmailDraftId == saved.first)
 }
+
+@Test func aStagedSendNeverGivesUpOnAServerOutage() async throws {
+    let h = try Harness(realEncoder: true)
+    let (first, _) = try await h.seedConversation()
+    let draft = try h.composeReply(to: first.threadId)
+    // drafts.send went through but its answer was lost, then Gmail answers 500 for a long while.
+    await h.fake.loseNextResponse(on: .sendDraft)
+    try await h.drafts.send(draft, undoSeconds: 0, now: h.clock.now())
+    try await h.sync.drainOps()
+    await h.fake.failNext(1000, with: .server(status: 500, message: "Backend Error"))
+    for _ in 0..<20 {
+        h.clock.advance(400)
+        try await h.sync.drainOps()
+    }
+    #expect(try h.draftRow(draft.id)?.state == .queued, "never made editable while it may have gone out")
+    #expect(try h.ops().first?.state == .pending)
+    #expect(!(try await h.drafts.cancelSend(draft.id)))
+
+    await h.fake.clearFailures()
+    h.clock.advance(400)
+    try await h.sync.drainOps()
+    #expect(try h.draftRow(draft.id) == nil)
+    #expect(await h.fake.ids(inThread: first.threadId).count == 3, "two received and exactly one sent")
+}
+
+@Test func sendingAgainAfterAStagedSendFailedDoesNotDuplicateIt() async throws {
+    let h = try Harness(realEncoder: true)
+    let (first, _) = try await h.seedConversation()
+    let draft = try h.composeReply(to: first.threadId)
+    await h.fake.loseNextResponse(on: .sendDraft)
+    try await h.drafts.send(draft, undoSeconds: 0, now: h.clock.now())
+    try await h.sync.drainOps()
+    // As an older build would leave it: the op failed for good and the draft became editable again.
+    try await h.store.database.writer.write { db in
+        try db.execute(sql: "UPDATE pending_op SET state = 'failed'")
+        try db.execute(sql: "UPDATE draft SET state = 'failed'")
+    }
+    let stored = try #require(try h.draftRow(draft.id))
+    try await h.drafts.send(stored, undoSeconds: 0, now: h.clock.now())
+    try await h.sync.drainOps()
+
+    #expect(await h.fake.callCount(.createDraft) == 1)
+    #expect(await h.fake.callCount(.sendDraft) == 1)
+    #expect(await h.fake.ids(inThread: first.threadId).count == 3, "two received and exactly one sent")
+    #expect(try h.draftRow(draft.id) == nil)
+}
+
+@Test func queuedSendsGoOutDuringALongHistoryCatchUp() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.historyFullFetchLimit = 2
+    let h = try Harness(configuration: configuration, realEncoder: true)
+    let (first, _) = try await h.seedConversation()
+    for index in 0..<40 {
+        await h.fake.deliver(FakeEmail(subject: "Overnight \(index)", date: testNow.addingTimeInterval(Double(index))))
+    }
+    let draft = try h.composeReply(to: first.threadId)
+    try await h.drafts.send(draft, undoSeconds: 0, now: h.clock.now())
+    await h.sync.kick()
+
+    // The poll alone: the send can only have gone out from inside it.
+    try await h.sync.pollHistory()
+    #expect(await h.fake.callCount(.sendDraft) == 1)
+    #expect(try h.draftRow(draft.id) == nil)
+}

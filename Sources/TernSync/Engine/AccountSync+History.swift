@@ -31,7 +31,10 @@ extension AccountSync {
             added.append(id)
         }
         let metadataOnly = Set(added.dropFirst(configuration.historyFullFetchLimit))
-        for page in pages { try await apply(page.records, reaching: page.reaching, metadataOnly: metadataOnly) }
+        for page in pages {
+            try await apply(page.records, reaching: page.reaching, metadataOnly: metadataOnly)
+            try await serviceActions()
+        }
         publishAccount(phase: account.backfillDone ? "Up to date" : nil)
     }
 

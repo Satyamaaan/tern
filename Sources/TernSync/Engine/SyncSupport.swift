@@ -37,12 +37,12 @@ public struct SyncConfiguration: Sendable {
     /// Units per minute background work (older mail, body trickle) leaves for everything else.
     public var backgroundReserve: Int = 1_500
     /// Bulk and background spending is smoothed over this many seconds: in any such window they
-    /// spend at most their per-minute share for that long (360 and 300 units by default), so they
+    /// spend at most their per-minute share for that long (540 and 450 units by default), so they
     /// never burst and interactive calls don't queue behind them in the HTTP client's limiter.
-    public var paceWindow: Double = 4
+    public var paceWindow: Double = 6
     /// Most units one bulk step may spend before the loop checks for polls and actions again.
-    /// Fits in one pace window, so a step runs without waiting.
-    public var bulkStepUnits: Int = 360
+    /// Half a pace window: two steps use the whole share, and one runs even after an opened thread.
+    public var bulkStepUnits: Int = 270
 
     /// Initial sync fetches this many days of All Mail in full, after the inbox.
     public var recentDays: Int = 30
@@ -68,7 +68,7 @@ public struct SyncConfiguration: Sendable {
     /// Messages per write transaction, so the UI fills in progressively.
     public var writeBatchSize: Int = 250
     /// Older mail is backfilled as metadata (20 units each), this many per background step.
-    public var backfillBatchSize: Int = 14
+    public var backfillBatchSize: Int = 10
     /// New mail per history poll fetched in full (30 × 60 units); beyond it, metadata, with bodies
     /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
     public var historyFullFetchLimit: Int = 30

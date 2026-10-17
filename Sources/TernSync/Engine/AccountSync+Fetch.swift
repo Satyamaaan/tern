@@ -488,6 +488,8 @@ extension AccountSync {
         var missing: [String] = []
         var buffer: [ParsedMessage] = []
         for (index, chunk) in chunks.enumerated() {
+            // Bulk and background fetches are the run loop's: queued actions go out in between.
+            if index > 0, QuotaPriority.current != .interactive { try await serviceActions() }
             var fetched: [GmailMessage] = []
             for attempt in 0..<3 {
                 let generation = historyGeneration

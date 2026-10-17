@@ -21,6 +21,10 @@ extension AccountSync {
     /// the same draft. Ops whose `notBefore` hasn't come (undo-send window, send later, retry
     /// backoff) are skipped, and `nextOpAt` records when to come back.
     public func drainOps() async throws {
+        // Bulk work drains between its requests (`serviceActions`); never two drains at once.
+        guard !isDraining else { return }
+        isDraining = true
+        defer { isDraining = false }
         nextOpAt = nil
         for _ in 0..<50 {
             guard try await drainPass() else { break }
@@ -221,19 +225,30 @@ extension AccountSync {
         return nil
     }
 
+    private enum SavedDraft {
+        case saved(GmailDraft)
+        /// Sending: the Gmail draft is gone because an earlier send of it went out.
+        case alreadySent(GmailMessageRef)
+    }
+
     /// Updates the draft's Gmail copy, creating it when there is none (or it was deleted elsewhere).
-    /// Looks for a copy it doesn't know the id of first, so a lost create isn't repeated.
-    private func saveGmailDraft(_ draft: Draft, account: Account, raw: Data, threadId: String?) async throws -> GmailDraft {
+    /// Looks for a copy it doesn't know the id of first, so a lost create isn't repeated. For a send,
+    /// a copy that's gone may have been sent by an earlier attempt: Sent is checked first.
+    private func saveGmailDraft(_ draft: Draft, account: Account, raw: Data, threadId: String?,
+                                forSend: Bool = false) async throws -> SavedDraft {
         var gmailDraftId = draft.gmailDraftId
         if gmailDraftId == nil { gmailDraftId = try await existingGmailDraft(draft, account: account) }
         if let gmailDraftId {
             do {
-                return try await api.updateDraft(id: gmailDraftId, raw: raw, threadId: threadId)
+                return .saved(try await api.updateDraft(id: gmailDraftId, raw: raw, threadId: threadId))
             } catch GmailAPIError.notFound {
+                if forSend, let sent = try await findSent(messageId: AccountSync.messageId(for: draft, account: account)) {
+                    return .alreadySent(sent)
+                }
                 // Deleted in another client; make a new one.
             }
         }
-        return try await api.createDraft(raw: raw, threadId: threadId)
+        return .saved(try await api.createDraft(raw: raw, threadId: threadId))
     }
 
     /// Sends the draft once its undo window (`notBefore`) and `scheduledAt` have passed: downloads
@@ -284,20 +299,24 @@ extension AccountSync {
             }
         } else {
             let raw = try await encoded(draft, account)
-            let saved = try await saveGmailDraft(draft, account: account, raw: raw, threadId: try await threadToSend(draft))
-            if let messageId = saved.message?.id { draftMessageIds.append(messageId) }
-            var staged = payload
-            staged.sendingDraftId = saved.id
-            let stagedJSON = String(decoding: try JSONEncoder().encode(staged), as: UTF8.self)
-            try writeNow { db in
-                try db.execute(sql: "UPDATE pending_op SET payload = ? WHERE id = ?", arguments: [stagedJSON, opId])
-                if var row = try Draft.fetchOne(db, key: draftId) {
-                    row.gmailDraftId = saved.id
-                    if let messageId = saved.message?.id { row.gmailMessageId = messageId }
-                    try row.update(db)
+            switch try await saveGmailDraft(draft, account: account, raw: raw, threadId: try await threadToSend(draft), forSend: true) {
+            case .alreadySent(let sent):
+                ref = sent
+            case .saved(let saved):
+                if let messageId = saved.message?.id { draftMessageIds.append(messageId) }
+                var staged = payload
+                staged.sendingDraftId = saved.id
+                let stagedJSON = String(decoding: try JSONEncoder().encode(staged), as: UTF8.self)
+                try writeNow { db in
+                    try db.execute(sql: "UPDATE pending_op SET payload = ? WHERE id = ?", arguments: [stagedJSON, opId])
+                    if var row = try Draft.fetchOne(db, key: draftId) {
+                        row.gmailDraftId = saved.id
+                        if let messageId = saved.message?.id { row.gmailMessageId = messageId }
+                        try row.update(db)
+                    }
                 }
+                ref = try await api.sendDraft(id: saved.id)
             }
-            ref = try await api.sendDraft(id: saved.id)
         }
 
         // Sent. Nothing below may reach the retry path.
@@ -320,7 +339,11 @@ extension AccountSync {
                 try MailStore.upsertServerMessages(db, parsed.map(\.message), attachments: parsed.flatMap(\.attachments))
             }
         } catch {
-            _ = try? writeNow { db in try PendingOp.deleteOne(db, key: opId) }
+            // Sent all the same: never leave the draft "sending" with nothing behind it.
+            _ = try? writeNow { db in
+                _ = try PendingOp.deleteOne(db, key: opId)
+                _ = try Draft.deleteOne(db, key: draftId)
+            }
         }
         try? FileManager.default.removeItem(at: DraftStore.folder(for: draftId, in: configuration.draftFilesDirectory))
         return .done
@@ -350,7 +373,8 @@ extension AccountSync {
         guard case .ready(let draft, let account) = claim else { return }
 
         let raw = try await encoded(draft, account)
-        let saved = try await saveGmailDraft(draft, account: account, raw: raw, threadId: try await threadToSend(draft))
+        guard case .saved(let saved) = try await saveGmailDraft(draft, account: account, raw: raw,
+                                                                 threadId: try await threadToSend(draft)) else { return }
         try writeNow { db in
             if var row = try Draft.fetchOne(db, key: draftId), row.accountId == accountId, row.state != .sent {
                 row.gmailDraftId = saved.id
@@ -421,7 +445,11 @@ extension AccountSync {
             return .halt(retryAt)
         default:
             let attempts = op.attempts + 1
-            if attempts >= configuration.maxOpAttempts {
+            // A staged send may already have gone out: on a server error it's never made editable
+            // (Send again could then deliver it twice); it keeps retrying, at most every few minutes.
+            let transient: Bool
+            if case .server(let status, _)? = error as? GmailAPIError, status >= 500 { transient = true } else { transient = false }
+            if attempts >= configuration.maxOpAttempts, !(transient && AccountSync.isStaged(op)) {
                 try await updateOp(opId) {
                     $0.state = .failed
                     $0.attempts = attempts
@@ -480,6 +508,11 @@ extension AccountSync {
 
     static func draftId(of op: PendingOp) -> String? {
         (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.draftId
+    }
+
+    /// A send whose Gmail draft exists and may already have been sent.
+    static func isStaged(_ op: PendingOp) -> Bool {
+        op.kind == .sendDraft && (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.sendingDraftId != nil
     }
 
     private func setOpState(_ id: Int64, _ state: PendingOp.State) async throws {

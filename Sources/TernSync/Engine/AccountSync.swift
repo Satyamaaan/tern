@@ -61,6 +61,7 @@ public actor AccountSync {
     var failedBodies = Set<String>()
     /// Set by `kick`; long bulk work checks it to send queued actions without waiting.
     var actionsWaiting = false
+    var isDraining = false
     /// The client has no threads.get; fall back to messages.get.
     var threadsUnsupported = false
     /// The client has no drafts.list; skip looking for a Gmail draft before creating one.
@@ -122,10 +123,11 @@ public actor AccountSync {
         wake()
     }
 
-    /// Sends queued actions now if any arrived; long bulk work (a full resync) calls this between
-    /// requests so user actions never wait for it.
+    /// Sends queued actions now if any arrived or came due (a send whose undo window ended); long
+    /// bulk work (a resync, a history catch-up, a backfill step) calls this between requests so
+    /// user actions never wait for it.
     func serviceActions() async throws {
-        guard actionsWaiting else { return }
+        guard actionsWaiting || nextOpAt.map({ $0 <= clock.now() }) == true else { return }
         actionsWaiting = false
         try await QuotaPriority.$current.withValue(.interactive) { try await drainOps() }
     }
@@ -395,7 +397,7 @@ public actor AccountSync {
     func retryDelay(for error: GmailAPIError, attempt: Int) -> Double? {
         switch error {
         case .network: return backoff(attempt)
-        case .server(501, GmailThread.unsupported): return nil
+        case .server(501, GmailThread.unsupported), .server(501, GmailDraftPage.unsupported): return nil
         case .server(let status, _) where status >= 500: return backoff(attempt)
         default: return nil
         }
