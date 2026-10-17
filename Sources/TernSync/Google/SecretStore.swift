@@ -21,10 +21,18 @@ public struct KeychainError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// Generic-password items in the login Keychain. Items are readable after first unlock and stay on
-/// this Mac (not synced through iCloud Keychain).
+/// Generic-password items, never synced through iCloud Keychain.
+///
+/// By default items go in the login keychain, which works for any signed build but ties access to
+/// the app's code signature: a build signed differently gets a "Tern wants to use your confidential
+/// information" prompt. `useDataProtectionKeychain` avoids that (and makes items readable after first
+/// unlock), but needs a Team-signed app with a keychain-access-groups entitlement.
 public struct KeychainSecretStore: SecretStore {
-    public init() {}
+    private let useDataProtectionKeychain: Bool
+
+    public init(useDataProtectionKeychain: Bool = false) {
+        self.useDataProtectionKeychain = useDataProtectionKeychain
+    }
 
     public func data(service: String, account: String) throws -> Data? {
         var query = baseQuery(service: service, account: account)
@@ -57,12 +65,9 @@ public struct KeychainSecretStore: SecretStore {
     }
 
     public func accounts(service: String) throws -> [String] {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-        ]
+        var query = baseQuery(service: service, account: nil)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
@@ -71,11 +76,13 @@ public struct KeychainSecretStore: SecretStore {
         return items.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
     }
 
-    private func baseQuery(service: String, account: String) -> [String: Any] {
-        [
+    private func baseQuery(service: String, account: String?) -> [String: Any] {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
         ]
+        if let account { query[kSecAttrAccount as String] = account }
+        if useDataProtectionKeychain { query[kSecUseDataProtectionKeychain as String] = true }
+        return query
     }
 }

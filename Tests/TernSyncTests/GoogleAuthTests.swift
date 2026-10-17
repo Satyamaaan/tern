@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Synchronization
 import Testing
 @testable import TernSync
@@ -142,6 +143,23 @@ import Testing
         #expect(server.requests.count == 1)
     }
 
+    @Test func lockedKeychainIsNotASignOut() async throws {
+        struct LockedKeychain: SecretStore {
+            func data(service: String, account: String) throws -> Data? { throw KeychainError(status: errSecInteractionNotAllowed) }
+            func set(_ data: Data, service: String, account: String) throws {}
+            func remove(service: String, account: String) throws {}
+            func accounts(service: String) throws -> [String] { [] }
+        }
+        let auth = GoogleAuth(config: testConfig, session: StubServer { _ in .json("{}") }.session)
+        let provider = GoogleTokenProvider(email: "me@example.com", auth: auth, secrets: LockedKeychain())
+        await #expect {
+            try await provider.accessToken()
+        } throws: { error in
+            if case GmailAPIError.network = error { return true }
+            return false
+        }
+    }
+
     @Test func refreshReturnsExpiry() async throws {
         let server = StubServer { _ in .json(#"{"access_token":"ya29.new","expires_in":3599,"token_type":"Bearer"}"#) }
         let clock = TestClock()
@@ -239,21 +257,25 @@ import Testing
         await #expect(throws: GmailAPIError.unauthorized) { try await accounts.api(for: "me@example.com").labels() }
     }
 
-    @Test func wrongStateIsRejected() async throws {
-        let page = Locked<(Int, String)?>(nil)
+    @Test func strayRequestsDoNotEndSignIn() async throws {
         let auth = GoogleAuth(config: testConfig, session: Self.fakeGoogle().session)
-        await #expect(throws: GoogleAuthError.stateMismatch) {
-            try await auth.signIn(openURL: Self.browser({ _ in "state=forged&code=abc" }, page: page))
+        let statuses = Locked<[Int]>([])
+        let result = try await auth.signIn { url in
+            let query = StubRequest(method: "GET", url: url, headers: [:], body: Data()).query
+            let base = query["redirect_uri"]! + "/?"
+            let state = query["state"]!
+            Task {
+                let session = URLSession(configuration: .ephemeral)
+                for target in ["state=forged&code=stolen", "state=\(state)&code=x&iss=https%3A%2F%2Fevil.example",
+                               "state=\(state)&code=real&iss=https%3A%2F%2Faccounts.google.com"] {
+                    let (_, response) = try await session.data(from: URL(string: base + target)!)
+                    statuses.set(statuses.value + [(response as! HTTPURLResponse).statusCode])
+                }
+            }
         }
-        try await waitFor { page.value != nil }
-        #expect(page.value?.0 == 400)
-    }
-
-    @Test func foreignIssuerIsRejected() async throws {
-        let auth = GoogleAuth(config: testConfig, session: Self.fakeGoogle().session)
-        await #expect(throws: GoogleAuthError.stateMismatch) {
-            try await auth.signIn(openURL: Self.browser({ "state=\($0)&code=abc&iss=https%3A%2F%2Fevil.example" }))
-        }
+        #expect(result.account.email == "Me@Example.com")
+        try await waitFor { statuses.value.count == 3 }
+        #expect(statuses.value == [400, 400, 200])
     }
 
     @Test func cancelledConsentIsReported() async throws {
@@ -266,9 +288,14 @@ import Testing
     @Test func untickedGmailScopeIsReportedAndRevoked() async throws {
         let google = Self.fakeGoogle(scope: "openid https://www.googleapis.com/auth/userinfo.email")
         let auth = GoogleAuth(config: testConfig, session: google.session)
+        let page = Locked<(Int, String)?>(nil)
         await #expect(throws: GoogleAuthError.missingGmailScope) {
-            try await auth.signIn(openURL: Self.browser({ "state=\($0)&code=abc" }))
+            try await auth.signIn(openURL: Self.browser({ "state=\($0)&code=abc" }, page: page))
         }
+        // The tab only learns the outcome after the exchange, so it never claims success.
+        try await waitFor { page.value != nil }
+        #expect(page.value?.1.contains("leaving the Gmail box ticked") == true)
+        #expect(page.value?.1.contains("close this tab") == false)
         #expect(google.requests.last?.url.path == "/revoke")
         #expect(google.requests.last?.form["token"] == "1//refresh-secret")
     }

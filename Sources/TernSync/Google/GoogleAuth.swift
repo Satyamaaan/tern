@@ -8,8 +8,6 @@ public enum GoogleAuthError: Error, Equatable, Sendable {
     case accessDenied
     /// Google redirected with an error other than `access_denied`.
     case authorizationFailed(String)
-    /// The redirect's `state` did not match; the response was not for this sign-in.
-    case stateMismatch
     /// The user unticked Gmail access on the consent screen.
     case missingGmailScope
     /// Google returned no refresh token, so Tern could not stay signed in.
@@ -105,10 +103,24 @@ public actor GoogleAuth {
         defer { server.stop() }
         let port = try await server.start()
         let redirectURI = "http://127.0.0.1:\(port)"
+        try Task.checkCancellation()
 
         openURL(authorizationURL(redirectURI: redirectURI, pkce: pkce, state: state, loginHint: loginHint))
-        let code = try await waitForCode(server, state: state)
-        let tokens = try await exchange(code: code, verifier: pkce.verifier, redirectURI: redirectURI)
+        let (code, browser) = try await waitForRedirect(server, state: state)
+        // The browser tab waits for its page until the tokens are in hand, so it never says "signed
+        // in" for a sign-in that then fails.
+        do {
+            let result = try await finish(code: code, verifier: pkce.verifier, redirectURI: redirectURI)
+            browser.respond(status: 200, html: AuthResultPage.success)
+            return result
+        } catch {
+            browser.respond(status: 200, html: AuthResultPage.failure(Self.browserMessage(for: error)))
+            throw error
+        }
+    }
+
+    private func finish(code: String, verifier: String, redirectURI: String) async throws -> GoogleSignInResult {
+        let tokens = try await exchange(code: code, verifier: verifier, redirectURI: redirectURI)
 
         let granted = Set((tokens.scope ?? "").split(separator: " ").map(String.init))
         guard granted.contains(GoogleScope.gmailModify) else {
@@ -140,12 +152,30 @@ public actor GoogleAuth {
         return FormEncoding.url(endpoints.authorization, items)
     }
 
-    /// Answers requests on the loopback port until one carries `state`, then returns its code.
-    /// Other requests (favicon, browser probes) get a 404.
-    private func waitForCode(_ server: LoopbackServer, state: String) async throws -> String {
+    private static func browserMessage(for error: Error) -> String {
+        switch error {
+        case GoogleAuthError.missingGmailScope:
+            "Tern needs access to Gmail. Return to Tern and sign in again, leaving the Gmail box ticked."
+        case GoogleAuthError.oauth(let code, _) where code == "invalid_client" || code == "deleted_client":
+            "Google didn't accept Tern's OAuth client. Check the client ID and secret in Tern."
+        case GoogleAuthError.network:
+            "Tern couldn't reach Google. Check your connection and try again."
+        case is CancellationError:
+            "Sign-in was cancelled in Tern."
+        default:
+            "Something went wrong. Return to Tern to try again."
+        }
+    }
+
+    /// Answers requests on the loopback port until the redirect for this sign-in arrives, and
+    /// returns its code plus the browser request, which is still waiting for its page. Requests
+    /// without OAuth parameters (favicon, probes) get a 404. Requests with the wrong `state` or a
+    /// foreign `iss` get a 400 and are otherwise ignored, so a stray local request can't end the
+    /// sign-in; PKCE means a stolen code is useless anyway.
+    private func waitForRedirect(_ server: LoopbackServer, state: String) async throws -> (String, LoopbackServer.Incoming) {
         let clock = clock
         let timeout = timeout
-        return try await withThrowingTaskGroup(of: String.self) { group in
+        return try await withThrowingTaskGroup(of: (String, LoopbackServer.Incoming).self) { group in
             group.addTask {
                 for await incoming in server.requests {
                     let query = incoming.request.query
@@ -157,7 +187,7 @@ public actor GoogleAuth {
                     guard query["state"] == state, query["iss"].map({ $0 == "https://accounts.google.com" }) ?? true else {
                         incoming.respond(status: 400, html: AuthResultPage.failure(
                             "This sign-in link has expired. Start again from Tern."))
-                        throw GoogleAuthError.stateMismatch
+                        continue
                     }
                     if let error = query["error"] {
                         incoming.respond(status: 200, html: AuthResultPage.failure(
@@ -169,8 +199,7 @@ public actor GoogleAuth {
                         incoming.respond(status: 400, html: AuthResultPage.failure("Google sent no authorization code."))
                         throw GoogleAuthError.invalidResponse("redirect without a code")
                     }
-                    incoming.respond(status: 200, html: AuthResultPage.success)
-                    return code
+                    return (code, incoming)
                 }
                 throw CancellationError()
             }
@@ -179,8 +208,8 @@ public actor GoogleAuth {
                 throw GoogleAuthError.timedOut
             }
             defer { group.cancelAll() }
-            guard let code = try await group.next() else { throw CancellationError() }
-            return code
+            guard let redirect = try await group.next() else { throw CancellationError() }
+            return redirect
         }
     }
 

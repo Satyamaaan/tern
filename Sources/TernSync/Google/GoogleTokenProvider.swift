@@ -28,11 +28,18 @@ public actor GoogleTokenProvider: GmailAccessTokenSource {
     }
 
     /// Reads the account's refresh token from `secrets` at each refresh, so signing out takes effect
-    /// at once.
+    /// at once. A missing token is `.unauthorized`; a Keychain that can't be read right now (locked,
+    /// access prompt dismissed) is reported as `.network` so callers retry later instead of asking
+    /// the user to sign in again.
     public init(email: String, auth: GoogleAuth, secrets: any SecretStore, clock: GoogleClock = .live) {
         let account = email.lowercased()
         self.init(clock: clock) {
-            let stored = try? secrets.data(service: GoogleKeychain.tokenService, account: account)
+            let stored: Data?
+            do {
+                stored = try secrets.data(service: GoogleKeychain.tokenService, account: account)
+            } catch {
+                throw GmailAPIError.network("Keychain unavailable: \(error)")
+            }
             guard let stored, let refreshToken = String(data: stored, encoding: .utf8), !refreshToken.isEmpty else {
                 throw GmailAPIError.unauthorized
             }
@@ -42,23 +49,26 @@ public actor GoogleTokenProvider: GmailAccessTokenSource {
 
     public func accessToken() async throws -> String {
         if let cached, cached.expiresAt - earlyRefresh > clock.now() { return cached.value }
-        let task: Task<GoogleAccessToken, Error>
-        if let refreshing {
-            task = refreshing
-        } else {
-            let refresher = refresher
-            task = Task { try await refresher() }
-            refreshing = task
-        }
+        let task = refreshing ?? startRefresh()
         do {
-            let token = try await task.value
-            if refreshing == task { refreshing = nil }
-            cached = token
-            return token.value
+            return try await task.value.value
         } catch {
-            if refreshing == task { refreshing = nil }
             throw Self.map(error)
         }
+    }
+
+    /// The refresh task alone updates the cache, so a caller that wakes late can't put back a token
+    /// that was invalidated meanwhile.
+    private func startRefresh() -> Task<GoogleAccessToken, Error> {
+        let refresher = refresher
+        let task = Task {
+            defer { refreshing = nil }
+            let token = try await refresher()
+            cached = token
+            return token
+        }
+        refreshing = task
+        return task
     }
 
     public func invalidate(_ token: String) {
