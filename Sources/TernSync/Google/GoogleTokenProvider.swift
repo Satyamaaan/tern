@@ -51,9 +51,23 @@ public actor GoogleTokenProvider: GmailAccessTokenSource {
         if let cached, cached.expiresAt - earlyRefresh > clock.now() { return cached.value }
         let task = refreshing ?? startRefresh()
         do {
-            return try await task.value.value
+            return try await Self.result(of: task).value
         } catch {
             throw Self.map(error)
+        }
+    }
+
+    /// The shared refresh's result, or `CancellationError` as soon as this caller is cancelled, so
+    /// quitting never waits on a slow token endpoint. The refresh goes on for any other caller.
+    private static func result(of task: Task<GoogleAccessToken, Error>) async throws -> GoogleAccessToken {
+        let once = ResumeOnce<GoogleAccessToken>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                once.set(continuation)
+                Task { once.resume(with: await task.result) }
+            }
+        } onCancel: {
+            once.resume(with: .failure(CancellationError()))
         }
     }
 

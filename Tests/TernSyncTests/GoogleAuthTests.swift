@@ -123,6 +123,23 @@ import Testing
         #expect(try await provider.accessToken() == "access-3")
     }
 
+    @Test func aCancelledCallerStopsWaitingForASlowRefresh() async throws {
+        let clock = TestClock()
+        let provider = GoogleTokenProvider(clock: clock.clock) {
+            try? await Task.sleep(for: .seconds(2))
+            return GoogleAccessToken(value: "slow", expiresAt: clock.now + 3600)
+        }
+        let started = Date()
+        let quitting = Task { try await provider.accessToken() }
+        try await Task.sleep(for: .milliseconds(50))
+        quitting.cancel()
+        let result = await quitting.result
+        #expect(Date().timeIntervalSince(started) < 1, "returns when cancelled, not when the refresh ends")
+        #expect(throws: CancellationError.self) { try result.get() }
+        // Another caller still gets the token from the same refresh.
+        #expect(try await provider.accessToken() == "slow")
+    }
+
     @Test func revokedRefreshTokenMeansUnauthorized() async throws {
         let server = StubServer { _ in
             .json(#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#, status: 400)

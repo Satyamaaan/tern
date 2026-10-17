@@ -273,12 +273,6 @@ final class Integration {
         notifications?.stop()
         stopObservingActivity()
         pathMonitor?.cancel()
-        guard let sync else { return }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await sync.shutdown() }
-            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
-            await group.next()
-            group.cancelAll()
-        }
+        await sync?.shutdown(timeout: timeout)
     }
 }

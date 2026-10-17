@@ -237,6 +237,44 @@ final class ServerWriteCounter: @unchecked Sendable {
     func bump() { lock.withLock { count += 1 } }
 }
 
+/// Resumes a continuation exactly once, with the first result any of several racing callers hands
+/// it, even one that arrives before the continuation is set. Later results are dropped.
+final class ResumeOnce<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var early: Result<Value, Error>?
+    private var finished = false
+
+    func set(_ continuation: CheckedContinuation<Value, Error>) {
+        lock.lock()
+        guard let early else {
+            self.continuation = continuation
+            lock.unlock()
+            return
+        }
+        finished = true
+        lock.unlock()
+        continuation.resume(with: early)
+    }
+
+    func resume(with result: Result<Value, Error>) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        guard let continuation else {
+            if early == nil { early = result }
+            lock.unlock()
+            return
+        }
+        finished = true
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(with: result)
+    }
+}
+
 extension Array {
     /// Consecutive slices of at most `size` elements.
     func syncChunks(_ size: Int) -> [[Element]] {

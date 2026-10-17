@@ -130,6 +130,26 @@ public final class SyncCoordinator {
         for task in running { await task.value }
     }
 
+    /// Stops and waits for the account tasks to finish, for at most `timeout` seconds of real time.
+    /// Returns at the deadline even when a task is stuck in a request that ignores cancellation,
+    /// without waiting for it any further.
+    public func shutdown(timeout: TimeInterval) async {
+        let running = Array(tasks.values) + serviceTasks
+        stop()
+        let once = ResumeOnce<Void>()
+        _ = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            once.set(continuation)
+            Task.detached {
+                for task in running { await task.value }
+                once.resume(with: .success(()))
+            }
+            Task.detached {
+                try? await Task.sleep(for: .seconds(max(0, timeout)))
+                once.resume(with: .success(()))
+            }
+        }
+    }
+
     // MARK: Accounts
 
     /// Adds an account after sign-in and starts syncing it.

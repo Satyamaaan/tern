@@ -103,3 +103,23 @@ private func waitUntil(timeout: Double = 10, _ condition: @MainActor () async th
     }
     await coordinator.shutdown()
 }
+
+@MainActor
+@Test func shutdownReturnsAtItsDeadlineWhenARequestHangs() async throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    // Every request takes 3 s and ignores cancellation, like a stalled connection.
+    let fake = FakeGmail(email: testEmail, latency: 3, sleep: { seconds in
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume() }
+        }
+    })
+    let coordinator = SyncCoordinator(store: store, accounts: [Account(email: testEmail)], apiProvider: { _ in fake },
+                                      encodeDraft: testEncoder, configuration: .test())
+    coordinator.start()
+    try await Task.sleep(for: .milliseconds(100))
+
+    let started = Date()
+    await coordinator.shutdown(timeout: 0.3)
+    #expect(Date().timeIntervalSince(started) < 1.5, "quitting doesn't wait out the hung request")
+    #expect(!coordinator.isRunning)
+}
