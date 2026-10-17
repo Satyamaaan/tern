@@ -108,10 +108,10 @@ private actor LimitedGmail: GmailAPI {
     let requests = await limited.backgroundRequests
     #expect(requests.count > 100)
     #expect(requests.allSatisfy { $0 <= configuration.backgroundMaxUnitsPerRequest })
-    // An opened thread, a send or a poll goes straight out; even the largest interactive request
-    // waits about a second at most behind what background work took from the limiter.
+    // An opened thread, a send or a poll goes straight out, even the largest interactive request:
+    // background work never takes enough from the limiter to make it wait.
     #expect(await limited.typicalWaits.allSatisfy { $0 == 0 })
-    #expect(try #require(await limited.largestWaits.max()) <= 1.25)
+    #expect(try #require(await limited.largestWaits.max()) == 0)
     #expect(await fake.callCount(.messages) > 0)
 }
 

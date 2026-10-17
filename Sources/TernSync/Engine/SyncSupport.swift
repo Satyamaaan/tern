@@ -46,6 +46,11 @@ public struct SyncConfiguration: Sendable {
 
     /// Initial sync fetches this many days of All Mail in full, after the inbox.
     public var recentDays: Int = 30
+    /// At most this many of the newest inbox messages come in full in the initial sync (an inbox of
+    /// 50,000 would otherwise take hours of quota); older ones arrive with the backfill.
+    public var initialInboxLimit: Int = 500
+    /// At most this many of the newest recent messages come in full in the initial sync.
+    public var initialRecentLimit: Int = 1_000
     /// Threads with at least this many messages to fetch come from one threads.get (120 units)
     /// instead of one messages.get each (60 units).
     public var threadFetchMinimum: Int = 3
@@ -56,9 +61,9 @@ public struct SyncConfiguration: Sendable {
     /// Most quota units one call may cost, so no single request outgrows the budget's headroom
     /// (16 full messages, 50 metadata, 8 full threads).
     public var maxUnitsPerRequest: Int = 1_000
-    /// The same for bulk and background calls (4 full messages, 12 metadata, 2 full threads): one
-    /// of them takes Gmail's quota rate about 2.4 s to cover, so an interactive call that arrives
-    /// behind it in the HTTP client's limiter waits about a second at most.
+    /// The same for bulk and background calls (4 full messages, 12 metadata, 2 full threads), so
+    /// with pacing they never take more than a sliver of the HTTP client's limiter and an
+    /// interactive call doesn't wait there behind them.
     public var backgroundMaxUnitsPerRequest: Int = 240
     /// Messages per write transaction, so the UI fills in progressively.
     public var writeBatchSize: Int = 250

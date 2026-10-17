@@ -89,9 +89,9 @@ extension AccountSync {
     }
 
     private func makeInitialPlan() async throws -> InitialPlan {
-        let inbox = try await listRefs(labelIds: [SystemLabel.inbox], query: nil)
+        let inbox = try await listRefs(labelIds: [SystemLabel.inbox], query: nil, limit: configuration.initialInboxLimit)
         let since = Int(clock.now().timeIntervalSince1970) - configuration.recentDays * 86_400
-        let recent = try await listRefs(labelIds: [], query: "after:\(since)")
+        let recent = try await listRefs(labelIds: [], query: "after:\(since)", limit: configuration.initialRecentLimit)
 
         // Every listed message per thread, in order of first appearance (newest first).
         var threadOrder: [String] = []
@@ -431,19 +431,21 @@ extension AccountSync {
         return labels
     }
 
-    /// Every message ref matching the filter, newest first, across all pages (5 units a page).
-    func listRefs(labelIds: [String], query: String?) async throws -> [GmailMessageRef] {
+    /// Message refs matching the filter, newest first, across pages (5 units a page): every one,
+    /// or the first `limit`.
+    func listRefs(labelIds: [String], query: String?, limit: Int? = nil) async throws -> [GmailMessageRef] {
         var refs: [GmailMessageRef] = []
         var token: String?
         repeat {
             let pageToken = token
-            let page = try await withRetry { [api, configuration] in
-                try await api.messageIds(query: query, labelIds: labelIds, pageToken: pageToken, maxResults: configuration.listPageSize)
+            let size = limit.map { min(configuration.listPageSize, max(1, $0 - refs.count)) } ?? configuration.listPageSize
+            let page = try await withRetry { [api] in
+                try await api.messageIds(query: query, labelIds: labelIds, pageToken: pageToken, maxResults: size)
             }
             refs += page.messages ?? []
             token = page.nextPageToken
-        } while token != nil
-        return refs
+        } while token != nil && refs.count < (limit ?? .max)
+        return limit.map { Array(refs.prefix($0)) } ?? refs
     }
 
     /// Every id matching `labelIds`, newest first, across all pages.
