@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private var settingsWindow: NSWindow?
     private var settingsState: SettingsState?
     private var onboardingWindow: NSWindow?
+    private var snoozeTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let launch = Timing.begin("launch")
@@ -68,6 +69,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         if model.accounts.isEmpty {
             if options.isFake { seedDemoMail(database) } else { showOnboarding() }
         }
+        startSnoozeTimer()
+    }
+
+    /// Brings snoozed threads back to the inbox when their time comes. Checked every minute and on wake.
+    private func startSnoozeTimer() {
+        let store = services.store
+        let writes = model.writes
+        let wake = { writes.async { _ = try? store.wakeSnoozed() } }
+        wake()
+        snoozeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in wake() }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in wake() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
