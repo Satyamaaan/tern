@@ -240,15 +240,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     }
 
     /// The sender's domain logo, else initials (in the account's hue when several accounts share the
-    /// list). Asks for logos as rows come into view, except in Spam and Trash: fetching a logo tells the
-    /// sender's domain this Mac's address, like a tracking pixel.
+    /// list). Asks for logos as rows come into view. Spam and Trash get initials only: fetching a logo
+    /// tells the sender's domain this Mac's address, like a tracking pixel, and a forged sender
+    /// mustn't borrow a real company's logo.
     private func avatar(for row: ThreadRow) -> RowAvatar {
         let thread = row.thread
         let sender = RowFormat.avatarParticipant(thread)
         let email = sender?.email ?? thread.accountId
         let logos = SenderLogos.shared
-        if sender != nil {
-            if !Self.isQuarantined(thread, in: model.kind) { logos.want(email) }
+        if sender != nil, !Self.isQuarantined(thread, in: model.kind) {
+            logos.want(email)
             if let image = logos.logo(forEmail: email) { return .logo(image) }
         }
         let tinted = model.scope == .all && model.accounts.count > 1 ? model.account(thread.accountId)?.colorIndex : nil
