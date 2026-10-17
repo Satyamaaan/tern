@@ -358,6 +358,7 @@ private struct AppearanceSettings: View {
             SettingsRow(title: "Split inbox", detail: "Important, People, Notifications, Newsletters, Other.") {
                 InkToggle(isOn: Binding(get: { prefs.splitInbox }, set: { model.setSplitInbox($0) }))
             }
+            SenderLogoSettingsRow()
         }
     }
 }
