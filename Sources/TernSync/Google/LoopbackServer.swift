@@ -78,6 +78,8 @@ final class LoopbackServer: @unchecked Sendable {
         }
     }
 
+    /// Stops listening and drops idle connections. Responses already being sent still finish, so
+    /// the browser gets its page even when sign-in ends right after answering it.
     func stop() {
         continuation.finish()
         queue.async {
@@ -136,6 +138,7 @@ final class LoopbackServer: @unchecked Sendable {
     }
 
     fileprivate func send(status: Int, html: String, on connection: NWConnection) {
+        queue.async { self.connections[ObjectIdentifier(connection)] = nil }
         let body = Data(html.utf8)
         let reason = HTTPURLResponse.localizedString(forStatusCode: status).capitalized
         let head = [

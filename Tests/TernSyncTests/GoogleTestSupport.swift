@@ -240,3 +240,18 @@ func batchIds(_ request: StubRequest) -> [String] {
             return String(path.prefix { $0 != "?" })
         }
 }
+
+/// A shareable, lock-protected value for state that test closures pass around.
+final class Locked<Value: Sendable>: Sendable {
+    private let mutex: Mutex<Value>
+
+    init(_ value: Value) {
+        mutex = Mutex(value)
+    }
+
+    var value: Value { mutex.withLock { $0 } }
+
+    func set(_ value: Value) {
+        mutex.withLock { $0 = value }
+    }
+}
