@@ -143,8 +143,9 @@ private final class Run: @unchecked Sendable {
             timer.cancel()
             lock.lock()
             let result = ProcessResult(exitCode: process.terminationStatus, stdout: stdoutData, stderr: stderrData)
+            let stopped = stopReason
             lock.unlock()
-            finish(.success(result))
+            finish(stopped.map { .failure(Self.error(for: $0)) } ?? .success(result))
         }
     }
 
@@ -155,8 +156,9 @@ private final class Run: @unchecked Sendable {
         stopReason = reason
         let running = started
         lock.unlock()
-        if running { terminate() }
+        // Answer before killing, so the exit of the killed process can't be reported as a result.
         finish(.failure(Self.error(for: reason)))
+        if running { terminate() }
     }
 
     private func finish(_ result: Result<ProcessResult, Error>) {
