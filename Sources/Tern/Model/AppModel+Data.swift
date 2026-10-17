@@ -95,8 +95,8 @@ extension AppModel {
             guard let self, self.source == source else { return }
             let first = !self.listLoaded
             self.rawRows = rows
-            self.hasMore = rows.count >= limit
-            self.listLoaded = true
+            if self.hasMore != (rows.count >= limit) { self.hasMore = rows.count >= limit }
+            if first { self.listLoaded = true }
             if !self.isSearching { self.rebuildSnapshot(first ? .reset : .none) }
             if first, let done = self.onFirstRows { self.onFirstRows = nil; done() }
         }
@@ -120,7 +120,8 @@ extension AppModel {
             needsReplyFirst: !isSearching && source.needsReplyFirst,
             groupsByDate: isSearching || source.groupsByDate)
 
-        checked = checked.filter { snapshot.rows[$0] != nil }
+        let stillChecked = checked.filter { snapshot.rows[$0] != nil }
+        if stillChecked != checked { checked = stillChecked }
         var newCursor = cursor
         if let pending = pendingCursor, snapshot.rows[pending] != nil {
             newCursor = pending
@@ -130,7 +131,7 @@ extension AppModel {
         } else if cursor == nil, animation == .reset {
             newCursor = snapshot.order.first
         }
-        cursor = newCursor
+        if newCursor != cursor { cursor = newCursor }
         if cursorAnchor.map({ snapshot.rows[$0] == nil }) ?? true { cursorAnchor = cursor }
 
         listView?.listDidChange(snapshot, animation: animation)

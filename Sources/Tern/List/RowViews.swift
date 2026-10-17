@@ -17,7 +17,7 @@ enum RowStyle: Equatable {
 }
 
 /// Everything a thread row draws, gathered by the list controller.
-struct RowModel {
+struct RowModel: Equatable {
     var row: ThreadRow
     var style: RowStyle
     var isSelected = false
@@ -28,11 +28,18 @@ struct RowModel {
     /// Replaces the compact time (snoozed list shows when it wakes).
     var timeOverride: String?
     var dimmed = false
+
+    static func == (a: RowModel, b: RowModel) -> Bool {
+        a.row == b.row && a.style == b.style && a.isSelected == b.isSelected && a.hasFocusRing == b.hasFocusRing
+            && a.isHovered == b.isHovered && a.accountColor == b.accountColor && a.chip?.text == b.chip?.text
+            && a.chip?.color == b.chip?.color && a.timeOverride == b.timeOverride && a.dimmed == b.dimmed
+    }
 }
 
 /// A message-list row, drawn in one pass (no subviews) so scrolling 50k threads stays smooth.
 final class ThreadRowView: NSTableRowView {
-    var model: RowModel? { didSet { needsDisplay = true } }
+    /// Redraws only when something visible changed, so j/k repaints two rows, not the screen.
+    var model: RowModel? { didSet { if model != oldValue { needsDisplay = true } } }
 
     static let inset: CGFloat = 6
     static let gutter: CGFloat = 20

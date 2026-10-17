@@ -294,7 +294,7 @@ final class AppModel {
     func setCursor(_ key: ThreadKey?, open: Bool, keepAnchor: Bool = false) {
         if !keepAnchor { cursorAnchor = key }
         let changed = key != cursor
-        cursor = key
+        if changed { cursor = key }
         listView?.selectionDidChange(scrollTo: key)
         scheduleMarkRead(open: open, changed: changed)
     }
