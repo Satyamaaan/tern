@@ -180,6 +180,12 @@ final class CommandRegistry {
             list.append(Command(id: "density.\(density.rawValue)", title: "Density: \(density.title)", group: .settings,
                                 menu: .view, section: 2, aliases: ["rows", "compact", "comfortable"]) { m.prefs.density = density })
         }
+        list.append(Command(id: "appearance.toggle", title: "Switch to Light Appearance", group: .settings,
+                            keys: [.command("l", shift: true)], menu: .view, section: 3,
+                            aliases: ["theme", "dark mode", "light mode", "toggle appearance"],
+                            currentTitle: { AppearanceMode.showsDark ? "Switch to Light Appearance" : "Switch to Dark Appearance" }) {
+            m.prefs.appearance = AppearanceMode.flipped
+        })
         for mode in AppearanceMode.allCases {
             list.append(Command(id: "appearance.\(mode.rawValue)", title: "Appearance: \(mode.title)", group: .settings,
                                 menu: .view, section: 3, aliases: ["theme", "dark mode", "light mode"]) { m.prefs.appearance = mode })

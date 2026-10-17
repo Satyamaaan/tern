@@ -249,12 +249,27 @@ private struct ProjectRow: View {
 /// sync", or a "Sign in again" link.
 struct SyncStatusLine: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 7) {
             content
             Spacer(minLength: 0)
+            // Light/dark switch, shown on hover only so the footer stays one quiet line.
+            Button { model.prefs.appearance = AppearanceMode.flipped } label: {
+                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(Theme.text3))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(colorScheme == .dark ? "Switch to Light Appearance (⇧⌘L)" : "Switch to Dark Appearance (⇧⌘L)")
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
         }
+        .onHover { hovering = $0 }
         .font(.ui(12))
         .padding(.horizontal, 18)
         .frame(height: 44)
