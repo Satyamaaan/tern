@@ -57,6 +57,8 @@ public actor AccountSync {
     var completeThreads = Set<String>()
     /// Threads next to the selection, waiting for their bodies.
     var adjacentQueue: [String] = []
+    /// False once `label_check` has nothing left for this account; true until it's been looked at.
+    var labelChecksPending = true
     /// Messages whose body couldn't be fetched this run; the trickle skips them.
     var failedBodies = Set<String>()
     /// Set by `kick`; long bulk work checks it to send queued actions without waiting.
@@ -209,7 +211,8 @@ public actor AccountSync {
     }
 
     /// The next slice of non-interactive work, by priority: bodies of threads next to the
-    /// selection, the initial inbox and recent mail, the older-mail backfill, the body trickle.
+    /// selection, the initial inbox and recent mail, labels a resync could only approximate, the
+    /// older-mail backfill, the body trickle.
     /// Runs only when the budget can afford it now; otherwise records when it can.
     func backgroundStep() async throws -> Bool {
         nextBackgroundAt = nil
@@ -229,6 +232,13 @@ public actor AccountSync {
         }
         if account.syncState == .new {
             return try await whenAffordable(configuration.bulkStepUnits, .bulk) { try await initialStep() }
+        }
+        if labelChecksPending, try await hasLabelChecks() {
+            return try await whenAffordable(batchSize(cost: quota.getMessage) * quota.getMessage, .background) {
+                try await labelCheckStep()
+                // After the last one the backfill can go on at once.
+                return true
+            }
         }
         if !account.backfillDone {
             return try await whenAffordable(configuration.backfillBatchSize * quota.getMessage + quota.list, .background) {

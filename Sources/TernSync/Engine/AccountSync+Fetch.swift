@@ -280,7 +280,8 @@ extension AccountSync {
             try await writeServer { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
         }
 
-        // Stored Trash and Spam: read their labels while that's cheap, else just move them there.
+        // Stored Trash and Spam: read their labels while that's cheap. Otherwise move them there now
+        // and leave their exact labels to `labelCheckStep`, queued in the same writes.
         let knownHidden = Array(hidden.filter(local.contains))
         var gone = local.subtracting(serverIds)
         if knownHidden.count <= configuration.resyncHiddenRefreshLimit {
@@ -303,13 +304,15 @@ extension AccountSync {
                         let id: String = row["id"]
                         let json: String = row["labelIds"]
                         var labels = Set((try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? [])
-                        labels.remove(SystemLabel.inbox)
+                        labels.subtract([SystemLabel.inbox, SystemLabel.trash, SystemLabel.spam])
                         labels.insert(trashSet.contains(id) ? SystemLabel.trash : SystemLabel.spam)
                         update[id] = Array(labels)
                     }
                     try MailStore.applyServerLabels(db, accountId: accountId, update)
+                    try AccountSync.queueLabelChecks(db, accountId: accountId, ids: chunk)
                 }
             }
+            labelChecksPending = true
         }
 
         let newInbox = inboxIds.filter { !local.contains($0) }

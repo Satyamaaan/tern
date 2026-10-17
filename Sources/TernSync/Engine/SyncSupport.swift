@@ -77,7 +77,8 @@ public struct SyncConfiguration: Sendable {
     /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
     public var historyFullFetchLimit: Int = 30
     /// After history expires, stored Trash and Spam (up to this many) have their labels read back
-    /// (20 units each); beyond it they're just moved to Trash or Spam locally.
+    /// (20 units each) during the resync; beyond it they're moved to Trash or Spam locally at once
+    /// and their exact labels are read in the background afterwards (`labelCheckStep`).
     public var resyncHiddenRefreshLimit: Int = 200
     /// Rate of the background body trickle for mail stored without a body.
     public var trickleUnitsPerMinute: Int = 1_200
