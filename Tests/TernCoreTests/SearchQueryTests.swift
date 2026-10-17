@@ -273,6 +273,27 @@ private func makeFixture() throws -> Fixture {
     #expect(try f.ids("before:2026/10/10 lisbon") == ["t4", "t5"])
 }
 
+@Test func datesApplyToTheMessageTheOtherTermsMatch() throws {
+    let f = try makeFixture()
+    let alice = ("Alice Park", "alice@park.dev")
+    let bob = ("Bob Lee", "bob@lee.dev")
+    try f.store.upsertMessages([
+        message(acme, "ma1", thread: "ta", daysAgo: 400, from: alice, subject: "Budget numbers", body: "The 2025 budget", labels: ["INBOX"]),
+        message(acme, "ma2", thread: "ta", daysAgo: 0.6, from: bob, subject: "Re: Budget numbers", body: "Revived", labels: ["INBOX"]),
+    ])
+    // Like Gmail, operators meet on one message: Bob's reply yesterday doesn't make Alice's 2025 mail new.
+    #expect(try !f.ids("from:alice newer_than:7d").contains("ta"))
+    #expect(try f.ids("from:bob newer_than:7d").contains("ta"))
+    #expect(try f.ids("from:alice before:2026/01/01") == ["ta"])
+    #expect(try f.ids("from:alice -newer_than:7d") == ["ta"])
+    #expect(try f.ids("budget older_than:30d") == ["ta"])
+    #expect(try f.ids("budget after:2026/10/16") == ["ta"])
+    #expect(try f.ids("budget after:2026/10/17") == [])
+    // With nothing to match per message, dates still mean the thread's last activity.
+    #expect(try f.ids("newer_than:1d").contains("ta"))
+    #expect(try !f.ids("older_than:30d").contains("ta"))
+}
+
 @Test func beforeAndAfterUseTheGivenTimeZone() throws {
     let f = try makeFixture()
     // t1 is 3 days before 2026-10-17T12:00Z: 2026-10-14T12:00Z.

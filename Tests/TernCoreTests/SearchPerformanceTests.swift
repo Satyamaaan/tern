@@ -41,6 +41,8 @@ private enum Perf {
             "from:github is:unread", "in:inbox the", "in:inbox t", "has:attachment invoice", "from:maya roadmap", "subject:invoice",
             "subject:the", "is:unread the", "from:github the", "category:people the", "label:finance the", "from:the",
             "to:alex the", "cc:maya", "bcc:maya", "newer_than:30d the", "before:2025/06/01 the", "account:northwind the",
+            "from:maya newer_than:7d", "from:github older_than:1y", "has:attachment newer_than:30d", "is:unread from:maya after:2026/09/01",
+            "roadmap before:2025/06/01", "the newer_than:2d",
         ]),
         ("negation, OR, groups", [
             "-the", "the -a", "roadmap -review", "from:github OR from:linear", "(invoice OR receipt) the",
