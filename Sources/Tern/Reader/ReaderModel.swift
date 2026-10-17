@@ -354,7 +354,10 @@ final class ReaderModel {
 
     private func withFile(_ attachment: MailAttachment, _ then: @escaping (URL) -> Void) {
         if let path = attachment.localPath, FileManager.default.fileExists(atPath: path) {
-            then(URL(fileURLWithPath: path))
+            let url = URL(fileURLWithPath: path)
+            // Files cached before Tern quarantined them get the flag now, before they open.
+            AttachmentQuarantine.mark(url)
+            then(url)
             return
         }
         guard let services else { return }
@@ -389,6 +392,7 @@ final class ReaderModel {
         }
         do {
             try FileManager.default.copyItem(at: url, to: destination)
+            AttachmentQuarantine.mark(destination)
             showToast("Saved to Downloads")
         } catch {
             showToast("Couldn’t save “\(name)”")

@@ -100,7 +100,7 @@ public struct SyncConfiguration: Sendable {
     public var sendConfirmationDelays: [Double] = [10, 30, 90]
     /// Retries for a read request (5xx, network) before the sync step gives up for now.
     public var maxRequestRetries: Int = 5
-    /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<filename>`.
+    /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<part>/<filename>`.
     public var attachmentCacheDirectory: URL = SyncConfiguration.defaultAttachmentDirectory
     /// `DraftStore.filesDirectory`: forwarded attachments are downloaded into a draft's folder
     /// before it's sent, and the folder is removed once it has been.
