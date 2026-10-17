@@ -33,15 +33,20 @@ public enum MailSanitizer {
         public var allowRemoteImages: Bool
         /// Maps a `cid:` content id (without angle brackets) to a URL the web view can load.
         public var resolveContentId: @Sendable (String) -> String?
+        /// Maps an allowed http(s) image URL to the URL the web view loads it through. The reader
+        /// can't fetch http(s) itself, so a remote image loads only where this put it.
+        public var remoteImageURL: @Sendable (String) -> String
         /// Fold quoted replies behind a toggle.
         public var collapseQuotes: Bool
 
         public init(
             allowRemoteImages: Bool = false, collapseQuotes: Bool = true,
+            remoteImageURL: @escaping @Sendable (String) -> String = { $0 },
             resolveContentId: @escaping @Sendable (String) -> String? = { _ in nil }
         ) {
             self.allowRemoteImages = allowRemoteImages
             self.collapseQuotes = collapseQuotes
+            self.remoteImageURL = remoteImageURL
             self.resolveContentId = resolveContentId
         }
     }
@@ -128,9 +133,7 @@ private struct Writer {
 
     init(options: MailSanitizer.Options) {
         self.options = options
-        let allowRemote = options.allowRemoteImages
-        let resolve = options.resolveContentId
-        css = CSSSanitizer { raw in Self.imageDecision(raw, allowRemote: allowRemote, resolve: resolve) }
+        css = CSSSanitizer { raw in Self.imageDecision(raw, options: options) }
     }
 
     mutating func write(_ node: HTMLNode, into output: inout String) {
@@ -171,10 +174,10 @@ private struct Writer {
                 output += " href=\"\(HTMLEntities.escape(url))\""
             case "src":
                 guard name == "img" else { continue }
-                switch Self.imageDecision(value, allowRemote: options.allowRemoteImages, resolve: options.resolveContentId) {
+                switch Self.imageDecision(value, options: options) {
                 case .keep(let url):
                     output += " src=\"\(HTMLEntities.escape(url))\""
-                    if url.hasPrefix("http") { output += " referrerpolicy=\"no-referrer\" loading=\"lazy\"" }
+                    if Self.isRemote(value) { output += " referrerpolicy=\"no-referrer\" loading=\"lazy\"" }
                 case .blocked:
                     blockedRemote += 1
                     placeholder = true
@@ -186,7 +189,7 @@ private struct Writer {
             case "background":
                 guard ["table", "td", "th", "tr"].contains(name) else { continue }
                 paintsOwnColors = true
-                switch Self.imageDecision(value, allowRemote: options.allowRemoteImages, resolve: options.resolveContentId) {
+                switch Self.imageDecision(value, options: options) {
                 case .keep(let url): output += " background=\"\(HTMLEntities.escape(url))\""
                 case .blocked: blockedRemote += 1
                 case .drop: break
@@ -264,7 +267,7 @@ private struct Writer {
                 parts.append("color: \(color.adaptiveText(original: color.hexString))")
             case "background":
                 paintsOwnColors = true
-                switch Self.imageDecision(attribute.value, allowRemote: options.allowRemoteImages, resolve: options.resolveContentId) {
+                switch Self.imageDecision(attribute.value, options: options) {
                 case .keep(let url): parts.append("background-image: url(\"\(url.replacingOccurrences(of: "\"", with: "%22"))\")")
                 case .blocked: blockedRemote += 1
                 case .drop: break
@@ -293,7 +296,7 @@ private struct Writer {
         }
     }
 
-    static func imageDecision(_ raw: String, allowRemote: Bool, resolve: (String) -> String?) -> CSSSanitizer.URLDecision {
+    static func imageDecision(_ raw: String, options: MailSanitizer.Options) -> CSSSanitizer.URLDecision {
         var url = cleanURL(raw)
         guard !url.isEmpty else { return .drop }
         if url.hasPrefix("//") { url = "https:" + url }
@@ -301,7 +304,7 @@ private struct Writer {
         case "http", "https":
             let lower = url.lowercased()
             if MailHTMLPolicy.trackerHosts.contains(where: { lower.contains($0) }) { return .drop }
-            return allowRemote ? .keep(url) : .blocked
+            return options.allowRemoteImages ? .keep(options.remoteImageURL(url)) : .blocked
         case "data":
             let lower = url.lowercased()
             let images = ["data:image/png", "data:image/jpeg", "data:image/jpg", "data:image/gif", "data:image/webp",
@@ -311,10 +314,15 @@ private struct Writer {
             var id = String(url.dropFirst(4))
             id = id.removingPercentEncoding ?? id
             if id.hasPrefix("<"), id.hasSuffix(">") { id = String(id.dropFirst().dropLast()) }
-            return resolve(id).map { .keep($0) } ?? .drop
+            return options.resolveContentId(id).map { .keep($0) } ?? .drop
         default:
             return .drop
         }
+    }
+
+    static func isRemote(_ raw: String) -> Bool {
+        let url = cleanURL(raw)
+        return url.hasPrefix("//") || ["http", "https"].contains(scheme(of: url) ?? "")
     }
 
     /// Removes the whitespace and control characters browsers ignore inside URLs, so

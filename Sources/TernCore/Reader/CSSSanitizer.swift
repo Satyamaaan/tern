@@ -9,8 +9,8 @@ struct CSSFindings {
 }
 
 /// Cleans inline `style` attributes and `<style>` sheets from mail. Drops anything that can run code,
-/// load remote content without permission, or escape the message's box; rewrites `html`/`body`
-/// selectors to the message wrapper; and turns plain colors into `light-dark()` pairs so simple mails
+/// load remote content without permission, or reach outside the message; rewrites `html`/`body`
+/// selectors to the message wrappers; and turns plain colors into `light-dark()` pairs so simple mails
 /// read well in dark mode.
 struct CSSSanitizer {
     var urlPolicy: (String) -> URLDecision
@@ -59,8 +59,13 @@ struct CSSSanitizer {
             value.removeSubrange(range)
             value = value.trimmingCharacters(in: .whitespaces)
         }
-        if lower.contains("url(") {
-            guard let rewritten = rewriteURLs(in: value) else { return nil }
+        if Self.mayFetch(lower) {
+            if Self.inertFunctions.contains(where: lower.contains) { return nil }
+            // `var()` and `attr()` could hand `src()` or `image-set()` a string the sanitizer never sees.
+            let takesStrings = lower.contains("src(") || lower.contains("image(") || lower.contains("image-set(")
+                || lower.contains("cross-fade(")
+            if takesStrings, lower.contains("var(") || lower.contains("attr(") { return nil }
+            guard let rewritten = rewriteFetches(in: value) else { return nil }
             value = rewritten
             if property.hasPrefix("background") { findings.paintsOwnColors = true }
         }
@@ -96,34 +101,113 @@ struct CSSSanitizer {
         }
     }
 
-    /// Applies the URL policy to every `url(…)`. Blocked or dropped URLs become `none`.
-    private mutating func rewriteURLs(in value: String) -> String? {
+    /// True when a value calls a function that can load something.
+    static func mayFetch(_ lowercased: String) -> Bool {
+        lowercased.contains("url(") || lowercased.contains("src(") || lowercased.contains("image(")
+            || lowercased.contains("image-set(") || lowercased.contains("cross-fade(")
+            || inertFunctions.contains(where: lowercased.contains)
+    }
+
+    /// Functions mail never needs that can pull in content from elsewhere; a declaration using one is dropped.
+    static let inertFunctions = ["element(", "paint(", "-webkit-canvas("]
+
+    /// Functions whose plain string arguments are image URLs.
+    private static let imageFunctions: Set<String> = [
+        "image-set", "-webkit-image-set", "image", "-webkit-image", "cross-fade", "-webkit-cross-fade",
+    ]
+
+    /// Applies the URL policy everywhere CSS can fetch: `url(…)`, `src(…)`, and the strings `image-set()`,
+    /// `image()` and `cross-fade()` take as images. Blocked or dropped URLs become `none`; a value that
+    /// can't be read safely returns nil.
+    private mutating func rewriteFetches(in value: String) -> String? {
         var output = ""
-        var rest = Substring(value)
-        while let start = rest.range(of: "url(", options: .caseInsensitive) {
-            output += rest[..<start.lowerBound]
-            guard let close = rest[start.upperBound...].firstIndex(of: ")") else { return nil }
-            var raw = rest[start.upperBound..<close].trimmingCharacters(in: .whitespaces)
-            if raw.count >= 2, let first = raw.first, first == "\"" || first == "'", raw.last == first {
-                raw = String(raw.dropFirst().dropLast())
+        var functions: [String] = []
+        var name = ""
+        var index = value.startIndex
+        func readString(_ quote: Character) -> String? {
+            var text = ""
+            index = value.index(after: index)
+            while index < value.endIndex, value[index] != quote {
+                text.append(value[index])
+                index = value.index(after: index)
             }
-            switch urlPolicy(raw) {
-            case .keep(let url): output += "url(\"\(url.replacingOccurrences(of: "\"", with: "%22"))\")"
-            case .blocked:
-                findings.blockedRemote += 1
-                output += "none"
-            case .drop: output += "none"
-            }
-            rest = rest[rest.index(after: close)...]
+            guard index < value.endIndex else { return nil }
+            index = value.index(after: index)
+            return text
         }
-        output += rest
+        while index < value.endIndex {
+            let character = value[index]
+            switch character {
+            case "(":
+                let function = name.lowercased()
+                name = ""
+                index = value.index(after: index)
+                guard function == "url" || function == "src" else {
+                    functions.append(function)
+                    output.append(character)
+                    continue
+                }
+                // `url(` takes everything up to `)`, quoted or not; `src(` takes one string.
+                while index < value.endIndex, value[index].isWhitespace { index = value.index(after: index) }
+                var raw: String
+                if index < value.endIndex, value[index] == "\"" || value[index] == "'" {
+                    guard let text = readString(value[index]) else { return nil }
+                    raw = text
+                } else {
+                    guard function == "url" else { return nil }
+                    raw = ""
+                    while index < value.endIndex, value[index] != ")" {
+                        guard value[index] != "\"", value[index] != "'", value[index] != "(" else { return nil }
+                        raw.append(value[index])
+                        index = value.index(after: index)
+                    }
+                    raw = raw.trimmingCharacters(in: .whitespaces)
+                }
+                while index < value.endIndex, value[index].isWhitespace { index = value.index(after: index) }
+                guard index < value.endIndex, value[index] == ")" else { return nil }
+                index = value.index(after: index)
+                output.removeLast(function.count)
+                output += replacement(for: raw)
+            case ")":
+                if !functions.isEmpty { functions.removeLast() }
+                name = ""
+                output.append(character)
+                index = value.index(after: index)
+            case "\"", "'":
+                guard let text = readString(character) else { return nil }
+                name = ""
+                if let function = functions.last, Self.imageFunctions.contains(function) {
+                    output += replacement(for: text)
+                } else {
+                    output += "\(character)\(text)\(character)"
+                }
+            default:
+                if character.isLetter || character.isNumber || character == "-" || character == "_" {
+                    name.append(character)
+                } else {
+                    name = ""
+                }
+                output.append(character)
+                index = value.index(after: index)
+            }
+        }
         return output
+    }
+
+    private mutating func replacement(for raw: String) -> String {
+        switch urlPolicy(raw) {
+        case .keep(let url): return "url(\"\(url.replacingOccurrences(of: "\"", with: "%22"))\")"
+        case .blocked:
+            findings.blockedRemote += 1
+            return "none"
+        case .drop: return "none"
+        }
     }
 
     // MARK: Style sheets
 
-    /// Sanitizes a whole `<style>` element. Selectors for `html`, `body` and `:root` are pointed at
-    /// `.tern-body`; `@import`, remote `@font-face`, dark-mode media blocks and unknown at-rules go.
+    /// Sanitizes a whole `<style>` element. Selectors for `html`, `body` and `:root` are pointed at the
+    /// message wrappers; `@import`, remote `@font-face`, dark-mode media blocks and unknown at-rules go.
     mutating func stylesheet(_ css: String) -> String {
         let text = Self.stripComments(css)
         var output = ""
@@ -161,7 +245,7 @@ struct CSSSanitizer {
                 case "@font-face":
                     let body = readBlock(text, &index)
                     let lower = body.lowercased()
-                    if !lower.contains("url(") || !lower.contains("http") && !lower.contains("//") {
+                    if !lower.contains("url(") && !lower.contains("src(") || !lower.contains("http") && !lower.contains("//") {
                         let cleaned = declarations(body)
                         if cleaned.lowercased().contains("src") { output += "@font-face {\(cleaned)}\n" }
                     }
@@ -182,15 +266,18 @@ struct CSSSanitizer {
         }
     }
 
-    /// Points document-level selectors at the shadow root: `html` and `:root` become `:host`,
-    /// `body` becomes the message wrapper.
+    /// Points document-level selectors at the message's own wrappers: `html` and `:root` become
+    /// `.tern-root`, `body` becomes `.tern-body`. Selectors that reach the shadow host or the reader
+    /// around it (`:host`, `::part`, `::slotted`) are dropped, so mail can't move or cover Tern's UI.
     static func rewriteSelector(_ selector: String) -> String {
         let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("<"), !trimmed.contains("\\") else { return "" }
+        let lower = trimmed.lowercased()
+        guard !lower.contains(":host"), !lower.contains("::part"), !lower.contains("::slotted") else { return "" }
         let range = NSRange(trimmed.startIndex..., in: trimmed)
         var output = documentSelector.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "$1\u{1}$2")
-        output = output.replacingOccurrences(of: "\u{1}html", with: ":host", options: .caseInsensitive)
-            .replacingOccurrences(of: "\u{1}:root", with: ":host", options: .caseInsensitive)
+        output = output.replacingOccurrences(of: "\u{1}html", with: ".tern-root", options: .caseInsensitive)
+            .replacingOccurrences(of: "\u{1}:root", with: ".tern-root", options: .caseInsensitive)
             .replacingOccurrences(of: "\u{1}body", with: ".tern-body", options: .caseInsensitive)
         return output
     }

@@ -1,8 +1,8 @@
 import AppKit
 import TernCore
 
-// Search as you type: each keystroke cancels the previous query, waits a few milliseconds for the next
-// key, then reads a page of hits on a background thread. Results replace the list, with the matched
+// Search as you type: each keystroke cancels the previous query (interrupting it if it is still
+// reading), waits a few milliseconds for the next key, then reads a page of hits off the main thread. Results replace the list, with the matched
 // words marked; Esc brings the mailbox back. A dropdown under the pill suggests people, labels,
 // projects, operators and recent searches, plus "✦ Ask" when AI is on.
 extension AppModel {
@@ -83,9 +83,15 @@ extension AppModel {
                 guard !Task.isCancelled else { return }
             }
             let interval = Timing.begin("search")
-            let hits = await Task.detached(priority: .userInitiated) {
-                (try? search.searchHits(text, options: options)) ?? []
-            }.value
+            let hits: [SearchHit]
+            do {
+                hits = try await search.interruptibleSearchHits(text, options: options)
+            } catch is CancellationError {
+                Timing.end(interval)
+                return
+            } catch {
+                hits = []
+            }
             Timing.end(interval)
             guard let self, !Task.isCancelled, generation == self.searchGeneration, self.isSearching else { return }
             self.receive(hits, limit: options.limit, reset: debounce)

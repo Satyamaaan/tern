@@ -33,8 +33,8 @@ final class MailNotifications: NSObject, UNUserNotificationCenterDelegate {
         observation = ValueObservation
             .tracking { db in try MailStore.fetchThreadRows(db, in: .unifiedInbox, limit: 40, before: nil) }
             .removeDuplicates()
-            .start(in: services.store.database.reader, scheduling: .async(onQueue: .main),
-                   onError: { NSLog("Tern: notification observation failed: \($0)") },
+            .startRestarting(in: services.store.database.reader, scheduling: .async(onQueue: .main),
+                   onError: { NSLog("Tern: notification observation failed, restarting it: \($0)") },
                    onChange: { [weak self] rows in MainActor.assumeIsolated { self?.receive(rows) } })
     }
 

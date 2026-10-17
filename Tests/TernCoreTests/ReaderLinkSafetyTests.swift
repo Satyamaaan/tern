@@ -36,3 +36,38 @@ import Testing
     #expect(LinkSafety.displayHost("https://Docs.Example.com/a") == "docs.example.com")
     #expect(LinkSafety.displayHost("mailto:x@y.z") == nil)
 }
+
+@Test func followsRedirectorsToTheRealDestination() {
+    // Google's /url, Outlook Safe Links and Proofpoint are judged by where they lead.
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: "https://www.google.com/url?q=https://paypa1.ru/x&sa=D")?.actual == "paypa1.ru")
+    #expect(LinkSafety.mismatch(text: "youtube.com", href: "https://www.google.com/url?q=https%3A%2F%2Fwww.youtube.com%2Fwatch") == nil)
+    let safelinks = "https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.example%2Flogin&data=05%7C01"
+    #expect(LinkSafety.mismatch(text: "chase.com", href: safelinks)?.actual == "evil.example")
+    #expect(LinkSafety.mismatch(text: "evil.example", href: safelinks) == nil)
+    let proofpoint2 = "https://urldefense.proofpoint.com/v2/url?u=https-3A__login.my-2Dbank.example_signin&d=DwMF&c=x"
+    #expect(LinkSafety.mismatch(text: "mybank.com", href: proofpoint2)?.actual == "login.my-bank.example")
+    #expect(LinkSafety.mismatch(text: "my-bank.example", href: proofpoint2) == nil)
+    let proofpoint3 = "https://urldefense.com/v3/__https://phish.example/a*20b__;JQ!!abc$"
+    #expect(LinkSafety.mismatch(text: "microsoft.com", href: proofpoint3)?.actual == "phish.example")
+    #expect(LinkSafety.mismatch(text: "linkedin.com", href: "https://www.linkedin.com/redir/redirect?url=https%3A%2F%2Fevil.example") != nil)
+    #expect(LinkSafety.mismatch(text: "apple.com", href: "https://protect-us.mimecast.com/s/AbC?domain=apple.com") == nil)
+    #expect(LinkSafety.mismatch(text: "apple.com", href: "https://protect-us.mimecast.com/s/AbC?domain=evil.example") != nil)
+    // Wrappers inside wrappers.
+    let nested = "https://nam12.safelinks.protection.outlook.com/?url=" +
+        "https%3A%2F%2Fwww.google.com%2Furl%3Fq%3Dhttps%253A%252F%252Fevil.example"
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: nested)?.actual == "evil.example")
+    #expect(LinkSafety.destination(of: URL(string: nested)!).host == "evil.example")
+}
+
+@Test func userContentHostsAreNotTrustedWholesale() {
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: "https://sites.google.com/view/paypal-verify") != nil)
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: "https://medium.com/@attacker/verify") != nil)
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: "https://attacker.substack.com/p/verify") != nil)
+    #expect(LinkSafety.mismatch(text: "paypal.com", href: "https://www.google.com/url") != nil, "a wrapper without its destination is where it goes")
+    // Opaque mailing-service trackers still pass.
+    #expect(LinkSafety.mismatch(text: "nytimes.com", href: "https://email.mg2.substack.com/c/eJx") == nil)
+    #expect(LinkSafety.mismatch(text: "stripe.com", href: "https://substack.com/redirect/2/garbage") == nil)
+    let payload = Data(#"{"e":"https://evil.example/x"}"#.utf8).base64EncodedString()
+        .replacingOccurrences(of: "=", with: "")
+    #expect(LinkSafety.mismatch(text: "stripe.com", href: "https://substack.com/redirect/2/\(payload).sig")?.actual == "evil.example")
+}

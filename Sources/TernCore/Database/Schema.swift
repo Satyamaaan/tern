@@ -11,6 +11,7 @@ enum Schema {
         migrator.registerMigration("integrate-1", migrate: ProjectExclusion.migrate)
         migrator.registerMigration("fixsync-1", migrate: OpDispatchSchema.migrate)
         migrator.registerMigration("fixsync-2", migrate: LabelCheckSchema.migrate)
+        migrator.registerMigration("fixapp-1", migrate: SnoozeReplies.migrate)
     }
 
     private static func v1Core(_ db: Database) throws {

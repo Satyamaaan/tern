@@ -53,6 +53,8 @@ final class ReaderModel {
 
     /// Senders whose remote images load, shared by every reader.
     private static var trustedSenders: Set<String>?
+    /// Messages whose images the user loaded once, for this run of the app.
+    private static var loadedMessages = Set<MessageKey>()
     private static let signposter = OSSignposter(subsystem: "dev.tern.mail", category: "Reader")
     private static let log = Logger(subsystem: "dev.tern.mail", category: "Reader")
 
@@ -134,10 +136,9 @@ final class ReaderModel {
             return
         }
         renderedSignature = signature
-        let (payload, deferred) = ReaderPayload.make(detail, context: context)
-        engine.setRemoteImages(allowed: detail.messages.contains { ReaderPayload.isTrusted($0, context) })
+        let (payload, loading, deferred) = ReaderPayload.make(detail, context: context)
         engine.render(payload)
-        loadBodies(deferred, key: key, context: context)
+        loadBodies([loading, deferred], key: key, context: context)
         if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
     }
 
@@ -148,7 +149,11 @@ final class ReaderModel {
         let names = Dictionary(labels(for: accountId).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         return ReaderContext(
             accountEmails: emails, accountColorIndex: services?.account(accountId)?.colorIndex ?? 0,
-            labelNames: names, trustedSenders: Self.trustedSenders ?? [], summary: summaryPayload())
+            labelNames: names, trust: trust, summary: summaryPayload())
+    }
+
+    private var trust: ReaderTrust {
+        ReaderTrust(senders: Self.trustedSenders ?? [], messages: Self.loadedMessages, remoteImages: engine.blocksRemoteLoads)
     }
 
     func labels(for accountId: String) -> [MailLabel] {
@@ -158,18 +163,21 @@ final class ReaderModel {
         return labels
     }
 
-    /// Sanitizes collapsed messages off the main thread so expanding one is instant.
-    private func loadBodies(_ messages: [MailMessage], key: ThreadKey, context: ReaderContext) {
-        guard !messages.isEmpty else { return }
-        let work = messages.map { ($0, ReaderPayload.isTrusted($0, context)) }
+    /// Sanitizes bodies off the main thread, a batch at a time: large open ones first, then the collapsed
+    /// ones so expanding one is instant.
+    private func loadBodies(_ batches: [[MailMessage]], key: ThreadKey, context: ReaderContext) {
+        let work = batches.filter { !$0.isEmpty }.map { batch in batch.map { ($0, ReaderPayload.isTrusted($0, context)) } }
+        guard !work.isEmpty else { return }
         Task { [weak self] in
-            let bodies = await Task.detached(priority: .userInitiated) {
-                work.map { ($0.0.id, ReaderBodies.shared.body(for: $0.0, trusted: $0.1)) }
-            }.value
-            guard let self, self.key == key else { return }
-            var payload: [String: Any] = [:]
-            for (id, body) in bodies { payload[id] = ReaderPayload.bodyPayload(body) }
-            self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": payload])
+            for batch in work {
+                let bodies = await Task.detached(priority: .userInitiated) {
+                    batch.map { ($0.0.id, ReaderBodies.shared.body(for: $0.0, trusted: $0.1)) }
+                }.value
+                guard let self, self.key == key else { return }
+                var payload: [String: Any] = [:]
+                for (id, body) in bodies { payload[id] = ReaderPayload.bodyPayload(body) }
+                self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": payload])
+            }
         }
     }
 
@@ -179,13 +187,11 @@ final class ReaderModel {
         guard let services, !keys.isEmpty else { return }
         services.prefetchBodies?(keys)
         let store = services.store
-        let trusted = Self.trustedSenders ?? []
-        let mine = Set(services.accounts.map { $0.email.lowercased() })
+        let trust = trust
         Task.detached(priority: .utility) {
             for key in keys.prefix(4) {
                 guard let detail = try? store.threadDetail(key), let target = ReaderPayload.targetMessage(detail) else { continue }
-                let sender = target.fromEmail.lowercased()
-                _ = ReaderBodies.shared.body(for: target, trusted: trusted.contains(sender) || mine.contains(sender) || sender == key.accountId)
+                _ = ReaderBodies.shared.body(for: target, trusted: trust.allows(target))
             }
         }
     }
@@ -203,6 +209,8 @@ final class ReaderModel {
         case "needBody":
             if let id = message["id"] as? String { sendBody(id) }
         case "loadImages":
+            if let id = message["id"] as? String { loadImages(messageId: id) }
+        case "alwaysImages":
             if let sender = message["sender"] as? String { trustImages(from: sender) }
         case "attachment":
             attachmentEvent(message)
@@ -233,12 +241,30 @@ final class ReaderModel {
         Self.renderObserver?(key, milliseconds)
     }
 
+    /// A body the page asked for (a collapsed message opened before its body arrived), sanitized off
+    /// the main thread unless it is cached.
     private func sendBody(_ id: String) {
         guard let key, let detail, let message = detail.messages.first(where: { $0.id == id }) else { return }
-        let body = ReaderBodies.shared.body(for: message, trusted: ReaderPayload.isTrusted(message, context(for: detail)))
-        engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+        let trusted = ReaderPayload.isTrusted(message, context(for: detail))
+        if let body = ReaderBodies.shared.cachedBody(for: message, trusted: trusted) {
+            engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+            return
+        }
+        Task { [weak self] in
+            let body = await Task.detached(priority: .userInitiated) { ReaderBodies.shared.body(for: message, trusted: trusted) }.value
+            guard let self, self.key == key else { return }
+            self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+        }
     }
 
+    /// "Load images": this message only.
+    private func loadImages(messageId: String) {
+        guard let detail, let key, let message = detail.messages.first(where: { $0.id == messageId }) else { return }
+        Self.loadedMessages.insert(message.key)
+        receive(detail, for: key)
+    }
+
+    /// "Always load from …": every message from this sender, except in Spam.
     private func trustImages(from sender: String) {
         let sender = sender.lowercased()
         guard !sender.isEmpty, let services else { return }
@@ -263,7 +289,9 @@ final class ReaderModel {
             hoverLink = ReaderHoverLink(destination: String(href.dropFirst("mailto:".count)).components(separatedBy: "?")[0].removingPercentEncoding ?? href)
         case "http", "https", "tel":
             let warning = LinkSafety.mismatch(text: text, href: href).map { "Opens \($0.actual), not \($0.shown)" }
-            hoverLink = ReaderHoverLink(destination: href, warning: warning)
+            // Through a known redirector (Google, Safe Links, Proofpoint…) the pill shows where it leads.
+            let destination = url.scheme?.lowercased() == "tel" ? href : LinkSafety.destination(of: url).absoluteString
+            hoverLink = ReaderHoverLink(destination: destination, warning: warning)
         default:
             hoverLink = nil
         }

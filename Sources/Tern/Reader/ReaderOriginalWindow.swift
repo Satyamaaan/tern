@@ -4,7 +4,9 @@ import TernCore
 /// "Show original": the headers we store and both bodies, unrendered, in a monospaced window.
 @MainActor
 enum ReaderOriginalWindow {
-    private static var open: [NSWindow] = []
+    /// Open windows and their close observers; both go when the window closes.
+    private static var open: [ObjectIdentifier: (window: NSWindow, observer: any NSObjectProtocol)] = [:]
+    static var openCount: Int { open.count }
 
     static func show(_ message: MailMessage, attachments: [MailAttachment]) {
         let window = NSWindow(
@@ -25,11 +27,24 @@ enum ReaderOriginalWindow {
         }
         window.contentView = scroll
         window.center()
+        track(window)
         window.makeKeyAndOrderFront(nil)
-        open.append(window)
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-            MainActor.assumeIsolated { open.removeAll { $0 === window } }
+    }
+
+    /// Keeps `window` alive until it closes, then lets it go.
+    static func track(_ window: NSWindow) {
+        let id = ObjectIdentifier(window)
+        let observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { closed(id) }
         }
+        open[id] = (window, observer)
+    }
+
+    private static func closed(_ id: ObjectIdentifier) {
+        guard let entry = open.removeValue(forKey: id) else { return }
+        NotificationCenter.default.removeObserver(entry.observer)
     }
 
     static func source(_ message: MailMessage, attachments: [MailAttachment]) -> String {

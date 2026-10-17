@@ -41,6 +41,8 @@ private enum Perf {
             "from:github is:unread", "in:inbox the", "in:inbox t", "has:attachment invoice", "from:maya roadmap", "subject:invoice",
             "subject:the", "is:unread the", "from:github the", "category:people the", "label:finance the", "from:the",
             "to:alex the", "cc:maya", "bcc:maya", "newer_than:30d the", "before:2025/06/01 the", "account:northwind the",
+            "from:maya newer_than:7d", "from:github older_than:1y", "has:attachment newer_than:30d", "is:unread from:maya after:2026/09/01",
+            "roadmap before:2025/06/01", "the newer_than:2d",
         ]),
         ("negation, OR, groups", [
             "-the", "the -a", "roadmap -review", "from:github OR from:linear", "(invoice OR receipt) the",
@@ -245,5 +247,28 @@ struct SearchSpeed {
             print(String(format: "stress %-30@ %4d results p50 %5.1f p95 %5.1f", "'\(query)'" as NSString, timing.results, timing.p50, timing.p95))
             #expect(timing.p95 <= Perf.budgetMs * 2, "stress '\(query)' p95 \(timing.p95) ms")
         }
+    }
+
+    /// A query superseded by the next keystroke stops reading instead of finishing in the background.
+    @Test(.enabled(if: !Perf.skip, "TERN_SKIP_PERF=1"))
+    func supersededSearchesStopReading() async throws {
+        let search = SearchService(try Perf.database())
+        // Relevance over a word in most messages, a full page: tens of milliseconds of reading.
+        let query = "(the OR a OR to) (you OR i) older_than:1d"
+        let options = SearchOptions(limit: 500, sort: .relevance)
+        let started = ContinuousClock.now
+        let all = try await search.interruptibleSearchHits(query, options: options)
+        let full = ContinuousClock.now - started
+        #expect(!all.isEmpty)
+
+        let interrupted = ContinuousClock.now
+        let task = Task { try await search.interruptibleSearchHits(query, options: options) }
+        try await Task.sleep(for: .milliseconds(2))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        let stopped = ContinuousClock.now - interrupted
+        print("superseded search: full \(full), cancelled after 2 ms stopped in \(stopped)")
+        #expect(stopped < full, "the interrupted read ended early")
+        #expect(try await search.interruptibleSearchHits("roadmap").isEmpty == false, "the connection works again")
     }
 }

@@ -1,14 +1,45 @@
 import AppKit
 import TernCore
 
+/// Which messages may load remote images. The From header can be forged, so it never decides alone:
+/// your own mail is recognised by Gmail's SENT label, a sender you chose never counts in Spam, and
+/// "Load images" on a message covers only that message.
+struct ReaderTrust: Sendable {
+    /// Lowercased senders the user chose "Always load images" for.
+    var senders: Set<String> = []
+    /// Messages the user loaded images in once.
+    var messages: Set<MessageKey> = []
+    /// False when the reader can't block remote loads; then no message gets its images.
+    var remoteImages = true
+
+    func allows(_ message: MailMessage) -> Bool {
+        guard remoteImages else { return false }
+        return Self.isOwn(message) || messages.contains(message.key) || trustsSender(of: message)
+    }
+
+    /// Images load for this message only, so the reader offers to always load them from its sender.
+    func loadedOnce(_ message: MailMessage) -> Bool {
+        remoteImages && messages.contains(message.key) && !Self.isOwn(message) && !trustsSender(of: message)
+            && !message.labelIds.contains(SystemLabel.spam)
+    }
+
+    private func trustsSender(of message: MailMessage) -> Bool {
+        senders.contains(message.fromEmail.lowercased()) && !message.labelIds.contains(SystemLabel.spam)
+    }
+
+    /// Sent or drafted from this account, by Gmail's labels rather than the From address.
+    static func isOwn(_ message: MailMessage) -> Bool {
+        message.labelIds.contains(SystemLabel.sent) || message.isDraft
+    }
+}
+
 /// What the payload needs besides the thread itself.
 struct ReaderContext {
     var accountEmails: Set<String>
     var accountColorIndex: Int
     /// Gmail label id → name, for the thread's account.
     var labelNames: [String: String]
-    /// Lowercased senders whose remote images load.
-    var trustedSenders: Set<String>
+    var trust: ReaderTrust
     var summary: [String: Any]
     var now = Date()
 
@@ -23,17 +54,31 @@ enum ReaderPayload {
         return sent.last(where: \.isUnread) ?? sent.last ?? detail.messages.last
     }
 
-    static func make(_ detail: ThreadDetail, context: ReaderContext) -> (payload: [String: Any], deferred: [MailMessage]) {
+    /// Bodies up to this many bytes are sanitized while building the payload (a few milliseconds);
+    /// bigger ones that aren't cached yet are sanitized off the main thread and arrive after the first paint.
+    static let inlineSanitizeLimit = 100_000
+
+    /// The payload, and the messages whose bodies are sanitized off the main thread: open ones still
+    /// loading (`loading`), and the collapsed ones (`deferred`).
+    static func make(_ detail: ThreadDetail, context: ReaderContext)
+        -> (payload: [String: Any], loading: [MailMessage], deferred: [MailMessage]) {
         let target = targetMessage(detail)
         var messages: [[String: Any]] = []
+        var loading: [MailMessage] = []
         var deferred: [MailMessage] = []
         for message in detail.messages {
             let expanded = message.id == target?.id || detail.messages.count == 1
             var item = messagePayload(message, detail: detail, context: context)
             item["expanded"] = expanded
             item["target"] = message.id == target?.id
-            if expanded {
-                item["body"] = bodyPayload(ReaderBodies.shared.body(for: message, trusted: isTrusted(message, context)))
+            let trusted = isTrusted(message, context)
+            if expanded, let body = ReaderBodies.shared.cachedBody(for: message, trusted: trusted)
+                ?? (bodyLength(message) <= inlineSanitizeLimit ? ReaderBodies.shared.body(for: message, trusted: trusted) : nil) {
+                item["body"] = bodyPayload(body)
+            } else if expanded {
+                // The page shows the snippet and waits for `setBodies` instead of asking for it.
+                item["bodyLoading"] = true
+                loading.append(message)
             } else {
                 deferred.append(message)
             }
@@ -46,7 +91,7 @@ enum ReaderPayload {
             "summary": context.summary,
             "messages": messages,
         ]
-        return (payload, deferred)
+        return (payload, loading, deferred)
     }
 
     static func header(_ detail: ThreadDetail, context: ReaderContext) -> [String: Any] {
@@ -54,7 +99,7 @@ enum ReaderPayload {
     }
 
     static func isTrusted(_ message: MailMessage, _ context: ReaderContext) -> Bool {
-        context.trustedSenders.contains(message.fromEmail.lowercased()) || context.isMe(message.fromEmail)
+        context.trust.allows(message)
     }
 
     static func bodyPayload(_ mail: SanitizedMail) -> [String: Any] {
@@ -65,7 +110,7 @@ enum ReaderPayload {
     static func signature(_ detail: ThreadDetail, context: ReaderContext) -> String {
         var parts = [detail.thread.key.description]
         for message in detail.messages {
-            parts.append("\(message.id):\(message.bodyState.rawValue):\(bodyLength(message)):\(message.isDraft):\(isTrusted(message, context))")
+            parts.append("\(message.id):\(message.bodyState.rawValue):\(bodyLength(message)):\(message.isDraft):\(isTrusted(message, context)):\(context.trust.loadedOnce(message))")
         }
         parts.append(String(detail.attachments.values.reduce(0) { $0 + $1.count }))
         return parts.joined(separator: "|")
@@ -119,6 +164,7 @@ enum ReaderPayload {
             "unread": message.isUnread,
             "draft": message.isDraft,
             "imagesAllowed": isTrusted(message, context),
+            "imagesOnce": context.trust.loadedOnce(message),
             "bodyVersion": "\(message.bodyState.rawValue):\(bodyLength(message))",
             "attachments": attachments,
         ]
@@ -224,10 +270,21 @@ final class ReaderBodies: @unchecked Sendable {
     /// Bodies are kept until they add up to this many bytes of markup.
     private let budget = 48 * 1_024 * 1_024
 
-    func body(for message: MailMessage, trusted: Bool) -> SanitizedMail {
-        let key = Key(
-            accountId: message.accountId, messageId: message.id,
+    /// The sanitized body if it is already cached.
+    func cachedBody(for message: MailMessage, trusted: Bool) -> SanitizedMail? {
+        let key = Self.key(message, trusted: trusted)
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    private static func key(_ message: MailMessage, trusted: Bool) -> Key {
+        Key(accountId: message.accountId, messageId: message.id,
             version: "\(message.bodyState.rawValue):\(ReaderPayload.bodyLength(message))", trusted: trusted)
+    }
+
+    func body(for message: MailMessage, trusted: Bool) -> SanitizedMail {
+        let key = Self.key(message, trusted: trusted)
         lock.lock()
         if let cached = storage[key] {
             lock.unlock()
@@ -253,9 +310,12 @@ final class ReaderBodies: @unchecked Sendable {
     static func sanitize(_ message: MailMessage, trusted: Bool) -> SanitizedMail {
         if let html = message.bodyHtml, !html.isEmpty {
             let account = message.accountId, id = message.id
-            return MailSanitizer.sanitize(html: html, options: .init(allowRemoteImages: trusted) { contentId in
+            let options = MailSanitizer.Options(
+                allowRemoteImages: trusted, remoteImageURL: ReaderRemoteImages.readerURL(for:)
+            ) { contentId in
                 MailSanitizer.contentIdURL(accountId: account, messageId: id, contentId: contentId)
-            })
+            }
+            return MailSanitizer.sanitize(html: html, options: options)
         }
         if let text = message.bodyText, !text.isEmpty { return PlainTextMail.html(text) }
         var placeholder = PlainTextMail.html(message.snippet)
