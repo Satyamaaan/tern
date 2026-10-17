@@ -23,16 +23,17 @@ struct MainView: View {
                         .transition(.move(edge: .leading))
                     Hairline(vertical: true)
                 }
-                if model.listOnly {
-                    if model.readerExpanded {
-                        ReaderColumn()
-                    } else {
-                        ListColumn(leadingInset: model.prefs.sidebarCollapsed ? 64 : 0)
-                    }
-                } else {
-                    ListColumn(leadingInset: model.prefs.sidebarCollapsed ? 64 : 0)
-                        .frame(width: listWidth)
+                // The list keeps one place in the view tree in every layout, so the table (and its
+                // scroll position) survives ⌘⇧\ and ⌘\.
+                let listHidden = model.listOnly && model.readerExpanded
+                ListColumn(leadingInset: model.prefs.sidebarCollapsed ? 64 : 0)
+                    .frame(width: model.listOnly ? (listHidden ? 0 : max(available, 0)) : listWidth)
+                    .clipped()
+                    .allowsHitTesting(!listHidden)
+                if !model.listOnly {
                     ColumnDivider(width: listWidth, available: available)
+                }
+                if !model.listOnly || model.readerExpanded {
                     ReaderColumn()
                 }
             }

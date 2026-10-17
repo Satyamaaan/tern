@@ -200,7 +200,9 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let selected = model.isSelected(key)
         var result = RowModel(row: row, style: style)
         result.isSelected = selected
-        result.hasFocusRing = key == model.cursor && model.focus == .list && table.window?.isKeyWindow != false && !model.searchFieldFocused
+        // Offscreen renders (snapshots) draw the ring as if the window were key.
+        let windowActive = table.window.map { $0.isKeyWindow || !$0.isVisible } ?? true
+        result.hasFocusRing = key == model.cursor && model.focus == .list && windowActive && !model.searchFieldFocused
         result.isHovered = index == hoveredRow
         if model.scope == .all, let account = model.account(key.accountId), model.accounts.count > 1 {
             result.accountColor = Theme.accountColor(account.colorIndex)
@@ -289,6 +291,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let centerY = style == .oneLine ? rect.midY : rect.minY + 18
         hoverBar.rootView = RowHoverBar(model: model, keys: targets(for: key))
         hoverBar.frame = CGRect(x: rect.maxX - ThreadRowView.inset - 6 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
+        // Row views are added after the bar; keep the bar on top of them.
+        if table.subviews.last !== hoverBar { table.addSubview(hoverBar, positioned: .above, relativeTo: nil) }
         hoverBar.isHidden = false
     }
 
@@ -306,7 +310,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     /// Right-click or `…`: select the row (unless it is already part of the selection), then show every action.
     func actionMenu(forRow row: Int) -> NSMenu? {
         guard let key = key(atRow: row), let registry = model.registry else { return nil }
-        if !model.isSelected(key) { model.click(key, command: false, shift: false) }
+        if !model.isSelected(key) { model.select(key) }
         return ThreadMenu.make(registry: registry, model: model)
     }
 }

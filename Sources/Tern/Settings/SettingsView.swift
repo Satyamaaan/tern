@@ -293,7 +293,7 @@ private struct AISettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Tern runs AI through a command-line tool you already use, on this Mac, with your own account. Mail never goes to Tern's servers; there are none.")
+            Text("Tern runs AI through a command-line tool you already use, signed in with your own account. The text it needs goes to that provider; Tern has no servers of its own.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
                 .fixedSize(horizontal: false, vertical: true)

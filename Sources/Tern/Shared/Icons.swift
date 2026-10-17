@@ -36,6 +36,18 @@ enum Icon: String, CaseIterable {
     private static let cache: [Icon: CGPath] = Dictionary(uniqueKeysWithValues: Icon.allCases.map { ($0, SVGPath.parse($0.svg)) })
 }
 
+extension Icon {
+    /// The icon as a template image, for places that only take images (menu labels, AppKit buttons).
+    func image(size: CGFloat = 15, lineWidth: CGFloat = 1.6) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { rect in
+            self.draw(in: rect, color: .black, lineWidth: lineWidth)
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+}
+
 /// A stroked line icon for SwiftUI.
 struct IconView: View {
     let icon: Icon

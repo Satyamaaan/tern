@@ -40,6 +40,7 @@ final class SelfCheck {
         scope()
         keys()
         paletteSearch()
+        if ProcessInfo.processInfo.environment["TERN_CHECK_MENUS"] == "1" { printMenus() }
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
     }
@@ -193,6 +194,21 @@ final class SelfCheck {
         palette.query = "mtp"
         check("fuzzy 'mtp' finds Move to Project", palette.flatItems.contains { $0.title == "Move to Project…" })
         palette.close()
+    }
+
+    private func printMenus() {
+        let menu = MainMenu(registry: registry).build()
+        for top in menu.items {
+            print("[\(top.title)]")
+            for item in top.submenu?.items ?? [] {
+                if item.isSeparatorItem { print("  ---"); continue }
+                var key = item.keyEquivalent
+                if key == "\r" { key = "↵" } else if key == "\u{1b}" { key = "esc" } else if key == "\t" { key = "⇥" }
+                let mods = item.keyEquivalentModifierMask
+                let prefix = (mods.contains(.control) ? "⌃" : "") + (mods.contains(.option) ? "⌥" : "") + (mods.contains(.shift) ? "⇧" : "") + (mods.contains(.command) ? "⌘" : "")
+                print("  \(item.title)\(key.isEmpty ? "" : "   \(prefix)\(key)")\(item.toolTip.map { "   (\($0))" } ?? "")")
+            }
+        }
     }
 
     // MARK: Timings

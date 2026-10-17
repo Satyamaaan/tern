@@ -221,12 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 extension AppModel {
     /// Shows a thread from outside the list (notification, mailto): selects it if listed, else opens it.
     func reveal(_ key: ThreadKey) {
-        if snapshot.rows[key] != nil {
-            setCursor(key, open: true)
-        } else {
-            pendingCursor = key
-            setCursor(key, open: true)
-        }
+        if snapshot.rows[key] == nil { pendingCursor = key }
+        checked = []
+        setCursor(key, open: true)
         focus = .reader
     }
 }

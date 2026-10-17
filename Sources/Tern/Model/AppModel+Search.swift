@@ -4,7 +4,7 @@ import TernCore
 // Search as you type: each keystroke cancels the previous query, waits a few milliseconds for the next
 // key, then reads on a background thread. Results replace the list; Esc brings the mailbox back.
 extension AppModel {
-    nonisolated static let searchDebounce: UInt64 = 12_000_000
+    nonisolated static let searchDebounce: UInt64 = 8_000_000
     nonisolated static let searchLimit = 200
 
     /// `/`: focus the search pill.

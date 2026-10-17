@@ -266,6 +266,13 @@ final class AppModel {
         }
     }
 
+    /// Moves the cursor to a row without opening it (right-click, drag).
+    func select(_ key: ThreadKey) {
+        focus = .list
+        checked = []
+        setCursor(key, open: false)
+    }
+
     /// x: adds or removes the cursor thread from the selection.
     func toggleChecked() {
         guard let cursor else { return }

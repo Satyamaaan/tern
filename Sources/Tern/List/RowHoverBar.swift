@@ -13,9 +13,9 @@ struct RowHoverBar: View {
             Menu {
                 SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
             } label: {
-                IconView(icon: .snoozed, size: 14)
-                    .frame(width: 24, height: 22)
-                    .contentShape(Rectangle())
+                // Menu labels on macOS only render text and images.
+                Image(nsImage: Icon.snoozed.image(size: 14))
+                    .foregroundStyle(Color(Theme.text2))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
