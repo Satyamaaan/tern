@@ -1,11 +1,13 @@
 import Foundation
 
 /// The formatting a draft body can hold: paragraphs, bulleted and numbered items and quotes, each a run
-/// of text with bold, italic, underline and links. The editor maps it to an attributed string; mail
-/// goes out as the clean HTML from `html`.
+/// of text with bold, italic, underline and links, and inline images the draft carries as `cid:` files.
+/// The editor maps it to an attributed string; mail goes out as the clean HTML from `html`.
 public struct RichText: Hashable, Sendable {
     /// U+2028, a line break inside one block (Shift-Return, `<br>`).
     public static let lineBreak: Character = "\u{2028}"
+    /// U+FFFC, the text of an image run.
+    public static let imageCharacter: Character = "\u{FFFC}"
 
     public struct Style: OptionSet, Hashable, Sendable {
         public let rawValue: Int
@@ -21,11 +23,20 @@ public struct RichText: Hashable, Sendable {
         public var style: Style
         /// Absolute URL string.
         public var link: String?
+        /// For an inline image, its `src` (`cid:…`, a file the draft carries); its text is one
+        /// `imageCharacter`.
+        public var image: String?
 
-        public init(_ text: String, style: Style = [], link: String? = nil) {
+        public init(_ text: String, style: Style = [], link: String? = nil, image: String? = nil) {
             self.text = text
             self.style = style
             self.link = link
+            self.image = image
+        }
+
+        /// An inline image showing `source`.
+        public static func image(_ source: String, link: String? = nil) -> Run {
+            Run(String(RichText.imageCharacter), link: link, image: source)
         }
     }
 
@@ -64,6 +75,7 @@ public struct RichText: Hashable, Sendable {
         return blocks.map { block in
             number = block.kind == .numbered ? number + 1 : 0
             let text = block.text.replacingOccurrences(of: String(Self.lineBreak), with: "\n")
+                .replacingOccurrences(of: String(Self.imageCharacter), with: "")
             switch block.kind {
             case .paragraph: return text
             case .bullet: return "• " + text
@@ -121,7 +133,7 @@ public struct RichText: Hashable, Sendable {
     // MARK: HTML out
 
     /// Clean HTML: `<div>` per paragraph (an empty one is `<div><br></div>`, like Gmail), `<ul>/<ol>/<li>`,
-    /// `<blockquote>`, `<strong>`, `<em>`, `<u>`, `<a href>` and `<br>`.
+    /// `<blockquote>`, `<strong>`, `<em>`, `<u>`, `<a href>`, `<img src>` and `<br>`.
     public var html: String {
         var out = ""
         var index = 0
@@ -159,6 +171,11 @@ public struct RichText: Hashable, Sendable {
             while end < runs.count, runs[end].link == link { end += 1 }
             var inner = ""
             for run in runs[index..<end] {
+                if let image = run.image {
+                    inner += "<img src=\"\(escapeAttribute(image))\" alt=\"\">"
+                    atStart = false
+                    continue
+                }
                 var text = escapeText(run.text, atStart: atStart)
                 if !run.text.isEmpty { atStart = run.text.last == lineBreak }
                 if run.style.contains(.underline) { text = "<u>\(text)</u>" }
@@ -175,11 +192,11 @@ public struct RichText: Hashable, Sendable {
         return out
     }
 
-    /// Joins neighbouring runs with the same style and link; drops empty runs.
+    /// Joins neighbouring text runs with the same style and link; drops empty runs.
     static func merged(_ runs: [Run]) -> [Run] {
         var result: [Run] = []
         for run in runs where !run.text.isEmpty {
-            if let last = result.last, last.style == run.style, last.link == run.link {
+            if let last = result.last, last.image == nil, run.image == nil, last.style == run.style, last.link == run.link {
                 result[result.count - 1].text += run.text
             } else {
                 result.append(run)

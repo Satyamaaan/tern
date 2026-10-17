@@ -269,6 +269,26 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
         #expect(message.children[1].mimeType == "application/pdf")
     }
 
+    @Test func anEditedDraftSendsItsInlineImageInline() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47] + Array(repeating: 7, count: 80))
+        let path = try temporaryFile("chart.png", png)
+        let stored = Draft(accountId: "a", toList: [Participant(email: "x@example.com")], subject: "Numbers",
+                           bodyHtml: #"<div dir="ltr">Here:<div><img src="cid:ii_chart" alt="chart.png" width="400"></div></div>"#,
+                           attachments: [DraftAttachment(path: path, filename: "chart.png", mimeType: "image/png", size: png.count,
+                                                         contentId: "ii_chart")])
+        var content = DraftContent(stored: stored)
+        content.body.blocks.append(RichText.Block(.paragraph, [RichText.Run("Thoughts?")]))
+        let (text, message) = try build(content.assembledDraft())
+        checkLines(text)
+
+        #expect(message.mimeType == "multipart/alternative", "the image isn't a separate attachment")
+        let related = message.children[1]
+        #expect(related.children.map(\.mimeType) == ["text/html", "image/png"])
+        #expect(related.children[1].header("Content-ID") == "<ii_chart>")
+        #expect(related.children[0].text.contains(#"<img src="cid:ii_chart" alt="">"#))
+        #expect(related.children[0].text.contains("Thoughts?"))
+    }
+
     @Test func draftEncoderAddsSenderNameAndReplyHeaders() throws {
         let store = try MailStore(AppDatabase.inMemory())
         try store.database.writer.write { db in

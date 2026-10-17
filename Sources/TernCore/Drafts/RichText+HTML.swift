@@ -3,9 +3,11 @@ import Foundation
 extension RichText {
     /// Reads HTML into the supported formatting, dropping everything else (styles, images, tables become
     /// paragraphs, scripts and heads disappear). Fast and forgiving; meant for our own drafts, pasted
-    /// HTML, signatures and AI output, not for rendering arbitrary mail.
-    public init(html: String) {
+    /// HTML, signatures and AI output, not for rendering arbitrary mail. With `keepingImages`, images
+    /// shown from a file the draft carries (`<img src="cid:…">`) stay, as image runs.
+    public init(html: String, keepingImages: Bool = false) {
         var builder = HTMLBuilder()
+        builder.keepsImages = keepingImages
         for token in DraftHTMLTokenizer(html) { builder.consume(token) }
         self.init(builder.finish())
     }
@@ -203,6 +205,7 @@ private struct HTMLBuilder {
     private var preDepth = 0
     private var skipDepth = 0
     private var skipTag: String?
+    var keepsImages = false
 
     private static let blockTags: Set<String> = [
         "div", "p", "li", "ul", "ol", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "table",
@@ -274,6 +277,12 @@ private struct HTMLBuilder {
             preDepth += 1
             return
         case "hr":
+            return
+        case "img":
+            if keepsImages, let source = attributes["src"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               source.lowercased().hasPrefix("cid:"), source.count > 4 {
+                appendImage(source)
+            }
             return
         case "td", "th":
             // Cells of one row read as one paragraph, separated by spaces.
@@ -368,11 +377,16 @@ private struct HTMLBuilder {
         guard !text.isEmpty else { return }
         if current.runs.isEmpty, current.kind == .paragraph, quoteDepth > 0 { current.kind = .quote }
         let style = style, link = link
-        if let last = current.runs.last, last.style == style, last.link == link {
+        if let last = current.runs.last, last.image == nil, last.style == style, last.link == link {
             current.runs[current.runs.count - 1].text += text
         } else {
             current.runs.append(RichText.Run(text, style: style, link: link))
         }
+    }
+
+    private mutating func appendImage(_ source: String) {
+        if current.runs.isEmpty, current.kind == .paragraph, quoteDepth > 0 { current.kind = .quote }
+        current.runs.append(.image(source, link: link))
     }
 
     /// Ends the current block. A block holding only a `<br>` is an empty line; one with nothing is dropped.

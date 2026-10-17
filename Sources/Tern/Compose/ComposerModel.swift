@@ -53,6 +53,8 @@ final class ComposerModel: Identifiable {
     @ObservationIgnored private var tokenFields: [RecipientKind: WeakTokenField] = [:]
     @ObservationIgnored let signaturePreview: String?
     @ObservationIgnored private(set) lazy var quotePreview: String = quoteHtml.map(Self.preview(ofQuote:)) ?? ""
+    /// Inline images fetched from Gmail, by `src`, for drafts whose files are still in the original.
+    @ObservationIgnored var fetchedImages: [String: NSImage] = [:]
 
     // MARK: Opening
 
@@ -91,7 +93,9 @@ final class ComposerModel: Identifiable {
             insets: mode == .window ? NSSize(width: 20, height: 12) : NSSize(width: 16, height: 10),
             minTextHeight: mode == .window ? 120 : 60)
 
+        editor.imageSource = { [weak self] source in self?.inlineImage(source) }
         editor.richText = content.body
+        fetchInlineImages(in: content.body)
         if let prefill = Self.takePrefill(services, kind: content.draft.kind, thread: content.draft) {
             editor.richText = content.body.isEmpty ? prefill : RichText(content.body.blocks + [RichText.Block()] + prefill.blocks)
             dirty = true
