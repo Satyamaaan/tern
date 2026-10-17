@@ -23,7 +23,7 @@ struct ReaderOpenCost {
     }
 
     func context() -> ReaderContext {
-        ReaderContext(accountEmails: [account.email], accountColorIndex: 0, labelNames: [:], trust: ReaderTrust(), summary: [:])
+        ReaderContext(accountEmails: [account.email], labelNames: [:], trust: ReaderTrust(), summary: [:])
     }
 
     /// Best of five cold opens (fresh message ids each time, so no sanitized body is cached).

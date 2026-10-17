@@ -42,9 +42,10 @@
 
   function headerHTML(p) {
     let html = `<header class="head"><h1 class="subject">${esc(p.subject || '(no subject)')}</h1><div class="chips">`;
+    // `icon` is Tern's own SVG from the app (never mail content); everything else is escaped.
     for (const chip of p.chips || []) {
       const style = chip.color ? ` style="--chip:${esc(chip.color)}"` : '';
-      html += `<span class="chip ${esc(chip.kind || '')}"${style}>${esc(chip.text)}</span>`;
+      html += `<span class="chip ${esc(chip.kind || '')}"${style}>${chip.icon || ''}<span>${esc(chip.text)}</span></span>`;
     }
     return html + `</div>${summaryHTML(p.summary)}</header>`;
   }
@@ -52,11 +53,11 @@
   function summaryHTML(s) {
     if (!s || s.state === 'none') return '<div class="summary" hidden></div>';
     if (s.state === 'action') {
-      return `<div class="summary action" data-act="summary"><span class="spark">✦</span><span class="text">${esc(s.label || 'Summarize')}</span></div>`;
+      return `<div class="summary action" data-act="summary"><span class="spark">${ICON_SPARK}</span><span class="text">${esc(s.label || 'Summarize')}</span></div>`;
     }
     if (s.state === 'loading') {
       const line = s.text ? `<p>${esc(s.text)}</p>` : '<p>Summarizing…</p>';
-      return `<div class="summary loading"><span class="spark">✦</span><div class="text">${line}</div></div>`;
+      return `<div class="summary loading"><span class="spark">${ICON_SPARK}</span><div class="text">${line}</div></div>`;
     }
     const clickable = s.expandable ? ' clickable' : '';
     let body;
@@ -65,24 +66,31 @@
     } else {
       body = `<p>${esc(s.text || '')}${s.expandable ? '<span class="fold">More</span>' : ''}</p>`;
     }
-    return `<div class="summary${clickable}" data-act="summary"><span class="spark">✦</span><div class="text">${body}</div></div>`;
+    return `<div class="summary${clickable}" data-act="summary"><span class="spark">${ICON_SPARK}</span><div class="text">${body}</div></div>`;
+  }
+
+  /// The sender's logo when the app has one (a `data:` URL it built), else their initials.
+  function avatarHTML(m) {
+    const logo = state.logos[m.email];
+    const inner = logo ? `<img src="${esc(logo)}" alt="">` : esc(m.initials);
+    return `<span class="av${logo ? ' logo' : ''}" data-email="${esc(m.email)}">${inner}</span>`;
   }
 
   function lineHTML(m) {
     const draft = m.draft ? '<span class="draft">Draft</span>' : '';
-    return `<div class="line" data-act="toggle"><span class="av" style="--hue:${esc(m.hue)}">${esc(m.initials)}</span>` +
+    return `<div class="line" data-act="toggle">${avatarHTML(m)}` +
       `<span class="from">${esc(m.from)}</span>${draft}<span class="snip">${esc(m.snippet)}</span>` +
-      `<time class="date mono">${esc(m.date)}</time></div>`;
+      `<time class="date">${esc(m.date)}</time></div>`;
   }
 
   function headHTML(m) {
     const address = m.email && m.email !== m.from ? `<span class="addr">${esc(m.email)}</span>` : '';
     let details = '';
     for (const [label, value] of m.details || []) details += `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`;
-    return `<div class="mhead" data-act="collapse"><span class="av" style="--hue:${esc(m.hue)}">${esc(m.initials)}</span>` +
+    return `<div class="mhead" data-act="collapse">${avatarHTML(m)}` +
       `<div class="who"><div class="row1"><span class="name">${esc(m.from)}</span>${address}</div>` +
       `<span class="to" data-act="details">${esc(m.toLine)}${ICON_CHEVRON}</span></div>` +
-      `<time class="date mono" title="${esc(m.dateFull)}">${esc(m.dateLong || m.date)}</time></div>` +
+      `<time class="date" title="${esc(m.dateFull)}">${esc(m.dateLong || m.date)}</time></div>` +
       `<dl class="details" hidden>${details}</dl>`;
   }
 
@@ -115,7 +123,7 @@
     let html = '<div class="atts">';
     for (const a of m.attachments) {
       html += `<div class="att" tabindex="0" data-att="${esc(a.id)}" title="${esc(a.name)}">${a.kind === 'image' ? ICON_IMAGE : ICON_FILE}` +
-        `<span class="name">${esc(a.name)}</span><span class="size mono">${esc(a.size)}</span></div>`;
+        `<span class="name">${esc(a.name)}</span><span class="size">${esc(a.size)}</span></div>`;
     }
     return html + '</div>';
   }
@@ -163,7 +171,7 @@
     const started = performance.now();
     const previous = state && state.key === p.key ? state : null;
     state = {
-      key: p.key, payload: p, messages: new Map(), expanded: new Set(), bodies: new Map(),
+      key: p.key, payload: p, messages: new Map(), expanded: new Set(), bodies: new Map(), logos: p.logos || {},
       openQuotes: previous ? previous.openQuotes : new Set(), focus: previous ? previous.focus : -1,
       showAll: previous ? previous.showAll : false,
     };
@@ -497,6 +505,19 @@
         }
       }
     },
+    /// Sender logos that arrived after the paint: swaps only the matching avatars, so scroll position,
+    /// open messages and focus stay as they are.
+    setLogos(key, logos) {
+      if (!state || state.key !== key) return;
+      for (const [email, logo] of Object.entries(logos)) {
+        if (state.logos[email] === logo) continue;
+        state.logos[email] = logo;
+        root().querySelectorAll(`.av[data-email="${CSS.escape(email)}"]`).forEach((element) => {
+          element.classList.add('logo');
+          element.innerHTML = `<img src="${esc(logo)}" alt="">`;
+        });
+      }
+    },
     setTheme(theme) { document.documentElement.dataset.theme = theme; },
     next() { move(1); },
     previous() { move(-1); },
@@ -519,7 +540,7 @@
     },
     clear() { state = null; root().innerHTML = ''; window.scrollTo(0, 0); },
     fontsReady() {
-      return Promise.all(['400 13px Inter', '500 13px Inter', '600 13px Inter', '600 22px "Inter Display"']
+      return Promise.all(['400 13px Inter', '500 13px Inter', '600 13px Inter', '600 24px "Inter Display"']
         .map((font) => document.fonts.load(font))).then(() => true);
     },
   };

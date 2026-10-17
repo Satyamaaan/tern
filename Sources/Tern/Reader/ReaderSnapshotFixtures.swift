@@ -81,6 +81,8 @@ enum ReaderSnapshotFixtures {
                            summary: "Maya needs your sign-off on the SOW before Thursday; the schedule is now 40/30/30 and the first milestone moves to Nov 14.",
                            messageCount: 4))
         fixtures.append(Fixture(name: "reply-chain", key: key("fx-chain")))
+        // Full width over the list: the column stays 720 pt and centred.
+        fixtures.append(Fixture(name: "reply-chain-wide", key: key("fx-chain"), width: 1_180))
 
         // Plain text with a quote, links and a signature.
         message("fx-plain", thread: "fx-plain", from: Participant(name: "Priya Raman", email: "priya@brightpath.co"), to: [me],
@@ -151,7 +153,26 @@ enum ReaderSnapshotFixtures {
         try store.upsertMessages(messages, attachments: attachments)
         try store.database.writer.write { db in for item in ai { try item.upsert(db) } }
         try store.setProject("proj-lumen", on: [key("fx-chain")], assigned: true)
+        _ = try store.perform(.snooze(until: now.addingTimeInterval(20 * 3_600)), on: [key("fx-cid")])
         return fixtures
+    }
+
+    /// A stand-in sender logo: a letter on a colour, as PNG.
+    static func logo(_ letter: String, _ color: UInt32) -> Data {
+        let size = NSSize(width: 64, height: 64)
+        let image = NSImage(size: size, flipped: false) { rect in
+            Theme.rgb(color).setFill()
+            rect.fill()
+            let text = NSAttributedString(string: letter, attributes: [
+                .font: NSFont.systemFont(ofSize: 34, weight: .bold), .foregroundColor: NSColor.white,
+            ])
+            let bounds = text.size()
+            text.draw(at: NSPoint(x: (rect.width - bounds.width) / 2, y: (rect.height - bounds.height) / 2))
+            return true
+        }
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return Data() }
+        return png
     }
 
     /// A PNG bar chart standing in for the downloaded inline image.

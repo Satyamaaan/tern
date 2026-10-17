@@ -62,7 +62,7 @@ struct MainView: View {
                 ColumnDivider(width: listWidth, available: available)
                     .offset(x: listWidth)
             }
-            ReaderColumn(surface: pane ? Theme.raised : Theme.bg)
+            ReaderColumn(surface: pane ? Theme.raised : Theme.bg, onBack: pane ? nil : { model.back() })
                 .frame(width: pane ? max(available - listWidth - 1, 0) : available)
                 .offset(x: pane ? listWidth + 1 : (readerShown || reduceMotion ? 0 : 12))
                 .opacity(readerShown ? 1 : 0)
@@ -174,13 +174,15 @@ struct ReaderColumn: View {
     @Environment(AppModel.self) private var model
     /// `raised` beside the list, `bg` over it.
     var surface: NSColor = Theme.raised
+    /// The ← button, shown while the reader covers the list.
+    var onBack: (() -> Void)?
 
     var body: some View {
         Group {
             if model.checked.count > 1 {
                 MultiSelectionView(count: model.checked.count)
             } else {
-                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition)
+                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

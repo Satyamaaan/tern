@@ -17,28 +17,37 @@ struct ReaderPosition {
     }
 }
 
-/// The right-hand pane: one conversation. Pass the neighbours in `prefetch` (next and previous rows)
-/// so moving to them is instant.
+/// One conversation, either full width over the list or in the side pane. Pass the neighbours in
+/// `prefetch` (next and previous rows) so moving to them is instant, and `onBack` when the reader covers
+/// the list. The container sets the surface; the reader itself draws no background.
 struct ReaderView: View {
     let key: ThreadKey?
     var prefetch: [ThreadKey]
     var position: ReaderPosition?
+    var onBack: (() -> Void)?
 
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
     @State private var model = ReaderModel()
 
-    init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil) {
+    /// The page's reading column (720 pt of content plus 32 pt each side); the bars below match it.
+    static let columnWidth: CGFloat = 784
+    static let columnPadding: CGFloat = 32
+
+    init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil, onBack: (() -> Void)? = nil) {
         self.key = key
         self.prefetch = prefetch
         self.position = position
+        self.onBack = onBack
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ReaderTopBar(model: model, position: position)
+            ReaderTopBar(model: model, position: position, onBack: onBack)
             if model.findVisible, key != nil {
                 ReaderFindBar(model: model)
+                    .readerColumn()
+                    .padding(.bottom, 8)
             }
             ZStack(alignment: .bottomLeading) {
                 ReaderWebHost(webView: model.engine.webView)
@@ -64,15 +73,17 @@ struct ReaderView: View {
                     // The card takes the reply pill's place and grows with its text.
                     InlineComposerView(request: request, onClose: { model.composing = nil })
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 32)
+                        .readerColumn()
                         .padding(.top, 10)
                         .padding(.bottom, 18)
                 } else {
                     ReaderReplyBar(model: model)
+                        .readerColumn()
+                        .padding(.top, 10)
+                        .padding(.bottom, 18)
                 }
             }
         }
-        .background(Color(Theme.raised))
         .onChange(of: key, initial: true) {
             model.attach(services)
             model.show(key, prefetch: prefetch)
@@ -98,6 +109,15 @@ struct ReaderWebHost: NSViewRepresentable {
     }
 }
 
+extension View {
+    /// Centres the view in the reader's reading column, so the bars line up with the page.
+    func readerColumn() -> some View {
+        padding(.horizontal, ReaderView.columnPadding)
+            .frame(maxWidth: ReaderView.columnWidth)
+            .frame(maxWidth: .infinity)
+    }
+}
+
 final class ReaderWebContainer: NSView {
     func host(_ webView: NSView) {
         guard webView.superview !== self else { return }
@@ -113,26 +133,33 @@ final class ReaderWebContainer: NSView {
 struct ReaderTopBar: View {
     @Bindable var model: ReaderModel
     let position: ReaderPosition?
+    var onBack: (() -> Void)?
+    /// Shows the "12 of 48" controls without hovering (snapshot harness).
+    static var alwaysShowPosition = false
 
     @Environment(AppServices.self) private var services
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 2) {
-            if let position, hovering, model.key != nil {
-                ReaderIconButton(symbol: "chevron.left", help: "Previous conversation  K") { position.previous?() }
+            if let onBack {
+                ReaderIconButton(icon: .back, help: "Back to list  Esc", action: onBack)
+                    .padding(.trailing, 4)
+            }
+            if let position, hovering || Self.alwaysShowPosition, model.key != nil {
+                ReaderIconButton(icon: .chevronLeft, help: "Previous conversation  K") { position.previous?() }
                     .disabled(position.previous == nil)
                 Text("\(position.index) of \(position.total)")
                     .font(.numeric(12))
                     .foregroundStyle(Color(Theme.text3))
                     .padding(.horizontal, 4)
-                ReaderIconButton(symbol: "chevron.right", help: "Next conversation  J") { position.next?() }
+                ReaderIconButton(icon: .chevronRight, help: "Next conversation  J") { position.next?() }
                     .disabled(position.next == nil)
             }
             Spacer(minLength: 0)
             if let key = model.key {
-                ReaderIconButton(symbol: "checkmark", help: "Done  E") { model.perform(.archive) }
-                ReaderMenuButton(symbol: "clock", help: "Snooze  H") {
+                ReaderIconButton(icon: .done, help: "Done  E") { model.perform(.archive) }
+                ReaderMenuButton(icon: .snoozed, help: "Snooze  H") {
                     SnoozeMenuItems(threads: [key]) { model.pickingSnoozeDate = true }
                 }
                 .popover(isPresented: $model.pickingSnoozeDate, arrowEdge: .bottom) {
@@ -141,10 +168,10 @@ struct ReaderTopBar: View {
                         model.perform(.snooze(until: date))
                     }
                 }
-                ReaderMenuButton(symbol: "ellipsis", help: "More") { moreMenu }
+                ReaderMenuButton(icon: .ellipsis, help: "More") { moreMenu }
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .frame(height: 52)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -188,27 +215,21 @@ struct ReaderTopBar: View {
     }
 }
 
-/// A 28 px icon button with a hover fill.
+/// A 28 px icon button with a 16 px glyph in `text2` and a hover fill.
 struct ReaderIconButton: View {
-    let symbol: String
+    let icon: Icon
     let help: String
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(Color(Theme.text2))
-                .frame(width: Theme.Control.regular, height: Theme.Control.regular)
-        }
-        .buttonStyle(IconButtonStyle())
-        .help(help)
+        IconButton(icon: icon, size: Theme.Control.regular, iconSize: 16, help: help, action: action)
     }
 }
 
-/// A 28 px icon button that opens a menu.
+/// A 28 px icon button that opens a menu. Menu labels drop custom views on macOS, so the glyph is a
+/// template image.
 struct ReaderMenuButton<Items: View>: View {
-    let symbol: String
+    let icon: Icon
     let help: String
     @ViewBuilder let items: () -> Items
 
@@ -216,8 +237,7 @@ struct ReaderMenuButton<Items: View>: View {
 
     var body: some View {
         Menu(content: items) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .regular))
+            Image(nsImage: icon.image(size: 16))
                 .foregroundStyle(Color(Theme.text2))
         }
         .menuStyle(.button)
@@ -263,9 +283,7 @@ struct ReaderFindBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
-                .foregroundStyle(Color(Theme.text3))
+            IconView(icon: .search, size: 15, color: Color(Theme.text3))
             TextField("Find in conversation", text: $model.findText)
                 .textFieldStyle(.plain)
                 .font(.ui(13))
@@ -284,16 +302,14 @@ struct ReaderFindBar: View {
             if model.findFailed {
                 Text("No matches").font(.ui(12)).foregroundStyle(Color(Theme.text3))
             }
-            ReaderIconButton(symbol: "chevron.up", help: "Previous match  ⇧⌘G") { model.find(backwards: true) }
-            ReaderIconButton(symbol: "chevron.down", help: "Next match  ⌘G") { model.find() }
-            ReaderIconButton(symbol: "xmark", help: "Close  Esc") { model.closeFind() }
+            IconButton(icon: .chevronUp, size: Theme.Control.small, iconSize: 15, help: "Previous match  ⇧⌘G") { model.find(backwards: true) }
+            IconButton(icon: .chevronDown, size: Theme.Control.small, iconSize: 15, help: "Next match  ⌘G") { model.find() }
+            IconButton(icon: .close, size: Theme.Control.small, iconSize: 15, help: "Close  Esc") { model.closeFind() }
         }
         .padding(.leading, 10)
-        .padding(.trailing, 2)
+        .padding(.trailing, 4)
         .frame(height: 32)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
-        .padding(.horizontal, 32)
-        .padding(.bottom, 8)
         .onAppear { focused = true }
     }
 }
@@ -304,9 +320,12 @@ struct ReaderLinkPill: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let warning = link.warning {
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .font(.ui(11, .medium))
-                    .foregroundStyle(Color(Theme.ink))
+                HStack(spacing: 5) {
+                    IconView(icon: .warning, size: 13, color: Color(Theme.ink))
+                    Text(warning)
+                }
+                .font(.ui(11, .medium))
+                .foregroundStyle(Color(Theme.ink))
             }
             Text(link.destination)
                 .font(.ui(11))
@@ -317,9 +336,9 @@ struct ReaderLinkPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous)
                 .fill(Color(Theme.raised))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1)))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1)))
         .frame(maxWidth: 520, alignment: .leading)
         .padding(8)
         .allowsHitTesting(false)
@@ -354,8 +373,7 @@ struct ReaderReplyBar: View {
         HStack(spacing: 8) {
             Button { model.reply(all: false) } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "arrowshape.turn.up.left")
-                        .font(.system(size: 12))
+                    IconView(icon: .reply, size: 15, color: Color(Theme.text3))
                     Text(model.replyName.map { "Reply to \($0)…" } ?? "Reply…")
                         .lineLimit(1)
                 }
@@ -375,9 +393,6 @@ struct ReaderReplyBar: View {
                 }
             }
         }
-        .padding(.horizontal, 32)
-        .padding(.top, 10)
-        .padding(.bottom, 18)
         .onHover { inside in
             hovering = inside
             if inside { model.requestQuickReplies() }
@@ -395,7 +410,7 @@ struct ReaderQuickReply: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text("✦").foregroundStyle(Color(Theme.text3))
+                IconView(icon: .sparkles, size: 13, color: Color(Theme.text3))
                 Text(text).foregroundStyle(Color(hovering ? Theme.text1 : Theme.text2)).lineLimit(1)
             }
             .font(.ui(13))

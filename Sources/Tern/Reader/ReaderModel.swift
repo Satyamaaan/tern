@@ -46,10 +46,16 @@ final class ReaderModel {
     @ObservationIgnored private var findPrepared = false
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var labelsByAccount: [String: [MailLabel]] = [:]
+    /// The sender logos the page shows for the open thread, by lowercased address.
+    @ObservationIgnored private var renderedLogos: [String: String] = [:]
     /// Called after each thread is painted, with its open time (snapshot harness, speed checks).
     static var renderObserver: ((ThreadKey, Double) -> Void)?
     /// Time the page spent building the last thread's DOM, in milliseconds.
     private(set) static var lastBuildMilliseconds: Double = 0
+    #if DEBUG
+    /// Stands in for `SenderLogos` in the snapshot harness.
+    static var logoOverride: ((String) -> Data?)?
+    #endif
 
     /// Senders whose remote images load, shared by every reader.
     private static var trustedSenders: Set<String>?
@@ -69,6 +75,7 @@ final class ReaderModel {
         guard self.services == nil else { return }
         self.services = services
         services.reader.model = self
+        observeLogos()
         if Self.trustedSenders == nil { Self.trustedSenders = (try? services.store.imageAllowedSenders()) ?? [] }
     }
 
@@ -114,6 +121,7 @@ final class ReaderModel {
         selectedAttachment = nil
         findPrepared = false
         renderedSignature = nil
+        renderedLogos = [:]
         pickingSnoozeDate = false
         if let openInterval { Self.signposter.endInterval("Open thread", openInterval) }
         openInterval = nil
@@ -129,13 +137,17 @@ final class ReaderModel {
             return
         }
         self.detail = detail
-        let context = context(for: detail)
+        var context = context(for: detail)
         let signature = ReaderPayload.signature(detail, context: context)
         guard signature != renderedSignature else {
             engine.run("Tern.updateHeader(h)", ["h": ReaderPayload.header(detail, context: context)])
             return
         }
         renderedSignature = signature
+        let senders = ReaderPayload.logoSenders(detail)
+        for sender in senders { SenderLogos.shared.want(sender) }
+        context.logos = logos(for: senders)
+        renderedLogos = context.logos
         let (payload, loading, deferred) = ReaderPayload.make(detail, context: context)
         engine.render(payload)
         loadBodies([loading, deferred], key: key, context: context)
@@ -147,13 +159,44 @@ final class ReaderModel {
         var emails = Set((services?.accounts ?? []).map { $0.email.lowercased() })
         emails.insert(accountId.lowercased())
         let names = Dictionary(labels(for: accountId).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-        return ReaderContext(
-            accountEmails: emails, accountColorIndex: services?.account(accountId)?.colorIndex ?? 0,
-            labelNames: names, trust: trust, summary: summaryPayload())
+        return ReaderContext(accountEmails: emails, labelNames: names, trust: trust, summary: summaryPayload())
     }
 
     private var trust: ReaderTrust {
         ReaderTrust(senders: Self.trustedSenders ?? [], messages: Self.loadedMessages, remoteImages: engine.blocksRemoteLoads)
+    }
+
+    // MARK: Sender logos
+
+    private func logos(for senders: [String]) -> [String: String] {
+        #if DEBUG
+        if let override = Self.logoOverride { return ReaderPayload.logos(senders, lookup: override) }
+        #endif
+        return ReaderPayload.logos(senders) { SenderLogos.shared.pngData(forEmail: $0) }
+    }
+
+    /// Follows `SenderLogos.revision` for as long as this model lives.
+    private func observeLogos() {
+        withObservationTracking {
+            _ = SenderLogos.shared.revision
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshLogos()
+                self.observeLogos()
+            }
+        }
+    }
+
+    /// Logos that arrived after the paint go to the page avatar by avatar, without a re-render.
+    func refreshLogos() {
+        guard let key, let detail, renderedSignature != nil else { return }
+        let missing = ReaderPayload.logoSenders(detail).filter { renderedLogos[$0] == nil }
+        guard !missing.isEmpty else { return }
+        let arrived = logos(for: missing)
+        guard !arrived.isEmpty else { return }
+        renderedLogos.merge(arrived) { $1 }
+        engine.run("Tern.setLogos(k, l)", ["k": key.description, "l": arrived])
     }
 
     func labels(for accountId: String) -> [MailLabel] {
@@ -466,7 +509,7 @@ final class ReaderModel {
         engine.run("Tern.setSummary(k, s)", ["k": key.description, "s": summaryPayload()])
     }
 
-    /// The ✦ line: summarize on first click (2–4 bullets), then fold and unfold.
+    /// The summary line: summarize on first click (2–4 bullets), then fold and unfold.
     func summaryClicked() {
         guard let key else { return }
         switch summary {
@@ -495,7 +538,7 @@ final class ReaderModel {
         }
     }
 
-    /// Fetches up to three ✦ quick replies, once per thread. Never blocks the reader.
+    /// Fetches up to three quick replies, once per thread. Never blocks the reader.
     func requestQuickReplies(after delay: Double = 0) {
         guard quickReplyTask == nil, quickReplies.isEmpty, let key, let ai = services?.ai else { return }
         quickReplyTask = Task { [weak self] in
