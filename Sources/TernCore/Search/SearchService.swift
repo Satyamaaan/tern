@@ -40,6 +40,18 @@ public struct SearchService: Sendable {
         try run(query, options, resolveHits: true)
     }
 
+    /// `searchHits` for search as you type: cancelling the calling task interrupts the query on its own
+    /// connection (other reads and writes go on) and throws `CancellationError`.
+    public func interruptibleSearchHits(_ text: String, options: SearchOptions = SearchOptions()) async throws -> [SearchHit] {
+        let query = SearchQuery(text)
+        guard !query.isEmpty else { return [] }
+        do {
+            return try await database.reader.read { db in try Self.run(db, query, options, resolveHits: true) }
+        } catch let error as DatabaseError where error.isInterruptionError {
+            throw CancellationError()
+        }
+    }
+
     /// Merges the full-text index into one segment. Searching works without it; run it now and then while idle
     /// (e.g. after a big backfill) to keep the index compact. Can take a few seconds on a large mailbox.
     public func optimizeIndex() throws {
@@ -50,18 +62,20 @@ public struct SearchService: Sendable {
 
     private func run(_ query: SearchQuery, _ options: SearchOptions, resolveHits: Bool) throws -> [SearchHit] {
         guard !query.isEmpty else { return [] }
+        return try database.reader.read { db in try Self.run(db, query, options, resolveHits: resolveHits) }
+    }
+
+    private static func run(_ db: Database, _ query: SearchQuery, _ options: SearchOptions, resolveHits: Bool) throws -> [SearchHit] {
         let limit = max(1, min(options.limit, 500))
-        return try database.reader.read { db in
-            guard let compiled = try SearchCompiler(db, options: options).compile(query), !compiled.isImpossible else {
-                return []
-            }
-            let executor = SearchExecutor(db: db, compiled: compiled, limit: limit)
-            let found = switch options.sort {
-            case .newest: try executor.run(try executor.choosePlan(), resolveMatches: resolveHits)
-            case .relevance: try executor.runRanked()
-            }
-            let rows = try MailStore.fetchThreadRows(db, keys: found.map(\.key))
-            return try executor.hits(rows: rows, found: found, resolve: resolveHits)
+        guard let compiled = try SearchCompiler(db, options: options).compile(query), !compiled.isImpossible else {
+            return []
         }
+        let executor = SearchExecutor(db: db, compiled: compiled, limit: limit)
+        let found = switch options.sort {
+        case .newest: try executor.run(try executor.choosePlan(), resolveMatches: resolveHits)
+        case .relevance: try executor.runRanked()
+        }
+        let rows = try MailStore.fetchThreadRows(db, keys: found.map(\.key))
+        return try executor.hits(rows: rows, found: found, resolve: resolveHits)
     }
 }

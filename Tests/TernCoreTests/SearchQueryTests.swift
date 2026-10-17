@@ -294,6 +294,19 @@ private func makeFixture() throws -> Fixture {
     #expect(try !f.ids("older_than:30d").contains("ta"))
 }
 
+@Test func cancelledSearchesThrowCancellationNotAnError() async throws {
+    let f = try makeFixture()
+    let task = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await f.search.interruptibleSearchHits("roadmap", options: f.options())
+    }
+    await #expect(throws: CancellationError.self) { try await task.value }
+    #expect(try await f.search.interruptibleSearchHits("roadmap", options: f.options()).map(\.row.thread.id) == ["t9", "t1", "t10"])
+    // Cancelling interrupts only the search's own connection: writes go on.
+    try f.store.upsertMessages([message(acme, "mz", thread: "tz", daysAgo: 0, from: ("Zoe", "zoe@z.dev"), subject: "Zebra", body: "z", labels: ["INBOX"])])
+    #expect(try f.ids("zebra") == ["tz"])
+}
+
 @Test func beforeAndAfterUseTheGivenTimeZone() throws {
     let f = try makeFixture()
     // t1 is 3 days before 2026-10-17T12:00Z: 2026-10-14T12:00Z.
