@@ -1,68 +1,109 @@
 # Tern — visual spec
 
-Direction: **"Cap & Beak"**, named for the Arctic tern's white body and black cap. Chalk and charcoal
-neutrals and **one neutral ink** (near-black in light, near-white in dark) for primary buttons and everything
-that means *this needs you*. The interface itself has no hue: colour only appears in data (account dots,
-project and category chips, mail content). Geist for the interface, and a single serif voice (Newsreader) in
-two places: the open thread's subject and empty states. Flat surfaces separated by hairlines, small 6 px
-corners, no shadows at rest. Calm like ChatGPT/Codex, Linear and Vercel, never the stock macOS look. Research
-behind it: `research.md`. Visual reference: `mockup.html` (open it in a browser).
+Direction: **list first**. The window is the mail list: tabs across the title bar, one calm line per
+conversation in a centred column, a small floating bar at the bottom. Opening a thread lays it over the list;
+Esc puts the list back exactly as it was. Chalk and charcoal neutrals with **one neutral ink** (near-black in
+light, near-white in dark) for primary buttons and everything that means *this needs you*. Colour appears only
+as a small hue on **tab and tag icons** (and in mail itself). One typeface, **Inter**, and one icon set,
+**Hugeicons Stroke Rounded**. Flat surfaces separated by hairlines, small corners, shadows only on floating
+things. Calm like Linear and ChatGPT, never the stock macOS look. Research behind the original direction:
+`research.md`. Visual reference: the offscreen renders (`--snapshot`, see "Checking it" below); the old static
+`mockup.html` is retired.
 
 Hard rules
-- Never a colored bar down one side of a row, card or callout. Status = a dot or a chip.
-- No hue in the chrome. "Needs you" reads through ink vs grey, fill vs ring, weight and position, never colour.
-- Nothing is a pill. Only avatars, status dots and the Flock are round.
-- At most three visible actions in any area. Everything else lives in one `…` menu or ⌘K.
+- Never a coloured bar down one side of a row, card or callout. Status is a dot or a tag.
+- Buttons, text and dots are neutral ink. Hue lives only on tab and tag icons; "needs reply" stays ink.
+- Nothing is a pill. Only avatars, status dots and the account stack are round.
+- At most three visible actions in any area. Everything else lives in one `…` menu or ⌘K; secondary controls
+  appear on hover.
 - Every action has a shortcut; ⌘K lists each command with its key.
 - No spinners or skeletons for cached mail. No white flash when HTML mail loads.
-- No pointer cursor, no hover highlight on everything (web tells). Hover only on rows and icon buttons.
+- No pointer cursor, no hover highlight on everything (web tells). Hover only on rows, tabs and icon buttons.
 
 ## Tokens
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| `bg` window / list | `#FFFFFF` | `#141414` |
+| `bg` window, list, reader over the list | `#FFFFFF` | `#141414` |
 | `sidebar` | `#F6F6F5` | `#0E0E0E` |
-| `raised` reader card, popovers | `#FFFFFF` | `#1A1A1A` |
+| `raised` reading pane, bottom bar, popovers | `#FFFFFF` | `#1A1A1A` |
 | `hover` | `#F1F1EF` | `#1F1F1F` |
-| `selected` | `#EBEBE8` | `#272727` |
-| `hairline` | `#E6E6E2` | `#2A2A2A` |
-| `hairlineStrong` | `#D6D6D1` | `#3A3A3A` |
+| `selected` selected row, active tab | `#EBEBE8` | `#272727` |
+| `hairline` row separators | `#E6E6E2` | `#2A2A2A` |
+| `hairlineStrong` tag outlines, field focus, bars | `#D6D6D1` | `#3A3A3A` |
 | `text1` | `#161616` | `#ECECEA` |
-| `text2` | `#5F5F5A` | `#A3A39E` |
-| `text3` | `#74746E` | `#85857F` |
-| `ink` primary fill, unread / needs-reply dots, Flock, focus ring, links | `#18181B` | `#EDEDEA` |
-| `inkHover` primary under the pointer | `#2E2E33` | `#D9D9D5` |
-| `inkPressed` primary while pressed | `#45454B` | `#C4C4BF` |
-| `inkSoft` needs-reply chip bg | `#E4E4E0` | `#303030` |
+| `text2` previews, tag labels, icons | `#5F5F5A` | `#A3A39E` |
+| `text3` times, counts, date headers | `#74746E` | `#85857F` |
+| `ink` primary fill, unread dots, needs-reply icon, focus ring, links | `#18181B` | `#EDEDEA` |
+| `inkHover` / `inkPressed` | `#2E2E33` / `#45454B` | `#D9D9D5` / `#C4C4BF` |
+| `inkSoft` | `#E4E4E0` | `#303030` |
 | `onInk` label on an `ink` fill | `#FFFFFF` | `#141414` |
+| `avatarFill` / `avatarText` letter avatars | `#E8E8E4` / `#55554F` | `#2E2E2E` / `#B4B4AE` |
 
 On a selected row, `text3` text switches to `text2`. Search matches get an `ink` 13% mark behind the word.
-The ✦ AI glyph is `text2`/`text3`, never a colour. Errors are `ink` 500 text (no red); invalid recipients get a
-dashed `text2` outline. Destructive confirmations stay in `NSAlert` with the system's destructive button.
+The AI sparkle icon is `text3`. Errors are `ink` 500 text (no red). Destructive confirmations stay in `NSAlert`.
 
-Chips: 12% tint background, coloured text, radius 4, height 18, Geist 11/16 weight 500.
+### Where hue is allowed
 
-| Category | Light | Dark |
+Tab and tag icons only, 12–14 px, never their text, never a fill:
+
+| Icon | Light | Dark |
 | --- | --- | --- |
-| needs reply | `ink` on `inkSoft`, with a 5 px `ink` dot before the text | same tokens |
-| newsletter | `#6E5BD0` | `#A89BF5` |
-| receipt | `#23764A` | `#5CCB91` |
-| notification | `#5E6B7A` | `#94A3B3` |
-| calendar | `#2F6FD8` | `#78A8FF` |
-| promotion | `#96620E` | `#E0B04F` |
-| security | `#B4232F` | `#FF8A93` |
+| Important (tag) | `#7C5CDB` | `#A78BFA` |
+| People (person) | `#2F6FD8` | `#6EA2FF` |
+| Newsletter (leaf) | `#1E9E5A` | `#4CC38A` |
+| Notification (bell) | `#C98500` | `#F0B429` |
+| Receipt (invoice) | `#138A7E` | `#3CC8B4` |
+| Calendar | `#4F5BD5` | `#8C95FF` |
+| Promotion (discount tag) | `#DD6B1D` | `#FF9E57` |
+| Security (shield) | `#C2334A` | `#FF6B81` |
+| Needs reply, All, Other, labels, searches | `ink` / `text2` / `text3` | same |
+| Project | the project's colour (Graphite, Blue, Green, Violet, Sand, Rose, Teal, Slate) | same |
 
-Account hues (dot / monogram, muted): `#4F7CAC` `#8A6FB3` `#3E9A86` `#8F7F62` `#B05C7A` `#6B7F4A`.
-Project colours (icon tint + 12% tint chip), indices 0–7: Graphite `#6B6B66`, Blue `#2F6FD8`, Green `#23764A`,
-Violet `#8A6FB3`, Sand `#8F7F62`, Rose `#B05C7A`, Teal `#3E9A86`, Slate `#5E6B7A`.
+Account hues (`#4F7CAC #8A6FB3 #3E9A86 #8F7F62 #B05C7A #6B7F4A`) tint letter avatars, softly (18% light,
+32% dark, initials in the hue darkened or lightened), and only when several accounts share a list.
 
-Radii (`Theme.Radius`): **chip 4** (chips, recipient tokens, keycaps, count badges, search marks, `•••`) ·
-**control 6** (buttons, icon buttons, fields, search, segmented controls, attachment chips) · **row 6** (list,
-sidebar, menu and palette rows) · **overlay 8** (toasts, chord HUD, formatting bar) · **card 10** (⌘K,
-dropdowns, popovers, composer card, shortcut sheet, rich mail card). Corners use the continuous style.
-Spacing: 4 px grid. Overlay shadow only (palette, menus, toasts): `0 8 30 rgba(0,0,0,.14)` light, `.5` dark.
-Never a shadow on a button.
+### Radius and spacing
+
+`Theme.Radius`: **chip 4** (tags, recipient tokens, keycaps, search marks) · **control 6** (buttons, icon
+buttons, tabs, fields) · **row 6** (row, sidebar, menu and palette fills) · **overlay 8** (toasts, the chord
+HUD, the search field, small overlays) · **card 10** (⌘K, popovers, the composer card, the bottom bar).
+Continuous corners. 4 px grid. Overlay shadow (palette, menus, toasts): `0 8 30 rgba(0,0,0,.14)` light, `.5`
+dark; the bottom bar rests lower (`0 4 12`, `.12` / `.5`). Never a shadow on a button.
+
+## Type: Inter
+
+Bundled in `Resources/Fonts` (OFL): Inter Regular, Medium, SemiBold and Inter Display SemiBold (the optical
+size for large text). Registered at launch. `Theme.ui(size, weight)` for text, `Theme.numeric(size, weight)`
+for anything with figures that should line up (Inter's tabular figures, `tnum`), `Theme.display(size)` for
+headlines. No serif, no monospace in the interface (mail's own `<pre>` keeps a system monospace).
+
+| Use | Font |
+| --- | --- |
+| UI default, row text | Inter 13/18 |
+| Row sender | Inter 13, 600 unread, 400 read |
+| Row subject | Inter 13, 500 unread, 400 read; preview 400 `text2` |
+| Small, meta, tags | Inter 11.5–12, tags 500 |
+| Date headers | Inter 10.5 500, +0.9 tracking, caps, `text3`, centred |
+| Section caps (sidebar) | Inter 11 500, +0.6 tracking, `text3` |
+| Times, counts, keycaps | Inter 12 tabular (`numeric`) |
+| Tabs | Inter 13, 500 active / 400 others; count 12 tabular `text3` |
+| Open thread subject | **Inter Display SemiBold 23/30**, −0.3 tracking |
+| Empty states, headlines | Inter Display SemiBold 17–20 (onboarding 30), −0.2 to −0.5 tracking |
+| Reading body (plain text mail) | Inter 14/22, max line 680 |
+
+## Icons: Hugeicons Stroke Rounded
+
+The free Hugeicons set (MIT). `scripts/hugeicons.py` reads the npm package `@hugeicons/core-free-icons` as data
+and writes `Sources/Tern/Shared/Hugeicons.swift` (one `Icon` case per icon Tern uses, as path data on the 24
+grid) plus the reader page's few inline SVGs. To add one: add a line to `ICONS` and run the script.
+
+- Drawn at stroke 1.5 on the 24 grid, scaled (1 pt at 16 pt), round caps and joins, tinted by the caller:
+  `IconView` (SwiftUI), `Icon.draw(in:color:)` (AppKit rows), `Icon.image(size:)` (template images for menus
+  and SwiftUI `Menu` labels), `Icon.svgMarkup` (the reader page).
+- Sizes: 16 in buttons, tabs 14, sidebar 16, row glyphs 14, tag icons 12, inline 11–12.
+- Default colour `text2`; quiet `text3`; ink only for compose and needs reply. Hue only per the table above.
+- No SF Symbols anywhere in the app.
 
 ## Buttons
 
@@ -70,137 +111,139 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 
 | | Height | Padding | Label | Rest | Hover | Pressed |
 | --- | --- | --- | --- | --- | --- | --- |
-| primary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
-| secondary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | 1 px `hairlineStrong` border | `hover` fill | `selected` fill |
-| quiet | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
-| icon | 28 × 28 (24 in rows) | — | 13–15 px glyph, `text2` | nothing | `hover` fill | `selected` fill |
-| link | text | — | Geist Medium 12, `ink` | — | underline | 60 % |
+| primary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
+| secondary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | 1 px `hairlineStrong` border | `hover` fill | `selected` fill |
+| quiet | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
+| icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | `hover` fill | `selected` fill |
+| link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
-All radius 6. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity,
-no hover. At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule
-into Send and a send-later chevron; each half steps to `inkHover` / `inkPressed` on its own. Segmented
-controls: a 28 pt `selected` track (2 px inset), the chosen segment `raised` with a `hairlineStrong` border,
-radius 4 inside 6. Switches are tinted `ink`.
-
-## Type
-
-Bundled in `Resources/Fonts` (OFL): Geist 400/500/600, Geist Mono 400/500, Newsreader 16pt Regular/Medium/Italic.
-Register them at launch with `CTFontManagerRegisterFontsForURL`.
-
-| Use | Font |
-| --- | --- |
-| UI default | Geist 13/18 |
-| Small, meta | Geist 12/16 |
-| Row sender | Geist 13/18, 600 unread, 500 read |
-| Mailbox title (list header) | Geist 15/20 600 |
-| Section caps | Geist 11/14 500, +0.6 tracking, `text3` |
-| Times, counts, keycaps | Geist Mono 12/16 (tabular) |
-| Open thread subject | **Newsreader Medium 24/30**, −0.2 tracking |
-| Empty states, onboarding headline | **Newsreader Italic 22/28** (onboarding 34/40) |
-| Reading body (plain text mail) | Geist 14/22, max line 680 |
+All radius 6. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
+a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
+`hairlineStrong` border, radius 4 inside 6. Switches are tinted `ink`.
 
 ## Window
 
-- Hidden title bar: `fullSizeContentView`, transparent titlebar, no toolbar. Traffic lights sit at (16, 18) inside
-  the sidebar. The whole window background is drawn by us.
-- Columns: **sidebar 232** (flat `sidebar`, collapses with ⌘\) · hairline · **list** (min 340, default 420,
-  resizable) · hairline · **reader** (flexible, min 420). ⌘⇧\ toggles list-only (reader as full width when
-  a thread is open, Esc returns). Minimum window 960×600, default 1320×840.
+Hidden title bar (`fullSizeContentView`, transparent), our own background. Minimum 960×600, default 1320×840.
 
-### Sidebar
-Top to bottom, 12 px side padding:
-1. 52 px header: traffic lights, then at the right a compose button (pencil icon, 28 px, `c`).
-2. **Account switcher**: one 32 px field (radius 6, hairline border) showing the current scope ("All accounts" with up to three overlapping
-   account dots, or the account's name). Click → menu: All accounts ⌘0, each account ⌘1…⌘9, Add account…,
-   Settings… This is the only account UI in the main window.
-3. Mailboxes (28 px rows, 6 radius, icon 15 px `text2`, label `text1`, count in mono `text3` at the right):
-   Inbox · Needs reply (count in `ink`, mono 500) · Snoozed · Starred · Drafts · Sent · All mail · then a
-   `More` row that expands Spam, Trash and the account's Gmail labels (labels only when one account is in scope).
-4. `PROJECTS` caps header (a `+` appears on hover). Project rows: icon tinted with the project colour, name,
-   unread count. Right-click or `…` on hover: rename, colour, rules, delete.
-5. Bottom, pinned: one quiet line of sync status in `text3` 12 px ("Up to date", "Syncing 1,204 of 8,330",
-   "Offline — changes will sync", or an `ink` "Sign in again" link). The dot is a hollow `text3` ring when
-   up to date, a filled `text3` dot while syncing, a filled `ink` dot when something needs you. Nothing else.
+```
+┌─ ● ● ●  [All 96] Needs reply 24  Important 48  People 41  …  +  ⋯ ───────── (P)(N)(K) 3 accounts  [✎] ┐  52
+│                                       TODAY                                                            │
+│   (F) Figma (4)            • Priya mentioned you in Mobile app — We're leaning…  [🔔 Notification]  4h │  32
+│   (G) Google Drive         • Sofia shared "Lumen — SOW" with you — We hit the…   [◎ Lumen]          4h │
+│   …                                                                                                    │
+│                                        [ ⌕  ▯  ⚙ ]                                                     │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-Selected sidebar row: `selected` fill. No icon colour change, no bar.
+### Title bar (52 px)
+- Traffic lights at (16, 18), then the **tabs**, left-aligned after an 84 px gutter.
+- Tabs: `All` · `Needs reply` · the category tabs `Important · People · Notifications · Newsletters · Other`
+  (split inbox; off in `⋯` → Category Tabs) · pinned tabs (projects, labels of the account in scope, saved
+  searches). Each: 14 px icon (hue per the table), title, count (unread; Needs reply counts waiting
+  threads) in tabular `text3`. 28 px tall, radius 6; active = `selected` fill and Medium text; hover = `hover`.
+- A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
+  pinned shows as a temporary tab at the end while it is open.
+- `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
+  fits), then Unpin, Mark All as Read, Select All, Density, Category Tabs, Reading Pane. Right-click a tab to
+  pin or unpin it.
+- Keys: Tab / ⇧Tab cycle the tabs; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 the category tabs.
+- Right side: the **account stack** (up to three 20 px letter avatars in account hues, overlapping by 6 px with
+  a 2 px `bg` ring) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
+  account ⌘1…⌘9, Add account…, Settings…); then **compose**: a 28 px icon button, ink pencil, `hairlineStrong`
+  outline (`c`, ⌘N). No notification bell.
 
-### List column
-- **Header, 52 px**: mailbox title (15/20 600) followed by **the Flock**: one 6 px `ink` dot per thread that
-  needs action (inbox unread + needs reply, max 12, then "+n" in mono `text3`). Each triage action lifts a
-  dot away (6 px upward drift + fade, 180 ms). At the right: one `…` menu (Mark all read, Select all,
-  Density: Auto/Compact/Comfortable, Sort). 
-- **Search field** under the header (32 px, radius 6, `hover` fill, a `hairlineStrong` border while focused,
-  magnifier + "Search" + `/` keycap in mono at the right). Focusing it (or `/`) turns the list into search results; Esc restores the mailbox.
-- **Split tabs** (Inbox only), 32 px: text tabs `Important 12 · People 8 · Notifications 31 · Newsletters 9 ·
-  Other 40` (active = `text1` with a 2 px `text1` underline; others `text2`; counts in mono `text3`). Tab / ⇧Tab
-  cycle them. "Important" = people + needs reply + calendar + security; the rest map to categories.
-- **Groups**: sticky caps headers 28 px with a hairline below: `NEEDS REPLY` (always first in Inbox/Important) ·
-  `TODAY` · `YESTERDAY` · `THIS WEEK` · `EARLIER THIS MONTH` · month names · years. Between the needs-reply group
-  and the rest draw the **waterline**: a 1 px dashed hairline (`text3` at 40%) with the count in mono at its
-  right end.
-- **Rows** (no borders between rows; 6 px inset from the list edges so hover/selection fills float; radius 6):
-  - Auto density: list ≥ 560 px → **one line, 36 px**; narrower → **two lines, 56 px**.
-  - Two-line: line 1 = unread dot slot (20 px gutter, 6 px `ink` dot) · sender (600 if unread) · thread count
-    in `text3` · (unified view) 8 px account dot · spacer · one chip (project beats category) · paperclip ·
-    time in mono `text3`. Line 2 = subject (500, `text1`) — preview (`text3`), one line; if the AI summary exists
-    it replaces the preview in `text2` with a tiny ✦ glyph.
-  - Sender text for threads: "Maya, Jonas 3"; drafts: "Draft to Maya" in `text2` italic with a pencil glyph.
-  - Times: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25".
-  - Hover replaces the time with three 24 px icon buttons: Done (archive), Snooze, `…`.
-  - Selected: `selected` fill; keyboard focus adds a 1.5 px `ink` ring at 45% opacity.
-- Triage: `e` archive → the row collapses (160 ms ease-out) and the next row is selected in the same frame.
-  A toast bottom-centre (36 px, radius 8, `ink` fill, `bg` text): "Archived · Undo  z" (4 s). Multi-select with `x`, ⇧J/⇧K, ⌘A, ⌘/⇧-click.
+### List
+- A centred column: full width minus 8 px margins when narrow, 28 px margins from 760 px, at most **1040 px**.
+- **Date headers**, 34 px, sticky: `TODAY · YESTERDAY · THIS WEEK · EARLIER THIS MONTH ·` month names · years,
+  centred caps `text3`, hairline below. Every list is in date order; nothing floats to the top.
+- **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **32 pt** when the list is ≥ 600 px
+  wide, two lines at 56 pt otherwise (the reading pane). Density Auto / Compact / Comfortable.
+  - One line: 20 px avatar · sender column (20 % of the column, 150–210 px: name, then `(13)` message count in
+    tabular `text3`; "Draft to Maya" in italic `text2` with a pencil) · 6 px `ink` unread dot · subject (500 when
+    unread) — preview in `text2` (or ✦ sparkle + AI summary) · paperclip · tags · time (tabular `text3`,
+    right-aligned: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25").
+  - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
+  - **Avatar**: the sender's domain logo (`SenderLogos`, full bleed on a white disc with a faint ring), else
+    one initial on `avatarFill` (or the account hue when several accounts share the list). Logos are asked for
+    as rows come into view, never in Spam or Trash; rows on screen refresh when one arrives.
+  - **Tags**: outline chips, 20 px tall, radius 4, 1 px `hairlineStrong`, 12 px coloured icon, label Inter 11.5
+    500 `text2`. Needs reply (ink reply icon) first, then the project or the category (not People/Other). Two
+    at most on one line, one on two lines; dropped before they squeeze the subject.
+  - Hairline separators across the column. Hover: `hover` fill (radius 6, 4 px outside the column) and three
+    icon buttons replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; keyboard focus adds a
+    1.5 px `ink` ring at 45 %.
+- Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
+  Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
+- Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
+  other lists one Display 17 line in `text2`.
+
+### Bottom bar
+A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
+the bar shadow, 4 px padding, three 28 px icon buttons — **Search** (`/`, ⌘F when no thread is on screen),
+**Sidebar** (⌃⌘S), **Settings** (⌘,). A button whose thing is open gets the `selected` fill. Hidden while a
+thread covers the list.
+
+### Search
+`/`, ⌘F or the bar's search button reveals the field above the list: the column's width, 36 px, radius 8,
+`hover` fill, `hairlineStrong` border while focused, search icon, "Search mail", a Pin button once there are
+results, an `esc` keycap. Typing turns the list into results (matches marked); the dropdown under the field
+suggests people, labels, projects, operators, recent searches and ✦ Ask. ↓ moves into the results, Esc
+closes the dropdown, then the search. A search can be pinned as a tab.
 
 ### Reader
-- `raised` surface. Top bar 52 px, right side only: **Done**, **Snooze**, **`…`** (reply all, forward, label,
-  project, star, mark unread, mute, spam, trash, print, show original). Left side shows `‹ ›` thread position
-  in `text3` ("12 of 48") only on hover.
-- Subject in Newsreader Medium 24/30 with 32 px side padding, max width 760. Under it a chip row (category,
-  project, Gmail user labels) and, if present, the AI summary: 1–2 lines in `text2` with a ✦ glyph, collapsible.
-- Messages: older messages collapsed to one 40 px line (28 px monogram, sender, snippet `text3`, date mono);
-  the latest unread (or last) message expanded. Expanded header: monogram, sender 13/600 + address `text3`,
-  "to me, Jonas" disclosure, date mono `text3` at right. Body: HTML in a WKWebView (transparent background set
-  before first paint; mail styles sanitized; light/dark adaptation for simple mails; remote images blocked
-  until "Load images" for that sender). Quoted text collapsed behind a `•••` toggle (radius 4). Attachments: chips
-  (file icon, name, size), Space = Quick Look.
-- Bottom: a **reply field** "Reply to Maya…" (36 px, radius 6, `hover` fill) with three ✦ AI quick replies
-  (secondary buttons) to its right on hover. Click / `r` expands the inline composer in place.
+- Enter, `o` or a click opens the thread **over the list** (same window, `bg` surface, a fade with a 12 px
+  slide on the pane spring; a crossfade with Reduce Motion). Esc or the ← button goes back with the selection kept; j/k move to the
+  next thread while reading; the list underneath keeps its scroll position.
+- ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
+  `raised`. Remembered.
+- Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
+  Done, Snooze, `⋯` as icon buttons.
+- A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
+  AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
+  unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
+  disclosure, date in tabular `text3`. Bodies in the WKWebView (transparent before first paint, sanitized,
+  remote images blocked until "Load images"; Tern's own avatars come as `data:` URLs, which the CSP allows while
+  it still allows no remote image). Attachments as chips. Quoted text behind a `•••` toggle.
+- Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
+  replies on hover; `r` or a click expands the inline reply card in place.
+
+### Sidebar
+Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
+title bar; remembered; Reduce Motion crossfades). Mailboxes (Inbox, Needs reply, Snoozed, Starred, Drafts,
+Sent, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover; drag rows
+onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and pinned at
+the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when something
+needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts tabular.
 
 ### ⌘K palette
-Centered 640 px wide, 10 radius, translucent `raised` at 92% with 24 px blur, overlay shadow. 52 px input
-(Geist 16) with a scope chip ("All accounts"). Results grouped: Actions (keycaps right-aligned in mono),
-Go to, Threads (live search), Projects, Labels, Accounts, Settings. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on
-all selected threads. Opens in 120 ms (scale .98 → 1 + fade).
+Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).
+Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
+its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Opens in 120 ms.
 
 ### Composer
-- Inline reply inside the reader, or a separate floating window for new mail (`c`), 640×560, `raised`, 10 radius.
-- Fields as flat rows separated by hairlines: From (only when several accounts; shows the account dot),
-  To (tokens with radius 4, autocomplete from contacts), Cc/Bcc revealed with ⌘⇧C/⌘⇧B, Subject (Geist 15/600).
-- Body: rich text, minimal formatting popover on selection (bold, italic, link, list, quote). Signature per
-  account inserted below.
-- Bottom bar: **Send** primary button (⌘↵) with a chevron for Send later (⌘⇧L), paperclip, ✦ Write with AI (⌘J),
-  and discard (trash icon) at the far right. Undo-send toast ("Sending in 5 s · Undo").
+Inline in the reader, or a floating window for new mail (`c`), 640×560, `raised`, radius 10. Flat rows with
+hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Inter 15/600). Rich text
+with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
+(⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
 
-### Empty states
-Inbox zero: centred tern drawn as a single stroke (900 ms stroke-draw, once), then Newsreader Italic
-"Nothing needs you." and one `text3` line ("23 cleared today"). Other mailboxes: one Newsreader Italic line, no
-illustration ("No snoozed mail.").
-
-### Settings
-Separate window (not a sheet), sidebar of sections: Accounts, AI, Appearance, Shortcuts, Notifications,
-Advanced. Flat rows with hairlines, the button system above, segmented controls, no grouped-box chrome.
-
-### Onboarding (first launch)
-One window, four steps, Newsreader headline "Mail at the speed you think." 1) Your Google client (paste client
-ID + secret, link to the setup guide, "Why?" explains open source). 2) Connect accounts (list + "Add Gmail
-account"; each shows sync progress). 3) AI (Codex / Claude Code / Off, each showing "Found, signed in" or
-"Not found"). 4) Done. A quiet "Try it with demo mail" link switches to the fake mailbox.
+### Settings, onboarding
+Settings is its own window with a section sidebar (Accounts, AI, Appearance, Shortcuts, Notifications,
+Advanced), flat rows with hairlines, the button system, segmented controls. Onboarding: one window, four
+steps, Inter Display headline "Mail at the speed you think."
 
 ## Motion
-Row exit 160 ms ease-out + list collapse 180 ms · pane changes spring (response 0.32, damping 0.86) · palette
-120 ms · hover reveal 90 ms · Flock dot lift 180 ms · nothing in the triage path over 200 ms. Reduce Motion:
-80 ms crossfades only.
+Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
+(response 0.32, damping 0.86) · palette 120 ms · search field 120 ms · hover reveal 90 ms · nothing in the
+triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
 
 ## Keyboard
-See `research.md` §E; implement that table. Bare-letter keys are inactive while a text field has focus.
-`g` chords time out after 1 s and show a small HUD.
+See `research.md` §E. Changes in this direction: ⌘\ toggles the reading pane (was: the sidebar); ⌃⌘S toggles
+the sidebar; ⌘⇧\ is gone (list only is now the default); Tab / ⇧Tab and ⌥1–⌥7 move between tabs; ⌘F searches
+mail unless a thread is on screen. Bare-letter keys are inactive while a text field has focus. `g` chords time
+out after 1 s and show a small HUD.
+
+## Checking it
+Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
+--snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, settings and
+onboarding in light and dark; `--check` drives the shell through its behaviour and timings.
