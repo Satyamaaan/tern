@@ -31,6 +31,14 @@ public enum MailAction: Codable, Hashable, Sendable {
         }
     }
 
+    /// Adds or removes a user label, which project rules may look at.
+    var changesUserLabels: Bool {
+        switch self {
+        case .addLabel, .removeLabel, .moveToLabel: true
+        default: false
+        }
+    }
+
     /// True when the thread leaves the current list (the UI then selects the next one).
     public var removesFromInbox: Bool {
         switch self {
@@ -104,6 +112,8 @@ extension MailStore {
             }
         }
 
+        // Gmail echoes the change back unchanged, so sync won't re-run label-based project rules.
+        if action.changesUserLabels { try ProjectRules.apply(db, keys: Set(threads)) }
         return UndoToken(
             action: action, threads: threads, opIds: opIds, previousLabels: previousLabels,
             previousSnoozes: previousSnoozes)
@@ -165,6 +175,8 @@ extension MailStore {
                     try op.insert(db)
                 }
             }
+
+            if token.action.changesUserLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
 
             for (key, until) in token.previousSnoozes {
                 if let until {

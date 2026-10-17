@@ -108,3 +108,17 @@ extension Harness {
     let row = try await store.database.reader.read { db in try ThreadAI.fetchOne(db, key: ["accountId": testEmail, "threadId": "t1"]) }
     #expect(row?.needsReply == false)
 }
+
+@Test func labellingInTernAppliesLabelProjectRules() async throws {
+    let h = try Harness()
+    let label = try await h.fake.createLabel(name: "Clients")
+    let clients = try h.addProject("Clients", rule: .label, "Clients")
+    let message = await h.fake.deliver(FakeEmail(subject: "Proposal", date: testNow.addingTimeInterval(-60)))
+    try await h.sync.initialSync()
+    let key = h.thread(message.threadId)
+
+    let token = try h.store.perform(.addLabel(label.id), on: [key])
+    #expect(try h.projects(message.threadId) == [clients.id], "at once, not after Gmail echoes it")
+    try h.store.undo(token)
+    #expect(try h.projects(message.threadId).isEmpty)
+}

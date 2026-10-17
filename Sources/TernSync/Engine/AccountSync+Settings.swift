@@ -30,11 +30,14 @@ extension AccountSync {
     func refreshSendAsIfPossible(now: Date) async throws {
         do {
             try await refreshSendAs()
-        } catch let error as GmailAPIError {
-            switch error {
-            case .unauthorized, .rateLimited: throw error
-            default: nextSendAsRefreshAt = now.addingTimeInterval(min(3600, configuration.dailyInterval))
-            }
+        } catch GmailAPIError.unauthorized {
+            throw GmailAPIError.unauthorized
+        } catch GmailAPIError.rateLimited(let retryAfter) {
+            throw GmailAPIError.rateLimited(retryAfter: retryAfter)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            nextSendAsRefreshAt = now.addingTimeInterval(min(3600, configuration.dailyInterval))
         }
     }
 

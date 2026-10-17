@@ -449,7 +449,7 @@ extension AccountSync {
         case .modifyLabels:
             guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else { return }
             let ids = Array(Set(payload.changes.map(\.messageId)))
-            for chunk in ids.syncChunks(configuration.fetchBatchSize) {
+            for chunk in ids.syncChunks(batchSize(cost: configuration.quota.getMessage)) {
                 guard let fetched = try? await api.messages(ids: chunk, format: .minimal) else { return }
                 var labels: [String: [String]] = [:]
                 for message in fetched { labels[message.id] = message.labelIds ?? [] }
