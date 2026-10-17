@@ -274,7 +274,9 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let next = RowStyle.resolve(model.prefs.density, width: scrollView.frame.width)
         guard next != style else { return }
         style = next
-        table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<items.count))
+        // Row views on screen keep their old height after noteHeightOfRows, so rebuild them; this only
+        // happens when the width crosses between one and two lines.
+        table.reloadData()
         refreshVisibleRows()
     }
 
