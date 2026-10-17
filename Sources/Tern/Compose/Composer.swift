@@ -21,13 +21,31 @@ enum Composer {
         present(model)
     }
 
-    /// Opens a Gmail draft that exists only as a DRAFT message (e.g. written in the browser).
+    /// Opens a Gmail draft that exists only as a DRAFT message (e.g. written in the browser). One stored
+    /// without its body has the body fetched first, so saving it can't replace the draft with its snippet.
     static func openDraftMessage(_ key: MessageKey, services: AppServices) {
-        guard let model = ComposerModel(draftMessage: key, services: services, mode: .window) else {
+        do {
+            guard let content = try services.drafts.importDraftMessage(key) else {
+                NSSound.beep()
+                return
+            }
+            present(ComposerModel(content: content, services: services, mode: .window))
+        } catch DraftError.bodyNotFetched(let thread) {
+            guard let fetchBodies = services.fetchBodies else {
+                NSSound.beep()
+                return
+            }
+            Task {
+                guard (try? await fetchBodies(thread)) != nil,
+                      let model = ComposerModel(draftMessage: key, services: services, mode: .window) else {
+                    NSSound.beep()
+                    return
+                }
+                present(model)
+            }
+        } catch {
             NSSound.beep()
-            return
         }
-        present(model)
     }
 
     private static func present(_ model: ComposerModel) {

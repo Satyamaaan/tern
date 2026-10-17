@@ -21,7 +21,8 @@ private func makeStore() throws -> DraftStore {
                         ccList: [Participant(email: work.email)], subject: "Lisbon offsite", bodyText: "Can you make it?",
                         bodyHtml: "<div>Can you make it?</div>", bodyState: .full, labelIds: ["INBOX"], hasAttachments: true),
             MailMessage(accountId: home.id, id: "d1", threadId: "t1", date: Date(timeIntervalSince1970: 200),
-                        fromEmail: home.email, toList: [maya], subject: "Re: Lisbon offsite", labelIds: ["DRAFT"]),
+                        fromEmail: home.email, toList: [maya], subject: "Re: Lisbon offsite", snippet: "Started this",
+                        bodyText: "Started this", bodyHtml: "<div>Started this</div>", bodyState: .full, labelIds: ["DRAFT"]),
         ], attachments: [
             MailAttachment(accountId: home.id, messageId: "m1", partId: "1", attachmentId: "att-1",
                            filename: "Agenda.pdf", mimeType: "application/pdf", size: 1_000),
@@ -315,10 +316,53 @@ private func typed(_ content: DraftContent, _ text: String) -> Draft {
     let store = try makeStore()
     let imported = try #require(try store.importDraftMessage(MessageKey(accountId: home.id, messageId: "d1")))
     #expect(imported.draft.gmailMessageId == "d1")
+    #expect(imported.body.plainText == "Started this")
     #expect(imported.draft.toList == [maya])
     #expect(imported.draft.subject == "Re: Lisbon offsite")
     try await store.save(typed(imported, "Edited"), now: t0)
     let again = try #require(try store.importDraftMessage(MessageKey(accountId: home.id, messageId: "d1")))
     #expect(again.draft.id == imported.draft.id)
     #expect(again.body.plainText == "Edited")
+}
+
+@Test func importingAGmailDraftKeepsItsFiles() async throws {
+    let store = try makeStore()
+    try await store.database.writer.write { db in
+        try MailStore.upsertMessages(db, [
+            MailMessage(accountId: home.id, id: "d2", threadId: "t2", date: Date(timeIntervalSince1970: 300),
+                        fromEmail: home.email, toList: [maya], subject: "Deck", snippet: "See the deck",
+                        bodyText: "See the deck", bodyHtml: #"<div>See the deck</div><img src="cid:fig">"#,
+                        bodyState: .full, labelIds: ["DRAFT"], hasAttachments: true),
+        ], attachments: [
+            MailAttachment(accountId: home.id, messageId: "d2", partId: "1", attachmentId: "att-d",
+                           filename: "Deck.pdf", mimeType: "application/pdf", size: 4_000, localPath: "/tmp/cached-deck.pdf"),
+            MailAttachment(accountId: home.id, messageId: "d2", partId: "2", attachmentId: "att-f",
+                           filename: "fig.png", mimeType: "image/png", size: 300, contentId: "fig", isInline: true),
+        ])
+    }
+    let imported = try #require(try store.importDraftMessage(MessageKey(accountId: home.id, messageId: "d2")))
+    #expect(imported.draft.attachments == [
+        DraftAttachment(path: "/tmp/cached-deck.pdf", filename: "Deck.pdf", mimeType: "application/pdf", size: 4_000,
+                        remote: RemoteAttachmentRef(accountId: home.id, messageId: "d2", partId: "1", attachmentId: "att-d")),
+        DraftAttachment(path: "", filename: "fig.png", mimeType: "image/png", size: 300,
+                        remote: RemoteAttachmentRef(accountId: home.id, messageId: "d2", partId: "2", attachmentId: "att-f"),
+                        contentId: "fig"),
+    ])
+    try await store.save(typed(imported, "Updated"), now: t0)
+    let saved = try #require(try store.draft(id: imported.draft.id))
+    #expect(saved.attachments == imported.draft.attachments, "a save keeps them")
+}
+
+@Test func aGmailDraftStoredWithoutItsBodyIsNotImported() throws {
+    let store = try makeStore()
+    try store.database.writer.write { db in
+        try MailStore.upsertMessages(db, [
+            MailMessage(accountId: home.id, id: "d3", threadId: "t3", date: Date(timeIntervalSince1970: 400),
+                        fromEmail: home.email, toList: [maya], subject: "Long draft", snippet: "The first line only",
+                        labelIds: ["DRAFT"], hasAttachments: true),
+        ])
+    }
+    #expect(throws: DraftError.bodyNotFetched(ThreadKey(accountId: home.id, threadId: "t3"))) {
+        try store.importDraftMessage(MessageKey(accountId: home.id, messageId: "d3"))
+    }
 }
