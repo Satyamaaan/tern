@@ -2,8 +2,9 @@ import Foundation
 
 /// OpenAI Codex CLI (`codex exec`), signed in with the user's ChatGPT account.
 ///
-/// Each call runs ephemerally in an empty temp directory with a read-only sandbox, the user's config,
-/// rules and hooks ignored, shell and other tools switched off, and the prompt on stdin.
+/// Each call runs ephemerally in an empty temp directory with a read-only sandbox, the user's config
+/// (and so its MCP servers), rules and hooks ignored, every tool-giving feature this version reports
+/// switched off (plugins and apps included), and the prompt on stdin.
 public struct CodexCLIProvider: AIProvider {
     public let id = "codex"
     public let displayName = "Codex"
@@ -43,8 +44,17 @@ public struct CodexCLIProvider: AIProvider {
         }
     }
 
+    /// Features this version has switched on, from `codex features list`, read once.
+    func enabledFeatures() async -> [String] {
+        await backend.memoized("features") {
+            guard let result = try? await backend.runCheck(["features", "list"]), result.exitCode == 0 else { return [] }
+            return Self.enabledFeatures(inList: result.stdoutText)
+        }
+    }
+
     public func complete(_ request: AIRequest) async throws -> String {
         let flags = await backend.flags()
+        let enabled = await enabledFeatures()
         var model = request.model
         if model == nil { model = await models().first }
         let directory = try CallDirectory()
@@ -59,7 +69,7 @@ public struct CodexCLIProvider: AIProvider {
         let answerPath = directory.file("answer.txt").path
         let arguments = Self.arguments(
             model: model, effort: request.effort, workDirectory: directory.work.path,
-            schemaPath: schemaPath, answerPath: answerPath, flags: flags)
+            schemaPath: schemaPath, answerPath: answerPath, flags: flags, enabledFeatures: enabled)
         let stdin = Self.stdin(for: request, schemaEnforced: schemaPath != nil)
 
         let result = try await backend.runModel(arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout)
@@ -76,16 +86,53 @@ public struct CodexCLIProvider: AIProvider {
 
     // MARK: Command line
 
-    /// Features that give the agent tools. Unknown names are ignored by `-c`, so older and newer
-    /// versions both accept the list.
+    /// Features that give the agent tools, always switched off. Unknown names are ignored by `-c`, so
+    /// older and newer versions both accept the list. Mail is untrusted input: a prompt-injected email
+    /// must not get a shell, a browser, files, plugins or other agents. `--sandbox read-only` stops
+    /// writes, not reads, so tools are switched off rather than sandboxed.
     static let disabledFeatures = [
-        "shell_tool", "unified_exec", "apps", "plugins", "hooks", "image_generation", "browser_use",
-        "computer_use", "view_image", "memories", "web_search_request",
+        "shell_tool", "unified_exec", "unified_exec_tty", "apps", "plugins", "remote_plugin", "plugin_sharing",
+        "hooks", "image_generation", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
+        "browser_annotation_api", "computer_use", "view_image", "memories", "web_search_request", "code_mode",
+        "code_mode_host", "multi_agent", "multi_agent_v2", "in_app_browser", "in_app_local_automation",
+        "workspace_dependencies", "skill_search", "skill_mcp_dependency_install", "tool_suggest",
+        "tool_call_mcp_elicitation", "goals", "sleep_tool", "shell_snapshot", "worktrees",
+        "standalone_web_search", "request_permissions_tool",
     ]
+
+    /// Features left on when this version reports them enabled: how Codex reaches the model and signs
+    /// in. Every other enabled feature is switched off, so a new tool in a later version starts off.
+    static let allowedFeatures: Set<String> = [
+        "api_key_cyber_access_programs", "api_key_model_discovery", "auth_elicitation", "compaction_image_budget",
+        "content_item_kinds", "enable_request_compression", "fast_mode", "ultrafast_mode", "instant_interrupt",
+        "respect_system_proxy", "secret_auth_storage", "system_proxy_fallback", "unbounded_connection_retries",
+    ]
+
+    /// Names marked `true` in `codex features list` ("name  stage  true|false" per line), except
+    /// removed features, which no longer do anything.
+    static func enabledFeatures(inList text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).compactMap { line in
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count >= 3, words.last == "true", !words.dropFirst().dropLast().contains("removed") else { return nil }
+            let name = words[0]
+            guard name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else { return nil }
+            return String(name)
+        }
+    }
+
+    /// The static floor plus every enabled feature that isn't allowed, in a stable order.
+    static func featuresToDisable(enabled: [String]) -> [String] {
+        var names = disabledFeatures
+        var seen = Set(names)
+        for name in enabled.sorted() where !allowedFeatures.contains(name) && seen.insert(name).inserted {
+            names.append(name)
+        }
+        return names
+    }
 
     static func arguments(
         model: String?, effort: AIRequest.Effort, workDirectory: String, schemaPath: String?,
-        answerPath: String, flags: Set<String>
+        answerPath: String, flags: Set<String>, enabledFeatures: [String] = []
     ) -> [String] {
         // An unreadable help text means an unknown version: assume today's flags.
         let has = { (flag: String) in flags.isEmpty || flags.contains(flag) }
@@ -100,8 +147,9 @@ public struct CodexCLIProvider: AIProvider {
             "-c", "approval_policy=\"never\"",
             "-c", "web_search=\"disabled\"",
             "-c", "tools.web_search=false",
+            "-c", "tools.view_image=false",
         ]
-        for feature in disabledFeatures { arguments += ["-c", "features.\(feature)=false"] }
+        for feature in featuresToDisable(enabled: enabledFeatures) { arguments += ["-c", "features.\(feature)=false"] }
         if let schemaPath { arguments += ["--output-schema", schemaPath] }
         if has("--output-last-message") { arguments += ["--output-last-message", answerPath] }
         arguments.append("-")
