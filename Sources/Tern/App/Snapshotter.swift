@@ -79,6 +79,13 @@ struct Snapshotter {
             model.setScope(.all)
         }
 
+        model.showsShortcuts = true
+        shot("shortcuts-light")
+        model.showsShortcuts = false
+        model.chordHUD = "g"
+        shot("chord-light")
+        model.chordHUD = nil
+
         model.prefs.sidebarCollapsed = true
         shot("sidebar-collapsed-light")
         model.prefs.sidebarCollapsed = false

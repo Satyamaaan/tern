@@ -53,7 +53,7 @@ struct KeyShortcut: Hashable {
         case .tab: return text + "⇥"
         case .up: return text + "↑"
         case .down: return text + "↓"
-        case .delete: return text + "⌫"
+        case .delete: return text + "del"
         case .space: return text + "space"
         }
     }
