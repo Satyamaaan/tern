@@ -9,8 +9,9 @@ enum TernApp {
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
-        // Offscreen snapshots never show a Dock icon or take focus.
-        app.setActivationPolicy(CommandLine.arguments.contains("--snapshot") ? .prohibited : .regular)
+        // Offscreen snapshots and self-checks never show a Dock icon or take focus.
+        let headless = CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--check")
+        app.setActivationPolicy(headless ? .prohibited : .regular)
         withExtendedLifetime(delegate) { app.run() }
     }
 }

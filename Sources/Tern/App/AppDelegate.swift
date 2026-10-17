@@ -41,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         NSApp.mainMenu = mainMenu.build()
         model.startObservations()
 
+        if CommandLine.arguments.contains("--check") {
+            SelfCheck(model: model, registry: registry).run()
+        }
         if let directory = options.snapshotDirectory {
             Snapshotter(model: model, registry: registry).run(into: directory)
             return

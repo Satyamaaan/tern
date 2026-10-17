@@ -351,15 +351,22 @@ struct Toast: Identifiable, Equatable {
     static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
 }
 
-/// Something `z` can put back.
+/// Something `z` can put back. The toast appears in the same frame as the action, before the write
+/// finishes, so the details needed to undo arrive later in a box filled on the serial write queue.
 struct UndoEntry: Identifiable {
     enum Change {
-        case mail(UndoToken)
-        case needsReply([ThreadKey: Bool])
+        case mail(MailAction, WriteResult<UndoToken>)
+        case needsReply(WriteResult<[ThreadKey: Bool]>)
         case project(String, [ThreadKey], assigned: Bool)
     }
 
     let id = UUID()
     var change: Change
     var threads: [ThreadKey]
+}
+
+/// A value produced by a write on `AppModel.writes`. Only read it from that queue, where every
+/// earlier write has finished.
+final class WriteResult<Value>: @unchecked Sendable {
+    var value: Value?
 }

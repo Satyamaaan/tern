@@ -5,10 +5,18 @@ import os
 enum Timing {
     static let signposter = OSSignposter(subsystem: "dev.tern", category: "speed")
 
-    struct Interval {
+    /// One measured span. Ending it twice is harmless (observations call back more than once).
+    final class Interval: @unchecked Sendable {
         let name: StaticString
         let state: OSSignpostIntervalState
         let started: UInt64
+        var ended = false
+
+        init(name: StaticString, state: OSSignpostIntervalState, started: UInt64) {
+            self.name = name
+            self.state = state
+            self.started = started
+        }
     }
 
     static func begin(_ name: StaticString) -> Interval {
@@ -18,7 +26,10 @@ enum Timing {
     /// Ends the interval and returns its length in milliseconds.
     @discardableResult
     static func end(_ interval: Interval) -> Double {
-        signposter.endInterval(interval.name, interval.state)
+        if !interval.ended {
+            interval.ended = true
+            signposter.endInterval(interval.name, interval.state)
+        }
         return Double(DispatchTime.now().uptimeNanoseconds - interval.started) / 1_000_000
     }
 

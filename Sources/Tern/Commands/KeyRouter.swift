@@ -41,7 +41,7 @@ final class KeyRouter {
 
     // MARK: Routing
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
+    func handle(_ event: NSEvent) -> NSEvent? {
         let flags = event.modifierFlags.intersection(KeyShortcut.relevantModifiers)
         let hasCommand = flags.contains(.command) || flags.contains(.control)
 

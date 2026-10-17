@@ -13,20 +13,17 @@ extension AppModel {
         if action.removesFromInbox, case .inbox = kind { prefs.clearedToday += keys.count }
 
         let store = self.store
-        let title = toast.map { $0.isEmpty ? Self.toastTitle(action, count: keys.count) : $0 }
+        let result = WriteResult<UndoToken>()
+        let entry = UndoEntry(change: .mail(action, result), threads: keys)
+        if let toast { showToast(toast.isEmpty ? Self.toastTitle(action, count: keys.count) : toast, undo: entry) }
         writes.async {
-            let token: UndoToken
-            do { token = try store.perform(action, on: keys) } catch {
-                DispatchQueue.main.async { MainActor.assumeIsolated { self.writeFailed(error, unhide: leaving) } }
+            do {
+                result.value = try store.perform(action, on: keys)
+            } catch {
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.writeFailed(error, unhide: leaving, entry: entry) } }
                 return
             }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self.committed(leaving)
-                    guard let title else { return }
-                    self.showToast(title, undo: UndoEntry(change: .mail(token), threads: keys))
-                }
-            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.committed(leaving) } }
         }
     }
 
@@ -81,7 +78,7 @@ extension AppModel {
         rebuildSnapshot(.collapse)
     }
 
-    private func committed(_ keys: [ThreadKey]) {
+    func committed(_ keys: [ThreadKey]) {
         for key in keys where hidden[key] == .writing { hidden[key] = .committed }
         // If the write left a thread in this list after all (no change reached the observation),
         // show it again once the observation has had time to catch up.
@@ -97,7 +94,9 @@ extension AppModel {
         }
     }
 
-    private func writeFailed(_ error: Error, unhide keys: [ThreadKey]) {
+    private func writeFailed(_ error: Error, unhide keys: [ThreadKey], entry: UndoEntry) {
+        undoStack.removeAll { $0.id == entry.id }
+        toasts.removeAll { $0.undo?.id == entry.id }
         for key in keys { hidden[key] = nil }
         rebuildSnapshot(.none)
         showToast("Couldn't save that change", undo: nil)
@@ -134,8 +133,8 @@ extension AppModel {
         writes.async {
             do {
                 switch change {
-                case .mail(let token): try store.undo(token)
-                case .needsReply(let previous): try store.restoreNeedsReply(previous)
+                case .mail(_, let result): if let token = result.value { try store.undo(token) }
+                case .needsReply(let result): if let previous = result.value { try store.restoreNeedsReply(previous) }
                 case .project(let id, let keys, let assigned): try store.setProject(id, on: keys, assigned: !assigned)
                 }
             } catch {
@@ -148,8 +147,8 @@ extension AppModel {
                 }
             }
         }
-        if case .mail(let token) = change, token.action.removesFromInbox, case .inbox = kind {
-            prefs.clearedToday = max(0, prefs.clearedToday - token.threads.count)
+        if case .mail(let action, _) = change, action.removesFromInbox, case .inbox = kind {
+            prefs.clearedToday = max(0, prefs.clearedToday - entry.threads.count)
         }
     }
 
@@ -180,14 +179,12 @@ extension AppModel {
         let flag = !keys.allSatisfy { row($0)?.needsReply ?? false }
         if !flag, case .needsReply = kind { hide(keys) }
         let store = self.store
+        let result = WriteResult<[ThreadKey: Bool]>()
+        showToast(flag ? "Marked needs reply" : "Cleared needs reply", undo: UndoEntry(change: .needsReply(result), threads: keys))
         writes.async {
-            let previous = (try? store.setNeedsReply(flag, on: keys)) ?? [:]
+            result.value = try? store.setNeedsReply(flag, on: keys)
             DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self.committed(keys.filter { self.hidden[$0] != nil })
-                    self.showToast(flag ? "Marked needs reply" : "Cleared needs reply",
-                                   undo: UndoEntry(change: .needsReply(previous), threads: keys))
-                }
+                MainActor.assumeIsolated { self.committed(keys.filter { self.hidden[$0] != nil }) }
             }
         }
     }
@@ -199,14 +196,12 @@ extension AppModel {
         let name = project(projectId)?.name ?? "project"
         if !assigned, case .project(let id) = kind, id == projectId { hide(keys) }
         let store = self.store
+        showToast(assigned ? "Added to \(name)" : "Removed from \(name)",
+                  undo: UndoEntry(change: .project(projectId, keys, assigned: assigned), threads: keys))
         writes.async {
             do { try store.setProject(projectId, on: keys, assigned: assigned) } catch { NSLog("Tern: project change failed: \(error)") }
             DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    self.committed(keys.filter { self.hidden[$0] != nil })
-                    self.showToast(assigned ? "Added to \(name)" : "Removed from \(name)",
-                                   undo: UndoEntry(change: .project(projectId, keys, assigned: assigned), threads: keys))
-                }
+                MainActor.assumeIsolated { self.committed(keys.filter { self.hidden[$0] != nil }) }
             }
         }
     }
