@@ -16,8 +16,8 @@ enum SearchSchema {
             );
             INSERT INTO message_fts(message_fts) VALUES('rebuild');
 
-            -- larger: / smaller: without scanning every message.
-            CREATE INDEX message_by_size ON message(sizeEstimate);
+            -- larger: finds the threads of big messages from this index alone, without touching messages.
+            CREATE INDEX message_by_size ON message(sizeEstimate, accountId, threadId);
             -- is:needsreply starts from the few flagged threads instead of walking the whole list.
             CREATE INDEX thread_ai_needs_reply ON thread_ai(accountId, threadId) WHERE needsReply = 1;
             """)

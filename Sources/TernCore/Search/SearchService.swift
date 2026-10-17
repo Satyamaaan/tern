@@ -40,6 +40,14 @@ public struct SearchService: Sendable {
         try run(query, options, resolveHits: true)
     }
 
+    /// Merges the full-text index into one segment. Searching works without it; run it now and then while idle
+    /// (e.g. after a big backfill) to keep the index compact. Can take a few seconds on a large mailbox.
+    public func optimizeIndex() throws {
+        try database.writer.write { db in
+            try db.execute(sql: "INSERT INTO message_fts(message_fts) VALUES('optimize')")
+        }
+    }
+
     private func run(_ query: SearchQuery, _ options: SearchOptions, resolveHits: Bool) throws -> [SearchHit] {
         guard !query.isEmpty else { return [] }
         let limit = max(1, min(options.limit, 500))
@@ -47,13 +55,13 @@ public struct SearchService: Sendable {
             guard let compiled = try SearchCompiler(db, options: options).compile(query), !compiled.isImpossible else {
                 return []
             }
-            let executor = SearchExecutor(db: db, compiled: compiled)
-            let keys = switch options.sort {
-            case .newest: try executor.threadKeys(plan: try executor.choosePlan(), limit: limit)
-            case .relevance: try executor.rankedThreadKeys(limit: limit)
+            let executor = SearchExecutor(db: db, compiled: compiled, limit: limit)
+            let found = switch options.sort {
+            case .newest: try executor.run(try executor.choosePlan(), resolveMatches: resolveHits)
+            case .relevance: try executor.runRanked()
             }
-            let rows = try MailStore.fetchThreadRows(db, keys: keys)
-            return try executor.hits(for: rows, resolve: resolveHits)
+            let rows = try MailStore.fetchThreadRows(db, keys: found.map(\.key))
+            return try executor.hits(rows: rows, found: found, resolve: resolveHits)
         }
     }
 }

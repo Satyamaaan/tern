@@ -46,7 +46,15 @@ struct CompiledSearch {
     var lastDateMin: Double?
     var lastDateMax: Double?
     var accountIds: [String]?
-    var highlighter: SearchHighlighter
+    /// Marks free-text terms in a message body excerpt.
+    var bodyHighlighter: SearchHighlighter
+    /// Marks free-text terms and `subject:` values in a subject.
+    var subjectHighlighter: SearchHighlighter
+    /// First word of each positive text term, lowercased ASCII: where to excerpt a body from.
+    var bodyTerms: [String] = []
+    /// Microseconds to test one message against every full-text expression the query probes with (the planner
+    /// avoids per-message tests when this is high).
+    var probeCost = 0.0
 
     var hasMessageConditions: Bool { fts != nil || !messageConds.isEmpty }
 
@@ -62,6 +70,7 @@ final class SearchCompiler {
     private var accountsCache: [Account]?
     private var labelsCache: [(accountId: String, id: String, name: String)]?
     private var projectsCache: [(id: String, name: String)]?
+    private var messageProbeCost = 0.0
 
     init(_ db: Database, options: SearchOptions) {
         self.db = db
@@ -72,7 +81,9 @@ final class SearchCompiler {
 
     func compile(_ query: SearchQuery) throws -> CompiledSearch? {
         guard let root = query.root else { return nil }
-        var compiled = CompiledSearch(highlighter: query.highlighter)
+        var compiled = CompiledSearch(
+            bodyHighlighter: query.highlighter(text: true, fields: []),
+            subjectHighlighter: query.highlighter(text: true, fields: [.subject]))
         var positives: [String] = []
         var negatives: [String] = []
         var accountIds: Set<String>? = options.accountId.map { [$0] }
@@ -104,6 +115,8 @@ final class SearchCompiler {
             compiled.threadConds.append(accountIds.isEmpty ? .never : SQLFragment("t.accountId IN \(list.sql)", list.arguments))
             compiled.messageConds.append(accountIds.isEmpty ? .never : SQLFragment("m.accountId IN \(list.sql)", list.arguments))
         }
+        compiled.bodyTerms = bodyTerms(of: root)
+        compiled.probeCost = (compiled.fts.map(Self.probeCost(of:)) ?? 0) + messageProbeCost
         if !query.includesTrashOrSpam {
             compiled.threadConds.append(SQLFragment("""
                 NOT EXISTS (SELECT 1 FROM thread_label hide WHERE hide.accountId = t.accountId \
@@ -182,18 +195,19 @@ final class SearchCompiler {
         case .filter(.hasAttachment):
             compiled.threadConds.append(SQLFragment("t.hasAttachments = 1"))
         case .filter(.larger(let bytes)):
-            compiled.drivers.append(.set(SQLFragment(
-                "SELECT DISTINCT accountId AS a, threadId AS i FROM message WHERE sizeEstimate > ?", [bytes])))
+            compiled.drivers.append(.set(SQLFragment("""
+                SELECT DISTINCT accountId AS a, threadId AS i FROM message INDEXED BY message_by_size WHERE sizeEstimate > ?
+                """, [bytes])))
         case .field(.filename, let text):
             guard !text.value.isEmpty else { return }
             compiled.drivers.append(.set(SQLFragment("""
                 SELECT DISTINCT m.accountId AS a, m.threadId AS i FROM attachment x \
-                JOIN message m ON m.accountId = x.accountId AND m.id = x.messageId \
+                CROSS JOIN message m ON m.accountId = x.accountId AND m.id = x.messageId \
                 WHERE x.filename LIKE ? ESCAPE '\\'
                 """, [SearchSQL.containsPattern(text.value)])))
         case .field(.cc, let text), .field(.bcc, let text):
             // The index only knows "recipients"; use it to find candidates, the list column to confirm.
-            if let phrase = Self.phrase(text) { positives.append("searchRecipients : \(phrase)") }
+            if let phrase = phrase(text) { positives.append("searchRecipients : \(phrase)") }
         default: break
         }
     }
@@ -204,20 +218,17 @@ final class SearchCompiler {
     func fts(_ expr: SearchExpr) throws -> String? {
         switch expr {
         case .text(let text):
-            return Self.phrase(text)
+            return phrase(text)
         case .field(let field, let text):
             switch field {
             case .from:
                 if Self.isMe(text) { return nil }
-                return Self.phrase(text).map { "searchSender : \($0)" }
+                return phrase(text).map { "searchSender : \($0)" }
             case .to:
-                if Self.isMe(text) {
-                    let phrases = try accounts().compactMap { Self.phrase(SearchText($0.email, isPhrase: true)) }
-                    return phrases.isEmpty ? nil : "searchRecipients : (\(Self.anyOf(phrases)))"
-                }
-                return Self.phrase(text).map { "searchRecipients : \($0)" }
+                if Self.isMe(text) { return nil }
+                return phrase(text).map { "searchRecipients : \($0)" }
             case .subject:
-                return Self.phrase(text).map { "subject : \($0)" }
+                return phrase(text).map { "subject : \($0)" }
             case .cc, .bcc, .filename:
                 return nil
             }
@@ -250,7 +261,7 @@ final class SearchCompiler {
 
     /// One quoted FTS5 phrase. Only letters and digits survive tokenizing, so nothing typed can become FTS5
     /// syntax (no operators, column filters, `NEAR`, `*` or quotes).
-    static func phrase(_ text: SearchText) -> String? {
+    func phrase(_ text: SearchText) -> String? {
         let tokens = text.tokens
         guard !tokens.isEmpty else { return nil }
         let quoted = tokens.joined(separator: " ").replacingOccurrences(of: "\"", with: "\"\"")
@@ -272,7 +283,24 @@ final class SearchCompiler {
     }
 
     private func probe(_ expression: String) -> SQLFragment {
-        SQLFragment("EXISTS (SELECT 1 FROM message_fts WHERE message_fts MATCH ? AND rowid = m.seq)", [expression])
+        messageProbeCost += Self.probeCost(of: expression)
+        return SearchExecutor.probe(expression)
+    }
+
+    /// Microseconds for the index to test one message against `expression` (measured on a 12-segment index):
+    /// ~17 per word, and ~230 more for a prefix of four letters or more, which has no prefix index.
+    static func probeCost(of expression: String) -> Double {
+        var cost = 0.0
+        var rest = expression[...]
+        // Every phrase is "word word…", optionally followed by *; nothing else in the expression is quoted.
+        while let open = rest.firstIndex(of: "\""), let close = rest[rest.index(after: open)...].firstIndex(of: "\"") {
+            let words = rest[rest.index(after: open)..<close].split(separator: " ")
+            cost += 17 * Double(words.count)
+            let next = rest.index(after: close)
+            if next < rest.endIndex, rest[next] == "*", (words.last?.count ?? 0) >= 4 { cost += 230 }
+            rest = rest[next...]
+        }
+        return cost
     }
 
     // MARK: Message-level SQL (alias `m`)
@@ -287,7 +315,14 @@ final class SearchCompiler {
             case .from:
                 return Self.isMe(text) ? SQLFragment("m.isFromMe = 1") : .always
             case .to:
-                return Self.isMe(text) ? .never : .always
+                guard Self.isMe(text) else { return .always }
+                // Any of your own addresses among the recipients; a substring test is cheaper than the index here.
+                let tests = try accounts().flatMap { account in
+                    ["toList", "ccList", "bccList"].map {
+                        SQLFragment("m.\($0) LIKE ? ESCAPE '\\'", [SearchSQL.containsPattern(account.email)])
+                    }
+                }
+                return .any(tests)
             case .cc:
                 return SQLFragment("m.ccList LIKE ? ESCAPE '\\'", [SearchSQL.containsPattern(text.value)])
             case .bcc:
@@ -430,24 +465,38 @@ final class SearchCompiler {
             .map { (accountId: $0.accountId, id: $0.id) }
     }
 
+    /// One branch per account, each with the account as a constant, so every branch is a primary-key lookup
+    /// in `thread_label (accountId, labelId, threadId)`. Ids that look like the typed text work even with no
+    /// label rows (`label:INBOX`); names need the label table, and mean different ids in different accounts.
     private func labelPredicate(_ value: String, _ t: String) throws -> SQLFragment {
-        // Plain ids work with no label rows at all (`label:INBOX`); names need the label table.
-        var alternatives: [SQLFragment] = []
-        let ids = Array(Set([value, value.uppercased()]))
-        let list = SQLFragment.list(ids)
-        alternatives.append(SQLFragment("x.labelId IN \(list.sql)", list.arguments.map { $0 as any DatabaseValueConvertible }))
+        let typedIds = [value, value.uppercased()]
         let byAccount = Dictionary(grouping: try matchingLabels(value), by: \.accountId)
-        for (accountId, matches) in byAccount.sorted(by: { $0.key < $1.key }) {
-            let labelList = SQLFragment.list(Array(Set(matches.map(\.id))).sorted())
-            alternatives.append(SQLFragment(
-                "x.accountId = ? AND x.labelId IN \(labelList.sql)",
-                [accountId] + labelList.arguments.map { $0 as any DatabaseValueConvertible }))
+        let branches: [SQLFragment] = try accounts().map { account in
+            let ids = Array(Set(typedIds + (byAccount[account.id] ?? []).map(\.id))).sorted()
+            let list = SQLFragment.list(ids)
+            return SQLFragment("""
+                \(t).accountId = ? AND EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId = ? \
+                AND x.labelId IN \(list.sql) AND x.threadId = \(t).id)
+                """, [account.id, account.id] + list.arguments.map { $0 as any DatabaseValueConvertible })
         }
-        let condition = SQLFragment.any(alternatives)
-        return SQLFragment("""
-            EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId = \(t).accountId AND x.threadId = \(t).id \
-            AND (\(condition.sql)))
-            """, condition.arguments.map { $0 as any DatabaseValueConvertible })
+        return .any(branches)
+    }
+
+    /// First word of each positive free-text term that can be found in a body with `instr(lower(…))`.
+    private func bodyTerms(of expr: SearchExpr) -> [String] {
+        var terms: [String] = []
+        func visit(_ expr: SearchExpr) {
+            switch expr {
+            case .text(let text):
+                if let word = text.tokens.first?.lowercased(), word.utf8.allSatisfy({ $0 < 0x80 }), !terms.contains(word) {
+                    terms.append(word)
+                }
+            case .and(let children), .or(let children): children.forEach(visit)
+            case .field, .filter, .not: break
+            }
+        }
+        visit(expr)
+        return Array(terms.prefix(4))
     }
 
     /// The single label id to walk when a typed label means the same id in every account.

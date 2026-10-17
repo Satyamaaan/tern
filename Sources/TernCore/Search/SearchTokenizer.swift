@@ -65,10 +65,21 @@ public struct SearchHighlighter: Sendable {
         var isPrefix: Bool
     }
 
+    /// A term whose words are all ASCII once folded, so it can be matched against ASCII text byte by byte.
+    private struct ASCIITerm: Sendable {
+        var words: [[UInt8]]
+        var isPrefix: Bool
+    }
+
     let terms: [Term]
+    private let asciiTerms: [ASCIITerm]
 
     init(terms: [Term]) {
         self.terms = terms
+        asciiTerms = terms.compactMap { term in
+            let words = term.tokens.map { Array($0.utf8) }
+            return words.allSatisfy({ $0.allSatisfy { $0 < 0x80 } }) ? ASCIITerm(words: words, isPrefix: term.isPrefix) : nil
+        }
     }
 
     public var isEmpty: Bool { terms.isEmpty }
@@ -76,6 +87,60 @@ public struct SearchHighlighter: Sendable {
     /// UTF-16 ranges (usable with `NSAttributedString`), sorted and merged.
     public func ranges(in text: String) -> [NSRange] {
         guard !terms.isEmpty, !text.isEmpty else { return [] }
+        var text = text
+        if let fast = text.withUTF8({ asciiRanges(in: $0) }) { return fast }
+        return unicodeRanges(in: text)
+    }
+
+    private static func isWordByte(_ byte: UInt8) -> Bool {
+        (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)
+    }
+
+    /// Plain ASCII text (nearly every excerpt): scan bytes, no String work. Nil when the text has other characters.
+    private func asciiRanges(in bytes: UnsafeBufferPointer<UInt8>) -> [NSRange]? {
+        var starts: [Int] = []
+        var ends: [Int] = []
+        var i = 0
+        let count = bytes.count
+        while i < count {
+            let byte = bytes[i]
+            if byte >= 0x80 { return nil }
+            if Self.isWordByte(byte) {
+                let start = i
+                i += 1
+                while i < count, Self.isWordByte(bytes[i]) { i += 1 }
+                starts.append(start)
+                ends.append(i)
+            } else {
+                i += 1
+            }
+        }
+        if i < count { return nil }
+        guard !starts.isEmpty else { return [] }
+
+        var found: [NSRange] = []
+        for term in asciiTerms where term.words.count <= starts.count {
+            let last = term.words.count - 1
+            for first in 0...(starts.count - term.words.count) {
+                var matches = true
+                for offset in 0...last {
+                    let word = term.words[offset]
+                    let start = starts[first + offset]
+                    let length = ends[first + offset] - start
+                    let prefix = offset == last && term.isPrefix
+                    if prefix ? length < word.count : length != word.count { matches = false; break }
+                    for index in 0..<word.count where bytes[start + index] | 0x20 != word[index] { matches = false; break }
+                    if !matches { break }
+                }
+                if matches {
+                    found.append(NSRange(location: starts[first], length: ends[first + last] - starts[first]))
+                }
+            }
+        }
+        return Self.merge(found)
+    }
+
+    private func unicodeRanges(in text: String) -> [NSRange] {
         let tokens = SearchTokenizer.foldedTokens(in: text)
         guard !tokens.isEmpty else { return [] }
         var found: [NSRange] = []

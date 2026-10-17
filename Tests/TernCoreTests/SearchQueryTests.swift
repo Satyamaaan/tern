@@ -445,14 +445,15 @@ private func makeFixture() throws -> Fixture {
         let routes = try f.store.database.reader.read { db -> [(String, [String])] in
             let options = f.options()
             guard let compiled = try SearchCompiler(db, options: options).compile(SearchQuery(text)) else { return [] }
-            let executor = SearchExecutor(db: db, compiled: compiled)
-            var routes: [(String, [String])] = [("walk", try executor.threadKeys(plan: .threadWalk, limit: 50).map(\.threadId))]
-            routes.append(("chosen", try executor.threadKeys(plan: try executor.choosePlan(), limit: 50).map(\.threadId)))
-            if compiled.fts != nil { routes.append(("fts", try executor.threadKeys(plan: .ftsFirst, limit: 50).map(\.threadId))) }
+            let executor = SearchExecutor(db: db, compiled: compiled, limit: 50)
+            func ids(_ plan: SearchExecutor.Plan) throws -> [String] { try executor.run(plan).map(\.key.threadId) }
+            var routes: [(String, [String])] = [("walk", try ids(.threadWalk))]
+            routes.append(("chosen \(try executor.choosePlan())", try ids(try executor.choosePlan())))
+            if compiled.fts != nil { routes.append(("fts", try ids(.ftsFirst))) }
             for driver in compiled.drivers {
                 switch driver {
-                case .label(let id): routes.append(("label \(id)", try executor.threadKeys(plan: .labelWalk(id), limit: 50).map(\.threadId)))
-                case .set(let fragment): routes.append(("set", try executor.threadKeys(plan: .set(fragment), limit: 50).map(\.threadId)))
+                case .label(let id): routes.append(("label \(id)", try ids(.labelWalk(id))))
+                case .set(let fragment): routes.append(("set", try ids(.set(fragment))))
                 }
             }
             return routes

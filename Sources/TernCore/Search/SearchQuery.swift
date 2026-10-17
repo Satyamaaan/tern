@@ -143,17 +143,25 @@ public struct SearchQuery: Hashable, Sendable {
         }
     }
 
-    /// Positive words and phrases (not under a negation), for highlighting matches in the list.
+    /// Positive words and phrases (not under a negation), for highlighting matches in the list. Includes the
+    /// values of `from:`, `to:`, `cc:`, `bcc:` and `subject:`, so it also suits sender and subject text.
     public var highlighter: SearchHighlighter {
+        highlighter(text: true, fields: [.from, .to, .cc, .bcc, .subject])
+    }
+
+    /// A highlighter for free-text terms (`text`) and the values of the given operators only.
+    func highlighter(text includeText: Bool, fields: Set<SearchField>) -> SearchHighlighter {
         var terms: [SearchHighlighter.Term] = []
+        func add(_ text: SearchText) {
+            let tokens = text.tokens.map(SearchTokenizer.fold)
+            if !tokens.isEmpty { terms.append(.init(tokens: tokens, isPrefix: text.isPrefix)) }
+        }
         func visit(_ expr: SearchExpr) {
             switch expr {
-            case .text(let text), .field(.from, let text), .field(.to, let text), .field(.cc, let text),
-                 .field(.bcc, let text), .field(.subject, let text):
-                let tokens = text.tokens.map(SearchTokenizer.fold)
-                if !tokens.isEmpty { terms.append(.init(tokens: tokens, isPrefix: text.isPrefix)) }
+            case .text(let text): if includeText { add(text) }
+            case .field(let field, let text): if fields.contains(field) { add(text) }
             case .and(let children), .or(let children): children.forEach(visit)
-            case .field(.filename, _), .filter, .not: break
+            case .filter, .not: break
             }
         }
         if let root { visit(root) }
