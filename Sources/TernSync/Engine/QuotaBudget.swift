@@ -17,6 +17,7 @@ public struct GmailQuota: Sendable, Hashable {
     public var createDraft = 10
     public var updateDraft = 15
     public var deleteDraft = 10
+    public var listDrafts = 5
     public var profile = 1
     public var labels = 1
     public var changeLabel = 5
@@ -55,19 +56,38 @@ public enum QuotaPriority: Int, Sendable, Comparable {
 /// whole minute; bulk and background calls stop short of it, keeping a reserve free so a poll, an
 /// action or an opened thread never waits behind a backfill. After Gmail rate limits the account,
 /// every call fails fast with `.rateLimited` until the pause ends.
+///
+/// Bulk and background calls are also paced: in any `paceWindow` seconds they may only add up to
+/// their share of the minute for that long (counting everything spent meanwhile), so they never
+/// burst. That keeps the HTTP client's rate limiter, a full-rate safety net, close to full, and an
+/// interactive request rarely waits there behind background work.
 public actor QuotaBudget {
     public nonisolated let unitsPerMinute: Int
     private let reserves: [QuotaPriority: Int]
+    private let paceWindow: Double
     private let clock: any SyncClock
     private var spent: [(at: Date, units: Int)] = []
     public private(set) var pausedUntil: Date?
     /// Every unit charged since the budget was created.
     public private(set) var totalUnits = 0
 
-    public init(unitsPerMinute: Int, bulkReserve: Int, backgroundReserve: Int, clock: any SyncClock) {
+    /// - Parameter paceWindow: Seconds over which bulk and background spending is smoothed; 0 lets
+    ///   them use their share of the minute in one burst.
+    public init(unitsPerMinute: Int, bulkReserve: Int, backgroundReserve: Int, paceWindow: Double = 0, clock: any SyncClock) {
         self.unitsPerMinute = unitsPerMinute
         self.reserves = [.interactive: 0, .bulk: bulkReserve, .background: max(bulkReserve, backgroundReserve)]
+        self.paceWindow = min(60, max(0, paceWindow))
         self.clock = clock
+    }
+
+    /// Most units `priority` may spend in one `paceWindow`; nil when it isn't paced.
+    public nonisolated func paceAllowance(_ priority: QuotaPriority) -> Int? {
+        guard priority != .interactive, paceWindow > 0 else { return nil }
+        return max(1, Int(Double(ceiling(priority)) * paceWindow / 60))
+    }
+
+    private nonisolated func ceiling(_ priority: QuotaPriority) -> Int {
+        unitsPerMinute - (reserves[priority] ?? 0)
     }
 
     /// Waits until `units` fit in the window for `priority`, then charges them.
@@ -118,15 +138,24 @@ public actor QuotaBudget {
 
     private func delay(for units: Int, priority: QuotaPriority, now: Date) -> Double {
         prune(now)
-        let ceiling = unitsPerMinute - (reserves[priority] ?? 0)
-        var used = spent.reduce(0) { $0 + $1.units }
-        // A request bigger than the ceiling still runs once the window is empty.
-        if used + units <= ceiling || used == 0 { return 0 }
-        for entry in spent {
+        let minute = Self.delay(for: units, limit: ceiling(priority), window: 60, entries: spent[...], now: now)
+        guard let allowance = paceAllowance(priority) else { return minute }
+        let cutoff = now.addingTimeInterval(-paceWindow)
+        let recent = spent[(spent.firstIndex { $0.at > cutoff } ?? spent.endIndex)...]
+        return max(minute, Self.delay(for: units, limit: allowance, window: paceWindow, entries: recent, now: now))
+    }
+
+    /// Seconds until `units` more fit under `limit` in a rolling `window` holding `entries`.
+    /// A request bigger than the limit still runs once the window is empty.
+    private static func delay(for units: Int, limit: Int, window: Double,
+                              entries: ArraySlice<(at: Date, units: Int)>, now: Date) -> Double {
+        var used = entries.reduce(0) { $0 + $1.units }
+        if used + units <= limit || used == 0 { return 0 }
+        for entry in entries {
             used -= entry.units
-            if used + units <= ceiling || used == 0 { return entry.at.addingTimeInterval(60).timeIntervalSince(now) }
+            if used + units <= limit || used == 0 { return entry.at.addingTimeInterval(window).timeIntervalSince(now) }
         }
-        return 60
+        return window
     }
 
     private func prune(_ now: Date) {
@@ -221,6 +250,17 @@ struct BudgetedGmail: GmailAPI {
 
     func sendDraft(id: String) async throws -> GmailMessageRef {
         try await charge(quota.send) { try await base.sendDraft(id: id) }
+    }
+
+    func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
+        do {
+            return try await charge(quota.listDrafts) {
+                try await base.drafts(query: query, pageToken: pageToken, maxResults: maxResults)
+            }
+        } catch GmailAPIError.server(501, GmailDraftPage.unsupported) {
+            await budget.refund(quota.listDrafts)
+            throw GmailAPIError.server(status: 501, message: GmailDraftPage.unsupported)
+        }
     }
 
     func sendAs() async throws -> [GmailSendAs] { try await charge(quota.sendAs) { try await base.sendAs() } }

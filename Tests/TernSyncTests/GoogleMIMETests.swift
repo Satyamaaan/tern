@@ -248,6 +248,53 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
         #expect(!html.contains("file://"))
     }
 
+    @Test func forwardedInlineImagesKeepTheirContentId() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47] + Array(repeating: 9, count: 100))
+        let path = try temporaryFile("logo.png", png)
+        let pdf = try temporaryFile("Agenda.pdf", Data("pdf".utf8))
+        let draft = Draft(accountId: "a", toList: [Participant(email: "x@example.com")], subject: "Fwd: Offsite",
+                          bodyHtml: #"<p>FYI</p><div class="gmail_quote"><img src="cid:logo@lumen"></div>"#,
+                          attachments: [DraftAttachment(path: path, filename: "logo.png", mimeType: "image/png", size: png.count,
+                                                        contentId: "logo@lumen"),
+                                        DraftAttachment(path: pdf, filename: "Agenda.pdf", mimeType: "application/pdf", size: 3)])
+        let (text, message) = try build(draft)
+        checkLines(text)
+
+        #expect(message.mimeType == "multipart/mixed")
+        let related = message.children[0].children[1]
+        #expect(related.children.map(\.mimeType) == ["text/html", "image/png"])
+        #expect(related.children[1].header("Content-ID") == "<logo@lumen>")
+        #expect(related.children[1].decoded == png)
+        #expect(related.children[0].text.contains(#"src="cid:logo@lumen""#))
+        #expect(message.children[1].mimeType == "application/pdf")
+    }
+
+    @Test func draftEncoderAddsSenderNameAndReplyHeaders() throws {
+        let store = try MailStore(AppDatabase.inMemory())
+        try store.database.writer.write { db in
+            try Account(email: "me@example.com", displayName: "Personal").insert(db)
+            try Setting(key: DraftStore.SettingKey.senderName("me@example.com"), value: "Mia Example").insert(db)
+            try MailStore.upsertMessages(db, [MailMessage(
+                accountId: "me@example.com", id: "m2", threadId: "t1", date: Date(), fromEmail: "ann@example.com",
+                subject: "Plans", rfcMessageId: "<two@example.com>", refs: "<one@example.com>")])
+        }
+        let draft = Draft(accountId: "me@example.com", threadId: "t1", replyToMessageId: "m2", kind: .reply,
+                          toList: [Participant(email: "ann@example.com")], subject: "Re: Plans", bodyHtml: "<p>Yes</p>")
+        let account = Account(email: "me@example.com", displayName: "Personal")
+        let message = try Entity(try DraftEncoder.make(store: store)(draft, account))
+        #expect(message.header("From") == "Mia Example <me@example.com>")
+        #expect(message.header("In-Reply-To") == "<two@example.com>")
+        #expect(message.header("References") == "<one@example.com> <two@example.com>")
+
+        var fresh = draft
+        fresh.kind = .new
+        fresh.threadId = nil
+        fresh.replyToMessageId = nil
+        let plain = try Entity(try DraftEncoder.make(store: store)(fresh, Account(email: "you@example.com")))
+        #expect(plain.header("From") == "you@example.com", "no sender name known: the address alone")
+        #expect(plain.header("In-Reply-To") == nil)
+    }
+
     @Test func longNamesStillFold() throws {
         let draft = Draft(accountId: "a", toList: [Participant(name: String(repeating: "Very Long Name ", count: 80), email: "x@example.com")],
                           subject: "e" + String(repeating: "\u{301}", count: 600))

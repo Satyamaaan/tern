@@ -19,6 +19,7 @@ enum GmailQuotaCost {
     static let draftsUpdate = 15
     static let draftsDelete = 10
     static let draftsSend = 100
+    static let draftsList = 5
     static let sendAsList = 1
 
     /// messages.get: 20, or 60 with `format=full` or `raw`.
@@ -28,16 +29,25 @@ enum GmailQuotaCost {
         case .full, .raw: 60
         }
     }
+
+    /// threads.get: 40, or 120 with `format=full`.
+    static func threadsGet(_ format: GmailMessageFormat) -> Int {
+        switch format {
+        case .minimal, .metadata: 40
+        case .full, .raw: 120
+        }
+    }
 }
 
-/// Token bucket in Gmail quota units, one per account.
+/// Token bucket in Gmail quota units, one per account: a safety net under the sync engine.
 ///
-/// Gmail allows each user 6,000 units a minute per Cloud project (15,000 for projects that used the
-/// API before 2026-05-01). The bucket refills at 80% of that and holds 10%, so even a full bucket
-/// plus a minute of refill stays under the limit, leaving room for retries and the user's other
-/// clients. Callers reserve units up front and wait for the refill, so concurrent callers are served
-/// in arrival order and a request costing more than the bucket simply waits longer. After a
-/// rate-limit response, `pause(for:)` holds everyone back.
+/// The engine's `QuotaBudget` is the real scheduler: it keeps each account inside Gmail's per-user
+/// quota (6,000 units a minute for projects created since 2026-05-01) and decides what goes first.
+/// This bucket only catches traffic that bypasses it, so it refills at the full per-minute rate and
+/// holds `burst` units (default: a third of a minute, enough for a history poll's 30 new messages
+/// in full), and budgeted traffic passes without waiting. Callers reserve units up front and wait for the refill,
+/// so concurrent callers are served in arrival order. After a rate-limit response, `pause(for:)`
+/// holds everyone back.
 public actor GmailRateLimiter {
     private let unitsPerSecond: Double
     private let capacity: Double
@@ -46,12 +56,23 @@ public actor GmailRateLimiter {
     private var lastRefill: TimeInterval
     private var blockedUntil: TimeInterval = 0
 
-    public init(unitsPerMinute: Double = 6000, clock: GoogleClock = .live) {
-        self.unitsPerSecond = unitsPerMinute * 0.8 / 60
-        self.capacity = unitsPerMinute * 0.1
+    /// - Parameters:
+    ///   - unitsPerMinute: The refill rate.
+    ///   - burst: Units the bucket holds; nil for a third of `unitsPerMinute`.
+    public init(unitsPerMinute: Double = 6000, burst: Double? = nil, clock: GoogleClock = .live) {
+        self.unitsPerSecond = unitsPerMinute / 60
+        self.capacity = max(1, burst ?? unitsPerMinute / 3)
         self.clock = clock
         self.tokens = capacity
         self.lastRefill = clock.now()
+    }
+
+    /// Seconds a caller asking for `units` now would wait (0 when they're available).
+    public func delay(for units: Int) -> TimeInterval {
+        let now = clock.now()
+        refill(now)
+        let debt = Double(units) - tokens
+        return max(blockedUntil - now, debt > 0 ? debt / unitsPerSecond : 0, 0)
     }
 
     /// Waits until `units` may be spent. A pause that starts while a caller waits holds it too.

@@ -11,8 +11,9 @@ public enum MIMEBuilderError: Error, Equatable, Sendable {
 /// Structure, innermost first:
 /// - `multipart/alternative`: text/plain (derived from the HTML) and text/html.
 /// - Inline images: the HTML half becomes `multipart/related` with the images, each with a
-///   Content-ID. An attachment is inline when the HTML shows it with `<img src="…">` pointing at its
-///   file (a `file://` URL or the bare path); the builder rewrites that src to `cid:…`.
+///   Content-ID. An attachment is inline when it has a `contentId` the HTML refers to as `cid:…`
+///   (a forwarded inline image), or when the HTML shows it with `<img src="…">` pointing at its file
+///   (a `file://` URL or the bare path); the builder rewrites that src to `cid:…`.
 /// - Other attachments: everything is wrapped in `multipart/mixed`.
 ///
 /// Text parts are quoted-printable (base64 when mostly non-ASCII); attachments are base64 in
@@ -45,7 +46,9 @@ public struct MIMEBuilder {
         var inline: [(DraftAttachment, contentId: String)] = []
         var regular: [DraftAttachment] = []
         for attachment in draft.attachments {
-            if attachment.mimeType.lowercased().hasPrefix("image/"),
+            if let contentId = attachment.contentId, !contentId.isEmpty, html.contains("cid:\(contentId)") {
+                inline.append((attachment, contentId))
+            } else if attachment.mimeType.lowercased().hasPrefix("image/"),
                let rewritten = Self.replaceImageSource(in: html, path: attachment.path) {
                 let contentId = "\(makeToken())@tern"
                 html = rewritten.replacingOccurrences(of: Self.cidPlaceholder, with: "cid:\(contentId)")
@@ -128,7 +131,7 @@ public struct MIMEBuilder {
         }
         part += "\r\n"
         part += "Content-Disposition: \(disposition)" + MIMEEncoding.parameter("filename", filename) + "\r\n"
-        if let contentId { part += "Content-ID: <\(contentId)>\r\n" }
+        if let contentId { part += "Content-ID: <\(MIMEEncoding.sanitize(contentId))>\r\n" }
         part += "Content-Transfer-Encoding: base64\r\n\r\n"
         part += MIMEEncoding.base64Lines(data)
         return part

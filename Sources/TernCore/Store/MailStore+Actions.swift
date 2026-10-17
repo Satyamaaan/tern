@@ -31,6 +31,14 @@ public enum MailAction: Codable, Hashable, Sendable {
         }
     }
 
+    /// Adds or removes a user label, which project rules may look at.
+    var changesUserLabels: Bool {
+        switch self {
+        case .addLabel, .removeLabel, .moveToLabel: true
+        default: false
+        }
+    }
+
     /// True when the thread leaves the current list (the UI then selects the next one).
     public var removesFromInbox: Bool {
         switch self {
@@ -104,9 +112,35 @@ extension MailStore {
             }
         }
 
+        // Gmail echoes the change back unchanged, so sync won't re-run label-based project rules.
+        if action.changesUserLabels { try ProjectRules.apply(db, keys: Set(threads)) }
         return UndoToken(
             action: action, threads: threads, opIds: opIds, previousLabels: previousLabels,
             previousSnoozes: previousSnoozes)
+    }
+
+    /// Applies a different action to each group of threads (e.g. a label whose id differs per account)
+    /// in one transaction, with one undo for all of it, named after the first action.
+    @discardableResult
+    public func perform(_ actions: [(action: MailAction, threads: [ThreadKey])]) throws -> UndoToken {
+        try database.writer.write { db in try Self.perform(db, actions) }
+    }
+
+    public static func perform(_ db: Database, _ actions: [(action: MailAction, threads: [ThreadKey])]) throws -> UndoToken {
+        guard let first = actions.first else { return try perform(db, .archive, on: []) }
+        var threads: [ThreadKey] = []
+        var opIds: [Int64] = []
+        var previousLabels: [MessageKey: [String]] = [:]
+        var previousSnoozes: [ThreadKey: Date?] = [:]
+        for item in actions {
+            let token = try perform(db, item.action, on: item.threads)
+            threads += token.threads
+            opIds += token.opIds
+            previousLabels.merge(token.previousLabels) { earlier, _ in earlier }
+            previousSnoozes.merge(token.previousSnoozes) { earlier, _ in earlier }
+        }
+        return UndoToken(action: first.action, threads: threads, opIds: opIds, previousLabels: previousLabels,
+                         previousSnoozes: previousSnoozes)
     }
 
     /// Puts threads back. If Gmail hasn't seen the action yet, the queued op is simply dropped.
@@ -141,6 +175,8 @@ extension MailStore {
                     try op.insert(db)
                 }
             }
+
+            if token.action.changesUserLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
 
             for (key, until) in token.previousSnoozes {
                 if let until {

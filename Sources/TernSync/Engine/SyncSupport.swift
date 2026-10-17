@@ -26,6 +26,9 @@ public struct SyncConfiguration: Sendable {
     public var snoozeCheckInterval: Double = 30
     /// How often the label list is refreshed during live sync.
     public var labelRefreshInterval: Double = 600
+    /// How often send-as settings (signatures, sender names) are read again, and daily upkeep
+    /// (needs-reply expiry) runs.
+    public var dailyInterval: Double = 86_400
 
     /// Quota costs and the per-user limit (per account; accounts sync in parallel).
     public var quota = GmailQuota()
@@ -33,11 +36,21 @@ public struct SyncConfiguration: Sendable {
     public var bulkReserve: Int = 600
     /// Units per minute background work (older mail, body trickle) leaves for everything else.
     public var backgroundReserve: Int = 1_500
+    /// Bulk and background spending is smoothed over this many seconds: in any such window they
+    /// spend at most their per-minute share for that long (540 and 450 units by default), so they
+    /// never burst and interactive calls don't queue behind them in the HTTP client's limiter.
+    public var paceWindow: Double = 6
     /// Most units one bulk step may spend before the loop checks for polls and actions again.
-    public var bulkStepUnits: Int = 1_200
+    /// Half a pace window: two steps use the whole share, and one runs even after an opened thread.
+    public var bulkStepUnits: Int = 270
 
     /// Initial sync fetches this many days of All Mail in full, after the inbox.
     public var recentDays: Int = 30
+    /// At most this many of the newest inbox messages come in full in the initial sync (an inbox of
+    /// 50,000 would otherwise take hours of quota); older ones arrive with the backfill.
+    public var initialInboxLimit: Int = 500
+    /// At most this many of the newest recent messages come in full in the initial sync.
+    public var initialRecentLimit: Int = 1_000
     /// Threads with at least this many messages to fetch come from one threads.get (120 units)
     /// instead of one messages.get each (60 units).
     public var threadFetchMinimum: Int = 3
@@ -48,10 +61,14 @@ public struct SyncConfiguration: Sendable {
     /// Most quota units one call may cost, so no single request outgrows the budget's headroom
     /// (16 full messages, 50 metadata, 8 full threads).
     public var maxUnitsPerRequest: Int = 1_000
+    /// The same for bulk and background calls (4 full messages, 12 metadata, 2 full threads), so
+    /// with pacing they never take more than a sliver of the HTTP client's limiter and an
+    /// interactive call doesn't wait there behind them.
+    public var backgroundMaxUnitsPerRequest: Int = 240
     /// Messages per write transaction, so the UI fills in progressively.
     public var writeBatchSize: Int = 250
     /// Older mail is backfilled as metadata (20 units each), this many per background step.
-    public var backfillBatchSize: Int = 50
+    public var backfillBatchSize: Int = 10
     /// New mail per history poll fetched in full (30 × 60 units); beyond it, metadata, with bodies
     /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
     public var historyFullFetchLimit: Int = 30
@@ -76,6 +93,9 @@ public struct SyncConfiguration: Sendable {
     public var maxRequestRetries: Int = 5
     /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<filename>`.
     public var attachmentCacheDirectory: URL = SyncConfiguration.defaultAttachmentDirectory
+    /// `DraftStore.filesDirectory`: forwarded attachments are downloaded into a draft's folder
+    /// before it's sent, and the folder is removed once it has been.
+    public var draftFilesDirectory: URL = DraftStore.defaultFilesDirectory
     /// Wake snoozed threads and sync when the Mac wakes from sleep.
     public var observeSystemWake: Bool = true
 

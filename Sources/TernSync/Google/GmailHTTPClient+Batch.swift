@@ -11,6 +11,23 @@ extension GmailHTTPClient {
     /// dropped, so pass a few hundred ids at a time. With the 2026 quota (6,000 units a minute,
     /// 20 per metadata get, 60 per full get) 150 ids in metadata format use about half a minute of quota.
     public func messages(ids: [String], format: GmailMessageFormat) async throws -> [GmailMessage] {
+        try await batchGet(ids, cost: GmailQuotaCost.messagesGet(format), id: \GmailMessage.id) { id in
+            "/gmail/v1/users/me/messages/\(Self.escape(id))?format=\(format.rawValue)"
+        }
+    }
+
+    /// users.threads.get for many ids, through the same batch machinery as `messages(ids:format:)`:
+    /// 40 units a thread, 120 with `format=full`. threads.get has no raw format; `.raw` asks for full.
+    public func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread] {
+        let format = format == .raw ? .full : format
+        return try await batchGet(ids, cost: GmailQuotaCost.threadsGet(format), id: \GmailThread.id) { id in
+            "/gmail/v1/users/me/threads/\(Self.escape(id))?format=\(format.rawValue)"
+        }
+    }
+
+    /// GETs `path(id)` for every id in concurrent batches; see `messages(ids:format:)`.
+    func batchGet<Item: Decodable>(_ ids: [String], cost: Int, id: KeyPath<Item, String>,
+                                   path: @escaping @Sendable (String) -> String) async throws -> [Item] {
         var seen = Set<String>()
         let unique = ids.filter { seen.insert($0).inserted }
         guard !unique.isEmpty else { return [] }
@@ -18,34 +35,33 @@ extension GmailHTTPClient {
             Array(unique[$0..<min($0 + options.batchSize, unique.count)])
         }
 
-        var found: [String: GmailMessage] = [:]
-        try await withThrowingTaskGroup(of: [GmailMessage].self) { group in
+        var found: [String: Item] = [:]
+        try await withThrowingTaskGroup(of: [Item].self) { group in
             var next = 0
             func startNext() {
                 guard next < chunks.count else { return }
                 let chunk = chunks[next]
                 next += 1
-                group.addTask { try await self.fetchBatch(chunk, format: format) }
+                group.addTask { try await self.fetchBatch(chunk, cost: cost, path: path) }
             }
             for _ in 0..<options.maxConcurrentBatches { startNext() }
-            while let messages = try await group.next() {
-                for message in messages { found[message.id] = message }
+            while let items = try await group.next() {
+                for item in items { found[item[keyPath: id]] = item }
                 startNext()
             }
         }
         return unique.compactMap { found[$0] }
     }
 
-    /// One batch of messages.get, with sub-request retries.
-    func fetchBatch(_ ids: [String], format: GmailMessageFormat) async throws -> [GmailMessage] {
+    /// One batch of GETs, with sub-request retries.
+    func fetchBatch<Item: Decodable>(_ ids: [String], cost: Int, path: (String) -> String) async throws -> [Item] {
         var pending = ids
-        var found: [GmailMessage] = []
+        var found: [Item] = []
         var retries = 0
         var refreshedAuth = false
-        let cost = GmailQuotaCost.messagesGet(format)
 
         while !pending.isEmpty {
-            let paths = pending.map { "/gmail/v1/users/me/messages/\(Self.escape($0))?format=\(format.rawValue)" }
+            let paths = pending.map(path)
             let boundary = "tern-batch-\(UUID().uuidString)"
             var request = try batchRequest()
             request.httpBody = GmailBatch.body(paths: paths, boundary: boundary)

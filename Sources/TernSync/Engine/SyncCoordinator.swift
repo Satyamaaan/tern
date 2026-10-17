@@ -39,7 +39,7 @@ public final class SyncCoordinator {
     /// - Parameters:
     ///   - accounts: Accounts to sync; each is stored if the database doesn't have it yet.
     ///   - apiProvider: The Gmail client for an account id (asked again after `reauthorized`).
-    ///   - encodeDraft: Builds the RFC 822 message for a draft.
+    ///   - encodeDraft: Builds the RFC 822 message for a draft: `DraftEncoder.make(store:)`.
     public init(store: MailStore, accounts: [Account],
                 apiProvider: @escaping @Sendable (String) -> any GmailAPI,
                 encodeDraft: @escaping @Sendable (Draft, Account) throws -> Data,
@@ -61,7 +61,8 @@ public final class SyncCoordinator {
 
     // MARK: Lifecycle
 
-    /// Starts syncing every account, the op-queue observer, the snooze timer and the wake observer.
+    /// Starts syncing every account, the op-queue observer, the snooze timer, daily upkeep and the
+    /// wake observer.
     public func start() {
         guard !isRunning else { return }
         isRunning = true
@@ -85,6 +86,13 @@ public final class SyncCoordinator {
             while !Task.isCancelled {
                 await self?.wakeSnoozedThreads()
                 try? await clock.sleep(seconds: interval)
+            }
+        })
+        let daily = configuration.dailyInterval
+        serviceTasks.append(Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.runDailyUpkeep()
+                try? await clock.sleep(seconds: daily)
             }
         })
 
@@ -178,6 +186,16 @@ public final class SyncCoordinator {
         for accountId in Set(woken.map(\.accountId)) { kick(accountId: accountId) }
     }
 
+    /// Clears needs-reply on threads whose last message aged past `RuleClassifier.needsReplyWindow`.
+    /// Runs at start and daily.
+    public func runDailyUpkeep() async {
+        let store = self.store
+        let now = clock.now()
+        _ = try? await Task.detached(priority: .utility) {
+            try await store.database.writer.write { db in try RuleClassifier.expireNeedsReply(db, now: now) }
+        }.value
+    }
+
     // MARK: Requests
 
     /// Makes sure every message of the thread is stored with its body (call when it opens).
@@ -208,6 +226,40 @@ public final class SyncCoordinator {
         return try await sync.serverSearch(query: query, limit: limit)
     }
 
+    // MARK: Mute
+
+    /// Mutes threads: archives them and labels them "Muted" (a user label Tern creates in each account
+    /// the first time, one Gmail request), through `MailStore.perform`, so it's instant and undoable.
+    /// New mail in a muted thread is archived again as it arrives. Returns the undo.
+    @discardableResult
+    public func mute(_ keys: [ThreadKey]) async throws -> UndoToken {
+        var actions: [(action: MailAction, threads: [ThreadKey])] = []
+        for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
+            guard let sync = syncs[accountId] else { throw SyncError.unknownAccount(accountId) }
+            actions.append((.moveToLabel(try await sync.muteLabelId()), threads))
+        }
+        let store = self.store
+        let planned = actions
+        return try await Task.detached(priority: .userInitiated) { try store.perform(planned) }.value
+    }
+
+    /// Unmutes threads: removes the "Muted" label (they stay where they are, like Gmail's unmute).
+    /// No network wait. Returns the undo.
+    @discardableResult
+    public func unmute(_ keys: [ThreadKey]) async throws -> UndoToken {
+        let store = self.store
+        return try await Task.detached(priority: .userInitiated) {
+            try store.database.writer.write { db in
+                var actions: [(action: MailAction, threads: [ThreadKey])] = []
+                for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
+                    guard let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value else { continue }
+                    actions.append((.removeLabel(label), threads))
+                }
+                return try MailStore.perform(db, actions)
+            }
+        }.value
+    }
+
     // MARK: Internals
 
     @discardableResult
@@ -215,7 +267,12 @@ public final class SyncCoordinator {
         let relay = self.relay
         let sync = AccountSync(
             account: account, store: store, api: apiProvider(account.id), encodeDraft: encodeDraft,
-            configuration: configuration, clock: clock, statusSink: { relay.yield($0) })
+            configuration: configuration, clock: clock,
+            remoteAttachmentFetcher: { [weak self] ref, file in
+                guard let owner = await self?.sync(for: ref.accountId) else { throw SyncError.unknownAccount(ref.accountId) }
+                return try await owner.attachmentData(ref, file: file)
+            },
+            statusSink: { relay.yield($0) })
         syncs[account.id] = sync
         let status = SyncStatus(accountId: account.id, quotaLimit: configuration.quota.unitsPerMinute)
         status.apply(SyncStatusSnapshot(accountId: account.id, state: account.syncState,

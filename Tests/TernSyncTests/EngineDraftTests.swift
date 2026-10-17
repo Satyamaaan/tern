@@ -13,6 +13,25 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try h.store.database.reader.read { db in try Draft.fetchOne(db, key: id) }
 }
 
+extension Harness {
+    var drafts: DraftStore { DraftStore(store.database, filesDirectory: configuration.draftFilesDirectory) }
+
+    /// Send with an undo window ending at `notBefore` (now when nil), on the test clock.
+    func queueSend(_ draft: Draft, notBefore: Date?) async throws {
+        let now = clock.now()
+        if let scheduled = draft.scheduledAt {
+            try await drafts.scheduleSend(draft, at: scheduled, now: now)
+        } else {
+            try await drafts.send(draft, undoSeconds: Int(((notBefore ?? now).timeIntervalSince(now)).rounded()), now: now)
+        }
+    }
+
+    /// Saves the draft and makes its Gmail save due at once.
+    func queueSave(_ draft: Draft) async throws {
+        try await drafts.save(draft, now: clock.now().addingTimeInterval(-DraftStore.saveInterval))
+    }
+}
+
 @Test func sendWaitsForTheUndoWindowAndCanBeUndone() async throws {
     let h = try Harness()
     let seeded = await seed(h.fake, count: 4)
@@ -20,25 +39,25 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     let original = seeded[0]
     let draft = reply(to: original)
 
-    try h.store.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
+    try await h.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.sendDraft) == 0)
     #expect(await h.sync.nextOpAt == h.clock.now().addingTimeInterval(10))
 
     // Undo within the window.
-    #expect(try h.store.cancelPendingSend(draftId: draft.id))
+    #expect(try await h.drafts.cancelSend(draft.id))
     #expect(try draftRow(h, draft.id)?.state == .editing)
-    #expect(try h.ops().isEmpty)
+    #expect(try h.ops().map(\.kind) == [.saveDraft], "back to editing, the Gmail copy is saved later")
 
     // Send again and let the window pass.
-    try h.store.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
+    try await h.queueSend(draft, notBefore: h.clock.now().addingTimeInterval(10))
     h.clock.advance(5)
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.sendDraft) == 0)
     h.clock.advance(6)
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.sendDraft) == 1)
-    #expect(!(try h.store.cancelPendingSend(draftId: draft.id)), "too late to undo")
+    #expect(!(try await h.drafts.cancelSend(draft.id)), "too late to undo")
 
     #expect(try draftRow(h, draft.id) == nil)
     #expect(try h.ops().isEmpty)
@@ -66,7 +85,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     var draft = reply(to: seeded[0])
     draft.scheduledAt = h.clock.now().addingTimeInterval(3600)
 
-    try h.store.queueSend(draft, notBefore: nil)
+    try await h.queueSend(draft, notBefore: nil)
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.sendDraft) == 0)
     #expect(await h.sync.nextOpAt == draft.scheduledAt)
@@ -84,7 +103,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await h.syncFully()
     var draft = reply(to: seeded[0], body: "<p>First</p>")
 
-    try h.store.queueSave(draft)
+    try await h.queueSave(draft)
     try await h.sync.drainOps()
     let saved = try #require(try draftRow(h, draft.id))
     let gmailDraftId = try #require(saved.gmailDraftId)
@@ -93,7 +112,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
 
     draft = saved
     draft.bodyHtml = "<p>Second</p>"
-    try h.store.queueSave(draft)
+    try await h.queueSave(draft)
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.updateDraft) == 1)
     #expect(try draftRow(h, draft.id)?.gmailDraftId == gmailDraftId)
@@ -101,7 +120,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await h.sync.pollHistory()
     #expect(try h.store.threadDetail(h.thread(seeded[0].threadId))?.thread.hasDraft == true)
 
-    try h.store.queueSend(try #require(try draftRow(h, draft.id)), notBefore: nil)
+    try await h.queueSend(try #require(try draftRow(h, draft.id)), notBefore: nil)
     try await h.sync.drainOps()
     #expect(await h.fake.callCount(.createDraft) == 1, "the existing Gmail draft is updated and sent")
     #expect(await h.fake.draftIds.isEmpty, "sending consumes the Gmail draft")
@@ -118,11 +137,11 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     let seeded = await seed(h.fake, count: 2)
     try await h.syncFully()
     let draft = reply(to: seeded[0])
-    try h.store.queueSave(draft)
+    try await h.queueSave(draft)
     try await h.sync.drainOps()
     try await h.sync.pollHistory()
 
-    try h.store.queueDelete(draftId: draft.id)
+    try await h.drafts.discard(draft.id)
     try await h.sync.drainOps()
     #expect(await h.fake.draftIds.isEmpty)
     #expect(try draftRow(h, draft.id) == nil)
@@ -137,11 +156,11 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await h.syncFully()
     await h.fake.loseNextResponse(on: .sendDraft)
     let draft = reply(to: seeded[0])
-    try h.store.queueSend(draft, notBefore: nil)
+    try await h.queueSend(draft, notBefore: nil)
 
     try await h.sync.drainOps()
     #expect(try h.ops().first?.state == .pending, "a lost response is retried")
-    #expect(!(try h.store.cancelPendingSend(draftId: draft.id)), "it may already have gone out")
+    #expect(!(try await h.drafts.cancelSend(draft.id)), "it may already have gone out")
     h.clock.advance(60)
     try await h.sync.drainOps()
 
@@ -161,7 +180,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     let seeded = await seed(h.fake, count: 2)
     try await h.syncFully()
     let early = reply(to: seeded[0])
-    try h.store.queueSend(early, notBefore: nil)
+    try await h.queueSend(early, notBefore: nil)
     try await h.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight'") }
     var relaunched = h.relaunched()
     try await relaunched.prepare()
@@ -171,7 +190,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
 
     // Quit right after drafts.send went through: the relaunch sees the draft is gone and doesn't resend.
     let late = reply(to: seeded[1], body: "<p>Late</p>")
-    try h.store.queueSend(late, notBefore: nil)
+    try await h.queueSend(late, notBefore: nil)
     await h.fake.loseNextResponse(on: .sendDraft)
     try await relaunched.drainOps()
     try await h.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight'") }
@@ -193,7 +212,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await h.syncFully()
     await h.fake.failNext(100, with: .server(status: 400, message: "Invalid To header"), on: .sendDraft)
     let draft = reply(to: seeded[0])
-    try h.store.queueSend(draft, notBefore: nil)
+    try await h.queueSend(draft, notBefore: nil)
 
     try await h.sync.drainOps()
     #expect(try draftRow(h, draft.id)?.state == .queued)
@@ -214,7 +233,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     await h.fake.stallSearchIndex()
     await h.fake.loseNextResponse(on: .sendDraft)
     let draft = reply(to: seeded[0])
-    try h.store.queueSend(draft, notBefore: nil)
+    try await h.queueSend(draft, notBefore: nil)
 
     try await h.sync.drainOps()
     h.clock.advance(60)

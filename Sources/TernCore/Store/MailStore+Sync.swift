@@ -84,6 +84,7 @@ extension MailStore {
 
     /// Writes messages fetched from Gmail, then replays unconfirmed local changes on top so a user
     /// action never visibly reverts while its op is still queued. Downloaded attachment paths are kept.
+    /// Rules run for the touched threads (`applyRules`).
     public static func upsertServerMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment] = []) throws {
         guard !messages.isEmpty || !attachments.isEmpty else { return }
         var attachments = attachments
@@ -105,14 +106,16 @@ extension MailStore {
                 attachments[index].localPath = paths[attachments[index].id]
             }
         }
-        try upsertMessages(db, messages, attachments: attachments)
+        let touched = try upsertMessages(db, messages, attachments: attachments)
         for (accountId, items) in Dictionary(grouping: messages, by: \.accountId) {
             try reapplyUnconfirmedChanges(db, accountId: accountId, messageIds: Set(items.map(\.id)))
         }
+        try applyRules(db, keys: touched)
     }
 
     /// Sets Gmail's current labels on stored messages, then replays unconfirmed local changes.
-    /// Messages that aren't stored are ignored; unchanged ones are not rewritten.
+    /// Messages that aren't stored are ignored; unchanged ones are not rewritten. Rules run for the
+    /// threads that changed (`applyRules`).
     public static func applyServerLabels(_ db: Database, accountId: String, _ labelsByMessage: [String: [String]]) throws {
         guard !labelsByMessage.isEmpty else { return }
         let ids = Array(labelsByMessage.keys)
@@ -125,7 +128,12 @@ extension MailStore {
             let labels = applying(changes[id] ?? [], to: server)
             if labels != Set(stored) { updates[id] = Array(labels) }
         }
-        try setLabels(db, accountId: accountId, updates)
+        try applyRules(db, keys: try setLabels(db, accountId: accountId, updates))
+    }
+
+    /// Deletes messages Gmail no longer has, then runs rules for the threads left (`applyRules`).
+    public static func deleteServerMessages(_ db: Database, accountId: String, ids: [String]) throws {
+        try applyRules(db, keys: try deleteMessages(db, accountId: accountId, ids: ids))
     }
 
     /// Re-applies unconfirmed label changes on top of what's stored for `messageIds`.
@@ -148,6 +156,28 @@ extension MailStore {
             result.formUnion(change.add)
         }
         return result
+    }
+
+    // MARK: Rules
+
+    /// Rule triage (`RuleClassifier`) and project rules (`ProjectRules`) for threads sync just
+    /// changed, in the caller's transaction, so a thread never shows unsorted. Threads that no
+    /// longer exist lose their triage, project and snooze rows.
+    public static func applyRules(_ db: Database, keys: Set<ThreadKey>, now: Date = Date()) throws {
+        guard !keys.isEmpty else { return }
+        let exists = try db.cachedStatement(sql: "SELECT EXISTS(SELECT 1 FROM thread WHERE accountId = ? AND id = ?)")
+        var present: [ThreadKey] = []
+        for key in keys {
+            if try Bool.fetchOne(exists, arguments: [key.accountId, key.threadId]) == true {
+                present.append(key)
+            } else {
+                for table in ["thread_ai", "thread_project", "snooze"] {
+                    try db.execute(sql: "DELETE FROM \(table) WHERE accountId = ? AND threadId = ?", arguments: [key.accountId, key.threadId])
+                }
+            }
+        }
+        try RuleClassifier.classify(db, keys: present, now: now)
+        try ProjectRules.apply(db, keys: present)
     }
 
     // MARK: Pending ops
@@ -185,62 +215,6 @@ extension MailStore {
             SELECT * FROM pending_op WHERE kind IN ('sendDraft', 'saveDraft', 'deleteDraft')
               AND json_extract(payload, '$.draftId') = ? ORDER BY id
             """, arguments: [draftId])
-    }
-
-    // MARK: Drafts
-
-    /// Saves the draft as queued and schedules it to send at `notBefore` (the end of the undo window,
-    /// or a send-later time). Undo with `cancelPendingSend`.
-    public func queueSend(_ draft: Draft, notBefore: Date?) throws {
-        try database.writer.write { db in
-            var draft = draft
-            draft.state = .queued
-            draft.lastError = nil
-            draft.updatedAt = Date()
-            try draft.upsert(db)
-            try PendingOp(accountId: draft.accountId, kind: .sendDraft, payload: try encodeJSON(DraftOpPayload(draftId: draft.id)),
-                          notBefore: notBefore).insert(db)
-        }
-    }
-
-    /// Saves the draft locally and queues a create/update of the Gmail draft.
-    public func queueSave(_ draft: Draft) throws {
-        try database.writer.write { db in
-            var draft = draft
-            draft.updatedAt = Date()
-            try draft.upsert(db)
-            try PendingOp(accountId: draft.accountId, kind: .saveDraft, payload: try encodeJSON(DraftOpPayload(draftId: draft.id))).insert(db)
-        }
-    }
-
-    /// Queues deletion of the draft. Keep the `draft` row: the engine needs its Gmail draft id and
-    /// removes the row once Gmail has deleted it.
-    public func queueDelete(draftId: String) throws {
-        try database.writer.write { db in
-            guard let draft = try Draft.fetchOne(db, key: draftId) else { return }
-            try PendingOp(accountId: draft.accountId, kind: .deleteDraft, payload: try encodeJSON(DraftOpPayload(draftId: draftId))).insert(db)
-        }
-    }
-
-    /// Undo send: drops a send that hasn't started and puts the draft back to editing.
-    /// Returns false when it's too late (sending, sent, or a retry of a send that may have gone out).
-    @discardableResult
-    public func cancelPendingSend(draftId: String) throws -> Bool {
-        struct Progress: Decodable { var sendingDraftId: String? }
-        return try database.writer.write { db in
-            let sends = try Self.draftOps(db, draftId: draftId).filter {
-                $0.kind == .sendDraft && $0.state == .pending
-                    && (try? JSONDecoder().decode(Progress.self, from: Data($0.payload.utf8)))?.sendingDraftId == nil
-            }
-            guard !sends.isEmpty else { return false }
-            _ = try PendingOp.deleteAll(db, keys: sends.compactMap(\.id))
-            if var draft = try Draft.fetchOne(db, key: draftId) {
-                draft.state = .editing
-                draft.updatedAt = Date()
-                try draft.update(db)
-            }
-            return true
-        }
     }
 
     // MARK: Attachments

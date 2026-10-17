@@ -40,6 +40,7 @@ public actor AccountSync {
     var pollRequested = true
     var nextPollAt = Date.distantPast
     var nextLabelRefreshAt = Date.distantPast
+    var nextSendAsRefreshAt = Date.distantPast
     /// When the earliest deferred op becomes due.
     var nextOpAt: Date?
     var consecutiveFailures = 0
@@ -60,27 +61,37 @@ public actor AccountSync {
     var failedBodies = Set<String>()
     /// Set by `kick`; long bulk work checks it to send queued actions without waiting.
     var actionsWaiting = false
+    var isDraining = false
     /// The client has no threads.get; fall back to messages.get.
     var threadsUnsupported = false
+    /// The client has no drafts.list; skip looking for a Gmail draft before creating one.
+    var draftListUnsupported = false
+    /// Downloads an attachment of another account's message (a forward whose draft moved accounts).
+    var remoteAttachmentFetcher: (@Sendable (RemoteAttachmentRef, DraftAttachment) async throws -> Data)?
     private var wakeRequested = false
     private var wakeContinuation: CheckedContinuation<Void, Never>?
 
     /// - Parameters:
     ///   - encodeDraft: Builds the RFC 822 message for a draft (the MIME builder lives in Google/).
     ///   - statusSink: Receives every status change; called on this actor.
+    ///   - remoteAttachmentFetcher: Downloads attachments of other accounts' messages, for forwards
+    ///     whose draft moved to this account.
     public init(account: Account, store: MailStore, api: any GmailAPI,
                 encodeDraft: @escaping @Sendable (Draft, Account) throws -> Data,
                 configuration: SyncConfiguration = SyncConfiguration(), clock: any SyncClock = SystemSyncClock(),
+                remoteAttachmentFetcher: (@Sendable (RemoteAttachmentRef, DraftAttachment) async throws -> Data)? = nil,
                 statusSink: @escaping @Sendable (SyncStatusSnapshot) -> Void = { _ in }) {
         self.accountId = account.id
         self.store = store
         let budget = QuotaBudget(unitsPerMinute: configuration.quota.unitsPerMinute, bulkReserve: configuration.bulkReserve,
-                                 backgroundReserve: configuration.backgroundReserve, clock: clock)
+                                 backgroundReserve: configuration.backgroundReserve, paceWindow: configuration.paceWindow,
+                                 clock: clock)
         self.budget = budget
         self.api = BudgetedGmail(base: api, budget: budget, quota: configuration.quota)
         self.encodeDraft = encodeDraft
         self.configuration = configuration
         self.clock = clock
+        self.remoteAttachmentFetcher = remoteAttachmentFetcher
         self.statusSink = statusSink
         self.account = account
         self.status = SyncStatusSnapshot(accountId: account.id, state: account.syncState,
@@ -112,10 +123,11 @@ public actor AccountSync {
         wake()
     }
 
-    /// Sends queued actions now if any arrived; long bulk work (a full resync) calls this between
-    /// requests so user actions never wait for it.
+    /// Sends queued actions now if any arrived or came due (a send whose undo window ended); long
+    /// bulk work (a resync, a history catch-up, a backfill step) calls this between requests so
+    /// user actions never wait for it.
     func serviceActions() async throws {
-        guard actionsWaiting else { return }
+        guard actionsWaiting || nextOpAt.map({ $0 <= clock.now() }) == true else { return }
         actionsWaiting = false
         try await QuotaPriority.$current.withValue(.interactive) { try await drainOps() }
     }
@@ -168,8 +180,9 @@ public actor AccountSync {
         }
     }
 
-    /// One pass: queued ops, a history poll when due (with a full resync if history expired),
-    /// then one step of bulk or background work if the quota allows.
+    /// One pass: queued ops, send-as settings when due (at start, then daily), a history poll when
+    /// due (with a full resync if history expired), then one step of bulk or background work if the
+    /// quota allows.
     /// Returns true when more background work can run right away.
     @discardableResult
     public func syncOnce() async throws -> Bool {
@@ -179,6 +192,7 @@ public actor AccountSync {
         try await drainOps()
 
         let now = clock.now()
+        if now >= nextSendAsRefreshAt { try await refreshSendAsIfPossible(now: now) }
         if pollRequested || now >= nextPollAt {
             pollRequested = false
             nextPollAt = now.addingTimeInterval(isActive ? configuration.activePollInterval : configuration.inactivePollInterval)
@@ -383,7 +397,7 @@ public actor AccountSync {
     func retryDelay(for error: GmailAPIError, attempt: Int) -> Double? {
         switch error {
         case .network: return backoff(attempt)
-        case .server(501, GmailThread.unsupported): return nil
+        case .server(501, GmailThread.unsupported), .server(501, GmailDraftPage.unsupported): return nil
         case .server(let status, _) where status >= 500: return backoff(attempt)
         default: return nil
         }

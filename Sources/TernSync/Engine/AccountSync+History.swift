@@ -31,7 +31,10 @@ extension AccountSync {
             added.append(id)
         }
         let metadataOnly = Set(added.dropFirst(configuration.historyFullFetchLimit))
-        for page in pages { try await apply(page.records, reaching: page.reaching, metadataOnly: metadataOnly) }
+        for page in pages {
+            try await apply(page.records, reaching: page.reaching, metadataOnly: metadataOnly)
+            try await serviceActions()
+        }
         publishAccount(phase: account.backfillDone ? "Up to date" : nil)
     }
 
@@ -103,10 +106,12 @@ extension AccountSync {
         let older = try await QuotaPriority.$current.withValue(.bulk) {
             try await fetchAndStore(metadataIds, format: .metadata)
         }
+        let added = fetchOrder
         try await fetchAndStore(fetchOrder.filter { !metadataOnly.contains($0) }, format: .full) { db, missing in
             let missing = missing + older
             try MailStore.applyServerLabels(db, accountId: accountId, labelUpdates)
-            try MailStore.deleteMessages(db, accountId: accountId, ids: deletions + missing)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: deletions + missing)
+            try AccountSync.rearchiveMuted(db, accountId: accountId, messageIds: added)
             _ = try AccountSync.updateAccountRow(db, accountId) { account in
                 if let historyId, AccountSync.isNewer(historyId, than: account.historyId) { account.historyId = historyId }
                 account.lastSyncAt = now

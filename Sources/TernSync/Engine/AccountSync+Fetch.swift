@@ -89,9 +89,9 @@ extension AccountSync {
     }
 
     private func makeInitialPlan() async throws -> InitialPlan {
-        let inbox = try await listRefs(labelIds: [SystemLabel.inbox], query: nil)
+        let inbox = try await listRefs(labelIds: [SystemLabel.inbox], query: nil, limit: configuration.initialInboxLimit)
         let since = Int(clock.now().timeIntervalSince1970) - configuration.recentDays * 86_400
-        let recent = try await listRefs(labelIds: [], query: "after:\(since)")
+        let recent = try await listRefs(labelIds: [], query: "after:\(since)", limit: configuration.initialRecentLimit)
 
         // Every listed message per thread, in order of first appearance (newest first).
         var threadOrder: [String] = []
@@ -128,11 +128,22 @@ extension AccountSync {
             || (needed * quota.getMessageFull >= quota.getThreadFull && known > needed)
     }
 
+    /// The inbox and recent mail are in. Every write already sorted its threads (`MailStore.applyRules`);
+    /// now the address book is rebuilt, so the split inbox knows who the user writes to, and the
+    /// account's threads are sorted again with it.
     private func finishInitialSync() async throws {
         initialPlan = nil
         try await updateAccount {
             if $0.backfillPageToken == nil { $0.backfillPageToken = "" }
             $0.syncState = $0.backfillDone ? .live : .backfilling
+        }
+        let accountId = self.accountId
+        try await write { db in
+            try MailStore.rebuildContacts(db)
+            let keys = try String.fetchAll(db, sql: "SELECT id FROM thread WHERE accountId = ?", arguments: [accountId])
+                .map { ThreadKey(accountId: accountId, threadId: $0) }
+            try RuleClassifier.classify(db, keys: keys)
+            try RuleClassifier.classifyAllMissing(db)
         }
         await publishBackfillProgress()
     }
@@ -229,6 +240,8 @@ extension AccountSync {
             $0.backfillDone = next == nil
             if next == nil { $0.syncState = .live }
         }
+        // All mail is in: the address book learns everyone the user has written to.
+        if next == nil { try await write { db in try MailStore.rebuildContacts(db) } }
         backfillPage = nil
         await publishBackfillProgress()
         return next != nil
@@ -315,7 +328,7 @@ extension AccountSync {
         let historyId = profile.historyId
         let now = clock.now()
         try await write { db in
-            try MailStore.deleteMessages(db, accountId: accountId, ids: goneIds)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: goneIds)
             _ = try AccountSync.updateAccountRow(db, accountId) {
                 $0.historyId = historyId
                 $0.lastSyncAt = now
@@ -346,7 +359,7 @@ extension AccountSync {
         }.filter { !skip.contains($0) }.prefix(limit).map { $0 }
         guard !ids.isEmpty else { return 0 }
         try await fetchAndStore(ids, format: .full) { db, missing in
-            try MailStore.deleteMessages(db, accountId: accountId, ids: missing)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: missing)
         }
         return ids.count
     }
@@ -418,19 +431,21 @@ extension AccountSync {
         return labels
     }
 
-    /// Every message ref matching the filter, newest first, across all pages (5 units a page).
-    func listRefs(labelIds: [String], query: String?) async throws -> [GmailMessageRef] {
+    /// Message refs matching the filter, newest first, across pages (5 units a page): every one,
+    /// or the first `limit`.
+    func listRefs(labelIds: [String], query: String?, limit: Int? = nil) async throws -> [GmailMessageRef] {
         var refs: [GmailMessageRef] = []
         var token: String?
         repeat {
             let pageToken = token
-            let page = try await withRetry { [api, configuration] in
-                try await api.messageIds(query: query, labelIds: labelIds, pageToken: pageToken, maxResults: configuration.listPageSize)
+            let size = limit.map { min(configuration.listPageSize, max(1, $0 - refs.count)) } ?? configuration.listPageSize
+            let page = try await withRetry { [api] in
+                try await api.messageIds(query: query, labelIds: labelIds, pageToken: pageToken, maxResults: size)
             }
             refs += page.messages ?? []
             token = page.nextPageToken
-        } while token != nil
-        return refs
+        } while token != nil && refs.count < (limit ?? .max)
+        return limit.map { Array(refs.prefix($0)) } ?? refs
     }
 
     /// Every id matching `labelIds`, newest first, across all pages.
@@ -438,9 +453,11 @@ extension AccountSync {
         try await listRefs(labelIds: labelIds, query: nil).map(\.id)
     }
 
-    /// Ids per call so one request costs at most `maxUnitsPerRequest`.
+    /// Ids per call so one request costs at most `maxUnitsPerRequest`, or
+    /// `backgroundMaxUnitsPerRequest` for bulk and background work.
     func batchSize(cost: Int) -> Int {
-        max(1, min(configuration.fetchBatchSize, configuration.maxUnitsPerRequest / max(1, cost)))
+        let limit = QuotaPriority.current == .interactive ? configuration.maxUnitsPerRequest : configuration.backgroundMaxUnitsPerRequest
+        return max(1, min(configuration.fetchBatchSize, limit / max(1, cost)))
     }
 
     /// `ids` that aren't stored with a full body, in order.
@@ -471,6 +488,8 @@ extension AccountSync {
         var missing: [String] = []
         var buffer: [ParsedMessage] = []
         for (index, chunk) in chunks.enumerated() {
+            // Bulk and background fetches are the run loop's: queued actions go out in between.
+            if index > 0, QuotaPriority.current != .interactive { try await serviceActions() }
             var fetched: [GmailMessage] = []
             for attempt in 0..<3 {
                 let generation = historyGeneration
