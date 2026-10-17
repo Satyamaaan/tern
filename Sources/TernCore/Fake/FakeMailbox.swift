@@ -142,7 +142,7 @@ private struct Generator {
     /// Spread over two years, denser toward now.
     mutating func pastDate() -> Date {
         let r = Double.random(in: 0..<1, using: &rng)
-        let days = pow(r, 2.4) * 730
+        let days = pow(r, 1.3) * 730
         return options.now.addingTimeInterval(-days * 86_400 - Double(int(0...3_600)))
     }
 
@@ -389,13 +389,13 @@ private struct Generator {
         // Where the thread lives now.
         var inInbox: Bool
         switch kind {
-        case .people: inInbox = recentDays < 10 ? chance(0.75) : chance(0.03)
-        case .notification: inInbox = recentDays < 5 ? chance(0.5) : chance(0.01)
+        case .people: inInbox = recentDays < 10 ? chance(0.6) : chance(0.002)
+        case .notification: inInbox = recentDays < 4 ? chance(0.4) : chance(0.001)
         case .calendar, .security: inInbox = recentDays < 7 ? chance(0.6) : false
-        default: inInbox = recentDays < 14 ? chance(0.45) : chance(0.02)
+        default: inInbox = recentDays < 10 ? chance(0.35) : chance(0.001)
         }
         if !lastIsInbound && kind == .people { inInbox = inInbox && chance(0.4) }
-        let unreadChance = !inInbox ? 0.01 : recentDays < 3 ? 0.65 : 0.15
+        let unreadChance = !inInbox ? 0.005 : recentDays < 2 ? 0.45 : 0.08
         let trashed = kind == .promotion && chance(0.05)
         let spam = kind == .promotion && !trashed && chance(0.03)
         let starred = kind == .people && chance(0.04)
@@ -451,7 +451,7 @@ private struct Generator {
                 bodyState: .full, labelIds: [SystemLabel.draft], isFromMe: true))
         }
 
-        let needsReply = kind == .people && inInbox && lastIsInbound && recentDays < 10 && chance(0.6)
+        let needsReply = kind == .people && inInbox && lastIsInbound && recentDays < 7 && chance(0.3)
         batch.ai.append(ThreadAI(
             accountId: account.id, threadId: threadId, category: kind.category, needsReply: needsReply,
             priority: kind == .people ? (needsReply ? 2 : 1) : 0,

@@ -106,7 +106,8 @@ private actor Counter {
         locator: CLILocator(home: "/Users/test", environment: [:], isExecutable: { $0 == "/opt/homebrew/bin/claude" }, listDirectory: { _ in [] }, runner: runner),
         gate: gate, environment: [:])
     let call = Task { try await provider.complete(AIRequest(instructions: "", input: "x", timeout: 7)) }
-    try await Task.sleep(for: .milliseconds(100))
+    // Cancel only once the call has reached the runner; a fixed sleep races on a busy machine.
+    for _ in 0..<200 where runner.timeouts.last != 7 { try await Task.sleep(for: .milliseconds(10)) }
     call.cancel()
     await #expect(throws: CancellationError.self) { try await call.value }
     #expect(runner.timeouts.last == 7)

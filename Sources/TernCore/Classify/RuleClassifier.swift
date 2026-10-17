@@ -109,7 +109,6 @@ public enum RuleClassifier {
         if sender == "calendar-notification@google.com" { return .calendar }
 
         let human = isHuman(sender, accountEmail: input.accountEmail, context: context) && !inbound.hasListUnsubscribe
-        let headText = subject + "\n" + inbound.text
         let isTool = toolDomains.contains(where: { MailText.domain(domain, isWithin: $0) })
         let looksLikeReceipt = matches(receiptPatterns, subject) || matches(receiptBodyPatterns, inbound.text)
 
@@ -127,7 +126,10 @@ public enum RuleClassifier {
                 || matches(newsletterPatterns, subject) {
                 return .newsletter
             }
-            if matches(promotionPatterns, headText) { return .promotion }
+            // Sales language counts in the subject or the opening lines; an article that mentions a
+            // "deal" deep in its text is still a newsletter.
+            let opening = subject + "\n" + String(inbound.text.prefix(240))
+            if matches(promotionPatterns, opening) { return .promotion }
             // In the Promotions tab without sales language: an article-length body reads as a newsletter.
             if promotionsTab { return inbound.text.count > 300 ? .newsletter : .promotion }
             return .newsletter
