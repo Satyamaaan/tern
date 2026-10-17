@@ -7,6 +7,7 @@ enum Schema {
         migrator.registerMigration("v1-search", migrate: v1Search)
         migrator.registerMigration("v1-features", migrate: v1Features)
         // Lanes append their migrations below this line, one line each.
+        migrator.registerMigration("search-1", migrate: SearchSchema.migrate)
     }
 
     private static func v1Core(_ db: Database) throws {

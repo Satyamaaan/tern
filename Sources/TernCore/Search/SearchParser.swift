@@ -113,8 +113,11 @@ enum SearchParser {
     // MARK: Parser
 
     struct Parser {
+        static let maxDepth = 24
+
         let tokens: [Token]
         var position = 0
+        var depth = 0
 
         init(tokens: [Token]) {
             self.tokens = tokens
@@ -168,18 +171,27 @@ enum SearchParser {
 
             var expr: SearchExpr?
             switch token {
-            case .lparen:
-                let inner = parseSequence(context: context, closer: .paren)
-                if case .rparen? = peek() { position += 1 }
-                expr = SearchParser.combine(inner, as: .and)
-            case .lbrace:
-                let inner = parseSequence(context: context, closer: .brace)
-                if case .rbrace? = peek() { position += 1 }
-                expr = SearchParser.combine(inner, as: .or)
-            case .opGroup(let name):
-                let inner = parseSequence(context: name, closer: .paren)
-                if case .rparen? = peek() { position += 1 }
-                expr = SearchParser.combine(inner, as: .and)
+            case .lparen, .lbrace, .opGroup:
+                // Groups nested absurdly deep are read flat instead of recursing without end.
+                guard depth < Self.maxDepth else { return nil }
+                depth += 1
+                defer { depth -= 1 }
+                switch token {
+                case .lparen:
+                    let inner = parseSequence(context: context, closer: .paren)
+                    if case .rparen? = peek() { position += 1 }
+                    expr = SearchParser.combine(inner, as: .and)
+                case .lbrace:
+                    let inner = parseSequence(context: context, closer: .brace)
+                    if case .rbrace? = peek() { position += 1 }
+                    expr = SearchParser.combine(inner, as: .or)
+                case .opGroup(let name):
+                    let inner = parseSequence(context: name, closer: .paren)
+                    if case .rparen? = peek() { position += 1 }
+                    expr = SearchParser.combine(inner, as: .and)
+                default:
+                    break
+                }
             case .atom(let atom):
                 expr = SearchParser.leaf(atom, context: context)
             case .minus, .or, .and, .rparen, .rbrace:
