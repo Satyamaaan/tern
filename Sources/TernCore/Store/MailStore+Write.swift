@@ -43,8 +43,10 @@ extension MailStore {
         }
     }
 
-    public static func upsertMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment] = []) throws {
-        guard !messages.isEmpty || !attachments.isEmpty else { return }
+    /// Returns the threads it changed.
+    @discardableResult
+    public static func upsertMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment] = []) throws -> Set<ThreadKey> {
+        guard !messages.isEmpty || !attachments.isEmpty else { return [] }
         let statement = try db.cachedStatement(sql: upsertMessageSQL)
         var touched = Set<ThreadKey>()
         for var message in messages {
@@ -55,6 +57,7 @@ extension MailStore {
         }
         for attachment in attachments { try attachment.upsert(db) }
         try refreshThreads(db, touched)
+        return touched
     }
 
     /// Sets the exact label list of existing messages (e.g. from history label events).
@@ -62,8 +65,10 @@ extension MailStore {
         try database.writer.write { db in try Self.setLabels(db, accountId: accountId, labelsByMessage) }
     }
 
-    public static func setLabels(_ db: Database, accountId: String, _ labelsByMessage: [String: [String]]) throws {
-        guard !labelsByMessage.isEmpty else { return }
+    /// Returns the threads it changed.
+    @discardableResult
+    public static func setLabels(_ db: Database, accountId: String, _ labelsByMessage: [String: [String]]) throws -> Set<ThreadKey> {
+        guard !labelsByMessage.isEmpty else { return [] }
         let update = try db.cachedStatement(sql: """
             UPDATE message SET labelIds = ?, isUnread = ?, isStarred = ?, isDraft = ?,
               isFromMe = isFromMe OR ?
@@ -81,14 +86,17 @@ extension MailStore {
             if let threadId { touched.insert(ThreadKey(accountId: accountId, threadId: threadId)) }
         }
         try refreshThreads(db, touched)
+        return touched
     }
 
     public func deleteMessages(accountId: String, ids: [String]) throws {
         try database.writer.write { db in try Self.deleteMessages(db, accountId: accountId, ids: ids) }
     }
 
-    public static func deleteMessages(_ db: Database, accountId: String, ids: [String]) throws {
-        guard !ids.isEmpty else { return }
+    /// Returns the threads it changed (some may be gone).
+    @discardableResult
+    public static func deleteMessages(_ db: Database, accountId: String, ids: [String]) throws -> Set<ThreadKey> {
+        guard !ids.isEmpty else { return [] }
         var touched = Set<ThreadKey>()
         let delete = try db.cachedStatement(sql: "DELETE FROM message WHERE accountId = ? AND id = ? RETURNING threadId")
         for id in ids {
@@ -98,6 +106,7 @@ extension MailStore {
             try db.execute(sql: "DELETE FROM attachment WHERE accountId = ? AND messageId = ?", arguments: [accountId, id])
         }
         try refreshThreads(db, touched)
+        return touched
     }
 
     /// Message ids still missing a body, newest first, for background prefetch.
@@ -207,7 +216,12 @@ extension MailStore {
 
     /// Rebuilds the autocomplete address book from all stored mail.
     public func rebuildContacts() throws {
-        try database.writer.write { db in
+        try database.writer.write { db in try Self.rebuildContacts(db) }
+    }
+
+    /// Rebuilds the address book inside the caller's transaction. Sync calls it once an account's
+    /// inbox and recent mail are in, and when the backfill finishes.
+    public static func rebuildContacts(_ db: Database) throws {
             try db.execute(sql: """
                 DELETE FROM contact;
                 INSERT INTO contact (id, name, sentCount, receivedCount, lastContacted)
@@ -223,7 +237,6 @@ extension MailStore {
                 ) WHERE email IS NOT NULL AND email != ''
                 GROUP BY lower(email);
                 """)
-        }
     }
 
     // MARK: Helpers

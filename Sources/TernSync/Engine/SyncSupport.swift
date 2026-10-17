@@ -26,6 +26,9 @@ public struct SyncConfiguration: Sendable {
     public var snoozeCheckInterval: Double = 30
     /// How often the label list is refreshed during live sync.
     public var labelRefreshInterval: Double = 600
+    /// How often send-as settings (signatures, sender names) are read again, and daily upkeep
+    /// (needs-reply expiry) runs.
+    public var dailyInterval: Double = 86_400
 
     /// Quota costs and the per-user limit (per account; accounts sync in parallel).
     public var quota = GmailQuota()

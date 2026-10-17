@@ -61,7 +61,8 @@ public final class SyncCoordinator {
 
     // MARK: Lifecycle
 
-    /// Starts syncing every account, the op-queue observer, the snooze timer and the wake observer.
+    /// Starts syncing every account, the op-queue observer, the snooze timer, daily upkeep and the
+    /// wake observer.
     public func start() {
         guard !isRunning else { return }
         isRunning = true
@@ -85,6 +86,13 @@ public final class SyncCoordinator {
             while !Task.isCancelled {
                 await self?.wakeSnoozedThreads()
                 try? await clock.sleep(seconds: interval)
+            }
+        })
+        let daily = configuration.dailyInterval
+        serviceTasks.append(Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.runDailyUpkeep()
+                try? await clock.sleep(seconds: daily)
             }
         })
 
@@ -176,6 +184,16 @@ public final class SyncCoordinator {
         let now = clock.now()
         let woken = (try? await Task.detached(priority: .utility) { try store.wakeSnoozed(now: now) }.value) ?? []
         for accountId in Set(woken.map(\.accountId)) { kick(accountId: accountId) }
+    }
+
+    /// Clears needs-reply on threads whose last message aged past `RuleClassifier.needsReplyWindow`.
+    /// Runs at start and daily.
+    public func runDailyUpkeep() async {
+        let store = self.store
+        let now = clock.now()
+        _ = try? await Task.detached(priority: .utility) {
+            try await store.database.writer.write { db in try RuleClassifier.expireNeedsReply(db, now: now) }
+        }.value
     }
 
     // MARK: Requests

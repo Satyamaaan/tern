@@ -106,7 +106,7 @@ extension AccountSync {
         try await fetchAndStore(fetchOrder.filter { !metadataOnly.contains($0) }, format: .full) { db, missing in
             let missing = missing + older
             try MailStore.applyServerLabels(db, accountId: accountId, labelUpdates)
-            try MailStore.deleteMessages(db, accountId: accountId, ids: deletions + missing)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: deletions + missing)
             _ = try AccountSync.updateAccountRow(db, accountId) { account in
                 if let historyId, AccountSync.isNewer(historyId, than: account.historyId) { account.historyId = historyId }
                 account.lastSyncAt = now

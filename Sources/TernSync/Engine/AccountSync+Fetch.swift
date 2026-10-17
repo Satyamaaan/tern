@@ -128,11 +128,22 @@ extension AccountSync {
             || (needed * quota.getMessageFull >= quota.getThreadFull && known > needed)
     }
 
+    /// The inbox and recent mail are in. Every write already sorted its threads (`MailStore.applyRules`);
+    /// now the address book is rebuilt, so the split inbox knows who the user writes to, and the
+    /// account's threads are sorted again with it.
     private func finishInitialSync() async throws {
         initialPlan = nil
         try await updateAccount {
             if $0.backfillPageToken == nil { $0.backfillPageToken = "" }
             $0.syncState = $0.backfillDone ? .live : .backfilling
+        }
+        let accountId = self.accountId
+        try await write { db in
+            try MailStore.rebuildContacts(db)
+            let keys = try String.fetchAll(db, sql: "SELECT id FROM thread WHERE accountId = ?", arguments: [accountId])
+                .map { ThreadKey(accountId: accountId, threadId: $0) }
+            try RuleClassifier.classify(db, keys: keys)
+            try RuleClassifier.classifyAllMissing(db)
         }
         await publishBackfillProgress()
     }
@@ -229,6 +240,8 @@ extension AccountSync {
             $0.backfillDone = next == nil
             if next == nil { $0.syncState = .live }
         }
+        // All mail is in: the address book learns everyone the user has written to.
+        if next == nil { try await write { db in try MailStore.rebuildContacts(db) } }
         backfillPage = nil
         await publishBackfillProgress()
         return next != nil
@@ -315,7 +328,7 @@ extension AccountSync {
         let historyId = profile.historyId
         let now = clock.now()
         try await write { db in
-            try MailStore.deleteMessages(db, accountId: accountId, ids: goneIds)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: goneIds)
             _ = try AccountSync.updateAccountRow(db, accountId) {
                 $0.historyId = historyId
                 $0.lastSyncAt = now
@@ -346,7 +359,7 @@ extension AccountSync {
         }.filter { !skip.contains($0) }.prefix(limit).map { $0 }
         guard !ids.isEmpty else { return 0 }
         try await fetchAndStore(ids, format: .full) { db, missing in
-            try MailStore.deleteMessages(db, accountId: accountId, ids: missing)
+            try MailStore.deleteServerMessages(db, accountId: accountId, ids: missing)
         }
         return ids.count
     }
