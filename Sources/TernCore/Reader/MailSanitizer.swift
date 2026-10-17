@@ -161,6 +161,7 @@ private struct Writer {
     mutating func writeAttributes(of node: HTMLNode, into output: inout String) {
         let name = node.name
         var style = ""
+        var placeholder = false
         for attribute in node.attributes {
             let key = attribute.name
             let value = attribute.value
@@ -176,8 +177,10 @@ private struct Writer {
                     if url.hasPrefix("http") { output += " referrerpolicy=\"no-referrer\" loading=\"lazy\"" }
                 case .blocked:
                     blockedRemote += 1
+                    placeholder = true
                     output += " data-tern-blocked=\"\""
                 case .drop:
+                    placeholder = true
                     output += " data-tern-missing=\"\""
                 }
             case "background":
@@ -233,6 +236,10 @@ private struct Writer {
             }
         }
         if name == "a" { output += " rel=\"noreferrer noopener\"" }
+        if placeholder, let width = Self.pixels(node.attribute("width")), let height = Self.pixels(node.attribute("height")) {
+            let ratio = "aspect-ratio: \(width) / \(height)"
+            style = style.isEmpty ? ratio : style + "; " + ratio
+        }
         if !style.isEmpty { output += " style=\"\(HTMLEntities.escape(style))\"" }
     }
 
@@ -344,6 +351,14 @@ private struct Writer {
         if let width = size("width"), width <= 1 { return true }
         if let height = size("height"), height <= 1 { return true }
         return false
+    }
+
+    /// A whole-pixel size from a `width`/`height` attribute ("600", "600px"); nil for percentages.
+    static func pixels(_ value: String?) -> Int? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "px", with: "")
+        guard let number = Double(trimmed), number >= 1 else { return nil }
+        return Int(number.rounded())
     }
 
     static func escapeText(_ text: String) -> String {

@@ -56,6 +56,7 @@ private func clean(_ html: String, images: Bool = false) -> SanitizedMail {
     #expect(blocked.blockedRemoteCount == 2)
     #expect(blocked.html.contains("data-tern-blocked"))
     #expect(blocked.html.contains("width=\"600\" height=\"300\""))
+    #expect(blocked.html.contains("style=\"aspect-ratio: 600 / 300\""), "blocked images keep their box so loading them later doesn't move the text")
     #expect(!blocked.html.contains("cdn.example"))
     #expect(!blocked.html.contains("open.gif"))
     #expect(!blocked.html.contains("mailtrack"))

@@ -21,6 +21,13 @@ final class AppServices {
     var loadAttachment: (MailAttachment) async throws -> URL = { _ in throw CocoaError(.featureUnsupported) }
     /// AI helpers; nil when AI is off or unavailable.
     var ai: AIActions?
+    /// Reader actions for the shell's key handling and the ⌘K palette (next/previous message, find, print…).
+    let reader = ReaderCommands()
+    /// Text a ✦ quick reply chose for a thread's next reply. The composer reads it and clears it.
+    var replyPrefill: [ThreadKey: String] = [:]
+    /// Mutes threads (archive now, keep later replies out of the inbox). Nil until sync supports it;
+    /// the reader's Mute item is disabled meanwhile.
+    var mute: (([ThreadKey]) -> Void)?
 
     init(store: MailStore) {
         self.store = store

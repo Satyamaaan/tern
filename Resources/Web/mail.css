@@ -1,0 +1,31 @@
+:host { display: block; }
+.tern-body { overflow-wrap: break-word; word-wrap: break-word; min-width: 0; padding: var(--card-padding, 0); }
+.tern-body img { max-width: 100%; height: auto; }
+.tern-body img[data-tern-blocked], .tern-body img[data-tern-missing] {
+  background: color-mix(in srgb, var(--text3) 10%, transparent); border-radius: 4px; color: var(--text3);
+  font-size: 11px; text-indent: 4px; vertical-align: top;
+}
+.tern-body table { max-width: none; }
+.tern-body pre { white-space: pre-wrap; font: 12.5px/1.6 var(--mono); }
+.tern-body a { color: var(--link, -webkit-link); }
+.tern-body blockquote { margin: 0 0 0 12px; }
+.tern-body hr { border: 0; border-top: 1px solid var(--hairline); }
+
+:host([data-mode="simple"]), :host([data-mode="plain"]) { --link: var(--accentInk); }
+:host([data-mode="simple"]) .tern-body p { margin: 0 0 12px; }
+
+.tern-plain { white-space: pre-wrap; font: 14px/22px var(--ui); color: var(--text1); }
+.tern-inline-quote { color: var(--text2); padding-left: 12px; }
+.tern-plain > .tern-sig { margin-top: 22px; }
+.tern-sig, :host([data-mode="simple"]) .gmail_signature, :host([data-mode="simple"]) [data-smartmail="gmail_signature"],
+:host([data-mode="simple"]) #Signature, :host([data-mode="simple"]) .moz-signature { opacity: 0.6; }
+
+.tern-quote-toggle {
+  display: grid; place-items: center; width: 30px; height: 16px; margin: 6px 0 2px; border-radius: 999px;
+  background: var(--hover); color: var(--text3); font: 600 11px/16px var(--ui); letter-spacing: 1px;
+  user-select: none; -webkit-user-select: none; white-space: normal; cursor: default;
+}
+.tern-quote-toggle:hover { background: var(--selected); color: var(--text2); }
+.tern-quote-toggle.open { background: var(--selected); }
+.tern-quote[hidden] { display: none; }
+:host([data-mode="simple"]) .tern-quote, :host([data-mode="plain"]) .tern-quote { color: var(--text2); }
