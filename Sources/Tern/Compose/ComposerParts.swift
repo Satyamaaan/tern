@@ -396,6 +396,22 @@ struct IconButton: View {
         }
         .buttonStyle(HoverFillStyle())
         .help(help)
+        .accessibilityLabel(help.components(separatedBy: "  ").first ?? help)
+    }
+}
+
+extension View {
+    /// Files dropped anywhere on the composer become attachments.
+    func acceptsFileDrops(_ model: ComposerModel) -> some View {
+        onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    DispatchQueue.main.async { model.addFiles([url]) }
+                }
+            }
+            return !providers.isEmpty
+        }
     }
 }
 

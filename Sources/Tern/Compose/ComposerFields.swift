@@ -100,8 +100,12 @@ struct AccountPicker: View {
     var body: some View {
         Menu {
             ForEach(model.services.accounts) { account in
-                Button("\(account.displayName.isEmpty ? account.email : account.displayName)  —  \(account.email)") {
-                    model.setAccount(account.id)
+                Button { model.setAccount(account.id) } label: {
+                    Label {
+                        Text("\(account.displayName.isEmpty ? account.email : account.displayName)  —  \(account.email)")
+                    } icon: {
+                        Image(nsImage: Self.dot(Theme.accountColor(account.colorIndex)))
+                    }
                 }
             }
         } label: {
@@ -122,6 +126,16 @@ struct AccountPicker: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel("From \(model.account?.email ?? model.accountId)")
+    }
+
+    /// The account's 8 pt dot as an image, for menu items.
+    static func dot(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
     }
 }
 

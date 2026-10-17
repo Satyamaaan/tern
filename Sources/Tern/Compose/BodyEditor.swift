@@ -442,6 +442,16 @@ final class BodyTextView: NSTextView {
         editor?.onEscape()
     }
 
+    /// The formatting bar goes when another field takes the caret (clicks on the bar itself don't).
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let responder = self.window?.firstResponder, responder !== self, responder is NSText else { return }
+            self.editor?.hideFormattingBar()
+        }
+        return resigned
+    }
+
     override func insertBacktab(_ sender: Any?) {
         editor?.onBacktab()
     }
@@ -707,6 +717,7 @@ struct LinkEditor: View {
     let canRemove: Bool
     let apply: (String) -> Void
     let remove: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -714,6 +725,8 @@ struct LinkEditor: View {
                 .textFieldStyle(.plain)
                 .font(.ui(13))
                 .frame(width: 240)
+                .focused($focused)
+                .onAppear { focused = true }
                 .onSubmit { apply(url) }
             if canRemove {
                 Button("Remove", action: remove)
