@@ -152,6 +152,8 @@ struct SyncLine: Hashable {
     var tone: Tone
     /// The longer form, shown on hover.
     var detail: String?
+    /// Where clicking the line goes, e.g. the Google Cloud page that turns the Gmail API on.
+    var url: URL?
 }
 
 enum ShellError: LocalizedError {

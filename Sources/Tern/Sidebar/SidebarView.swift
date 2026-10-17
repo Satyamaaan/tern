@@ -275,8 +275,16 @@ struct SyncStatusLine: View {
             Text("Offline — changes will sync").foregroundStyle(Color(Theme.text3))
         } else if let line = services.syncLine {
             Dot(color: line.tone == .attention ? Theme.accent : Theme.text3, size: 6)
-            Text(line.text).foregroundStyle(Color(Theme.text3)).lineLimit(1).truncationMode(.tail)
+            if let url = line.url {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Text(line.text).underline().foregroundStyle(Color(Theme.text2)).lineLimit(1).truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
                 .help(line.detail ?? line.text)
+            } else {
+                Text(line.text).foregroundStyle(Color(Theme.text3)).lineLimit(1).truncationMode(.tail)
+                    .help(line.detail ?? line.text)
+            }
         } else if let progress = services.syncProgress {
             Dot(color: Theme.text3, size: 6)
             Text("Syncing \(progress.done.formatted()) of \(progress.total.formatted())").foregroundStyle(Color(Theme.text3))
