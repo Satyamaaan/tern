@@ -289,12 +289,12 @@ struct PaletteView: View {
         .frame(width: 640)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: Theme.Radius.card).fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color(Theme.raised).opacity(0.92))
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Color(Theme.raised).opacity(0.92))
             }
         )
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .overlayShadow()
         .onAppear {
             controller.reset()
@@ -312,9 +312,10 @@ struct PaletteView: View {
         return Text(title)
             .font(.ui(12, .medium))
             .foregroundStyle(Color(Theme.text2))
-            .padding(.horizontal, 10)
-            .frame(height: 24)
-            .background(Capsule().fill(Color(Theme.hover)))
+            .padding(.horizontal, 8)
+            .frame(height: Theme.Control.small)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).fill(Color(Theme.hover)))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).strokeBorder(Color(Theme.hairline), lineWidth: 1))
     }
 
     private var results: some View {
@@ -393,7 +394,7 @@ private struct PaletteRow: View {
         case .project(let project): ProjectGlyph(project: project, size: 16)
         case .dot(let color): Dot(color: color, size: 8)
         case .check(let on):
-            if on { IconView(icon: .done, size: 14, color: Color(Theme.accentInk)) } else { Color.clear.frame(width: 1, height: 1) }
+            if on { IconView(icon: .done, size: 14, color: Color(Theme.ink)) } else { Color.clear.frame(width: 1, height: 1) }
         }
     }
 }

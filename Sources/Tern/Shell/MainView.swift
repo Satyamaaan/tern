@@ -39,6 +39,7 @@ struct MainView: View {
             }
         }
         .background(Color(Theme.bg))
+        .tint(Color(Theme.ink))
         .ignoresSafeArea()
         .overlay(alignment: .top) { overlays }
         .overlay(alignment: .bottom) { chordHUD }
@@ -91,8 +92,8 @@ struct MainView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(Capsule().fill(Color(Theme.raised)))
-            .overlay(Capsule().strokeBorder(Color(Theme.hairline), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairline), lineWidth: 1))
             .overlayShadow()
             .padding(.bottom, 80)
             .transition(.opacity)
@@ -201,14 +202,14 @@ struct SnoozeDateSheet: View {
                 Spacer()
                 Button("Cancel") { model.snoozeDateFor = nil }
                     .keyboardShortcut(.cancelAction)
-                    .buttonStyle(PillButtonStyle(primary: false))
+                    .buttonStyle(TernButtonStyle(.secondary))
                 Button("Snooze") {
                     let keys = model.snoozeDateFor ?? []
                     model.snoozeDateFor = nil
                     model.perform(.snooze(until: date), on: keys)
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(PillButtonStyle(primary: true))
+                .buttonStyle(TernButtonStyle(.primary))
             }
         }
         .padding(24)

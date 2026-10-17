@@ -66,7 +66,7 @@ final class ThreadRowView: NSTableRowView {
         if model.hasFocusRing {
             let ring = NSBezierPath(roundedRect: pill.insetBy(dx: 0.75, dy: 0.75), xRadius: Theme.Radius.row - 0.5, yRadius: Theme.Radius.row - 0.5)
             ring.lineWidth = 1.5
-            Theme.accent.withAlphaComponent(0.4).setStroke()
+            Theme.ink.withAlphaComponent(0.45).setStroke()
             ring.stroke()
         }
 
@@ -128,7 +128,7 @@ private struct RowPainter {
     private func drawUnreadDot(centerY: CGFloat) {
         guard unread else { return }
         let x = pill.minX + 2 + ThreadRowView.gutter / 2
-        Theme.accent.setFill()
+        Theme.ink.setFill()
         NSBezierPath(ovalIn: CGRect(x: x - 3, y: centerY - 3, width: 6, height: 6)).fill()
     }
 
@@ -241,7 +241,7 @@ private struct RowPainter {
         }
         let tail: NSAttributedString
         if let summary = model.row.summary, !summary.isEmpty {
-            let text = NSMutableAttributedString(string: "✦ ", attributes: [.font: Theme.ui(12), .foregroundColor: Theme.accentInk])
+            let text = NSMutableAttributedString(string: "✦ ", attributes: [.font: Theme.ui(12), .foregroundColor: Theme.text2])
             text.append(NSAttributedString(string: summary, attributes: [.font: Theme.ui(13), .foregroundColor: Theme.text2]))
             tail = text
         } else {
@@ -267,7 +267,7 @@ private struct RowPainter {
         return style
     }()
 
-    /// Draws `text` with a soft accent mark behind each range (search matches). Marks past the visible
+    /// Draws `text` with a soft ink mark behind each range (search matches). Marks past the visible
     /// width are clipped with the text.
     static func drawMarked(_ text: NSAttributedString, ranges: [NSRange], in rect: CGRect) {
         guard rect.width > 4 else { return }
@@ -275,14 +275,14 @@ private struct RowPainter {
         let lineHeight = ceil(font.ascender - font.descender)
         let y = rect.minY + (rect.height - lineHeight) / 2
         let line = CTLineCreateWithAttributedString(text)
-        Theme.accentSoft.setFill()
+        Theme.ink.withAlphaComponent(0.13).setFill()
         for range in ranges where range.location < text.length {
             let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
             let end = CTLineGetOffsetForStringIndex(line, min(NSMaxRange(range), text.length), nil)
             let mark = CGRect(x: rect.minX + start - 2, y: y - 1, width: end - start + 4, height: lineHeight + 2)
                 .intersection(rect.insetBy(dx: -2, dy: -2))
             guard mark.width > 3 else { continue }
-            NSBezierPath(roundedRect: mark, xRadius: 4, yRadius: 4).fill()
+            NSBezierPath(roundedRect: mark, xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip).fill()
         }
         draw(text, in: rect)
     }

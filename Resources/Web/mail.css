@@ -11,7 +11,7 @@
 .tern-body blockquote { margin: 0 0 0 12px; }
 .tern-body hr { border: 0; border-top: 1px solid var(--hairline); }
 
-:host([data-mode="simple"]), :host([data-mode="plain"]) { --link: var(--accentInk); }
+:host([data-mode="simple"]), :host([data-mode="plain"]) { --link: var(--ink); }
 :host([data-mode="simple"]) .tern-body p { margin: 0 0 12px; }
 
 .tern-plain { white-space: pre-wrap; font: 14px/22px var(--ui); color: var(--text1); }
@@ -21,7 +21,7 @@
 :host([data-mode="simple"]) #Signature, :host([data-mode="simple"]) .moz-signature { opacity: 0.6; }
 
 .tern-quote-toggle {
-  display: grid; place-items: center; width: 30px; height: 16px; margin: 6px 0 2px; border-radius: 999px;
+  display: grid; place-items: center; width: 30px; height: 16px; margin: 6px 0 2px; border-radius: 4px;
   background: var(--hover); color: var(--text3); font: 600 11px/16px var(--ui); letter-spacing: 1px;
   user-select: none; -webkit-user-select: none; white-space: normal; cursor: default;
 }

@@ -42,7 +42,7 @@ struct Snapshotter {
     }
 
     /// More states for visual review: hover + toast, the waterline, wide one-line rows, search, one
-    /// account with labels, collapsed sidebar, inbox zero, settings and onboarding.
+    /// account with labels, collapsed sidebar, inbox zero, settings, onboarding and the project editor.
     private func extras(_ window: MainWindow, _ directory: URL) {
         func shot(_ name: String, dark: Bool = false) {
             render(window, appearance: dark ? .darkAqua : .aqua, to: directory.appendingPathComponent("\(name).png"))
@@ -108,6 +108,15 @@ struct Snapshotter {
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-light.png"), dark: false)
         standalone(OnboardingView(onFinish: {}, onDemo: {}).environment(model).environment(model.services),
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-dark.png"), dark: true)
+        if let project = model.projects.first {
+            let draft = ProjectDraft(
+                id: project.id, name: project.name, colorIndex: project.colorIndex, icon: project.icon ?? "folder",
+                rules: [.init(field: .fromDomain, value: "lumen.io")], isNew: false)
+            for dark in [false, true] {
+                standalone(ProjectEditor(draft: draft).environment(model), size: NSSize(width: 480, height: 520),
+                           to: directory.appendingPathComponent("project-editor-\(dark ? "dark" : "light").png"), dark: dark)
+            }
+        }
     }
 
     func standalone<V: View>(_ view: V, size: NSSize, to url: URL, dark: Bool) {

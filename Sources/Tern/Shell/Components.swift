@@ -16,27 +16,136 @@ struct Hairline: View {
 /// A square icon button with a hover fill (rows and icon buttons are the only things that hover).
 struct IconButton: View {
     let icon: Icon
-    var size: CGFloat = 28
+    var size: CGFloat = Theme.Control.regular
     var iconSize: CGFloat = 15
     var help: String = ""
     let action: () -> Void
-
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             IconView(icon: icon, size: iconSize)
                 .frame(width: size, height: size)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Color(Theme.hover).opacity(hovering ? 1 : 0)))
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(IconButtonStyle())
         .help(help)
     }
 }
 
-/// A shortcut key in Geist Mono, e.g. the `/` in the search pill or `⌘K` in the palette.
+// MARK: - Buttons
+
+/// Every text button in the app. 6 px corners, Geist Medium, 28 pt (24 pt small), no shadow.
+/// - `primary`: `ink` fill, `onInk` label. One per area at most.
+/// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
+/// - `quiet`: no border; the `hover` fill appears under the pointer.
+/// All three darken a step while pressed, show an `ink` ring when focused from the keyboard and drop
+/// to 40 % when disabled.
+struct TernButtonStyle: ButtonStyle {
+    enum Kind { case primary, secondary, quiet }
+    enum Size { case regular, small }
+
+    var kind: Kind
+    var size: Size = .regular
+
+    init(_ kind: Kind, size: Size = .regular) {
+        self.kind = kind
+        self.size = size
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        StyledButton(configuration: configuration, kind: kind, size: size)
+    }
+
+    private struct StyledButton: View {
+        let configuration: Configuration
+        let kind: Kind
+        let size: Size
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @State private var hovering = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            configuration.label
+                .font(.ui(size == .small ? 12 : 13, .medium))
+                .lineLimit(1)
+                .foregroundStyle(Color(kind == .primary ? Theme.onInk : Theme.text1))
+                .padding(.horizontal, size == .small ? 10 : 12)
+                .frame(height: size == .small ? Theme.Control.small : Theme.Control.regular)
+                .background(shape.fill(fill))
+                .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: kind == .secondary ? 1 : 0))
+                .focusRing(isFocused, shape: shape)
+                .contentShape(shape)
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovering = $0 && isEnabled }
+        }
+
+        private var fill: Color {
+            let pressed = configuration.isPressed
+            switch kind {
+            case .primary:
+                return Color(pressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink)
+            case .secondary, .quiet:
+                return pressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear
+            }
+        }
+    }
+}
+
+/// Icon-only buttons: the label sets the size (28 pt by default); `hover` fill under the pointer,
+/// `selected` while pressed, an `ink` ring when focused, 40 % when disabled.
+struct IconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledButton(configuration: configuration)
+    }
+
+    private struct StyledButton: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @State private var hovering = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            configuration.label
+                .background(shape.fill(
+                    configuration.isPressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear))
+                .focusRing(isFocused, shape: shape)
+                .contentShape(shape)
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovering = $0 && isEnabled }
+        }
+    }
+}
+
+/// A text link in `ink`, underlined under the pointer ("Choose file…", "Add rule", "Undo").
+struct LinkButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        StyledLink(configuration: configuration)
+    }
+
+    private struct StyledLink: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Color(Theme.ink))
+                .underline(hovering && isEnabled)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+extension View {
+    /// The keyboard focus ring: 1.5 px `ink` at 50 %, 2 px outside the control.
+    func focusRing<S: InsettableShape>(_ visible: Bool, shape: S) -> some View {
+        overlay(shape.inset(by: -2.5).strokeBorder(Color(Theme.ink).opacity(visible ? 0.5 : 0), lineWidth: 1.5))
+    }
+}
+
+/// A shortcut key in Geist Mono, e.g. the `/` in the search field or `⌘K` in the palette.
 struct Keycap: View {
     let text: String
     var inverted = false
@@ -48,15 +157,15 @@ struct Keycap: View {
             .padding(.horizontal, 5)
             .frame(minWidth: 20, minHeight: 20)
             .background(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: Theme.Radius.chip)
                     .fill(inverted ? Color.clear : Color(Theme.bg))
-                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(
                         inverted ? Color(Theme.bg).opacity(0.35) : Color(Theme.hairlineStrong), lineWidth: 1))
             )
     }
 }
 
-/// A chip: 12% tint, coloured text, radius 6, 18 px tall.
+/// A chip: 12% tint, coloured text, radius 4, 18 px tall.
 struct Chip: View {
     let text: String
     let color: NSColor
@@ -71,13 +180,17 @@ struct Chip: View {
     }
 }
 
-/// A small coloured circle (account hue, status).
+/// A small circle (account hue, status). `ring` draws it hollow, for quiet states.
 struct Dot: View {
     let color: NSColor
     var size: CGFloat = 7
+    var ring = false
 
     var body: some View {
-        Circle().fill(Color(color)).frame(width: size, height: size)
+        Circle()
+            .fill(Color(color).opacity(ring ? 0 : 1))
+            .overlay(Circle().strokeBorder(Color(color), lineWidth: ring ? 1.25 : 0))
+            .frame(width: size, height: size)
     }
 }
 

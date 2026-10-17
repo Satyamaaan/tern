@@ -169,6 +169,7 @@ struct ComposerView: View {
             ComposerBottomArea(model: model)
         }
         .background(Color(Theme.raised))
+        .tint(Color(Theme.ink))
         .acceptsFileDrops(model)
         .ignoresSafeArea()
     }
@@ -245,9 +246,9 @@ struct InlineComposerCard: View {
                 .frame(height: min(max(model.bodyHeight, Self.minBody), Self.maxBody))
             ComposerBottomArea(model: model)
         }
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairline)))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Color(Theme.raised)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
     }

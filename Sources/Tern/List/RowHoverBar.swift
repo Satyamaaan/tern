@@ -45,7 +45,7 @@ private struct HoverButton: View {
         Button(action: action) {
             IconView(icon: icon, size: 14)
                 .frame(width: 24, height: 22)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(Theme.selected).opacity(hovering ? 1 : 0)))
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected).opacity(hovering ? 1 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

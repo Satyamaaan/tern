@@ -100,7 +100,7 @@ final class ToastPanel: NSPanel {
     override var canBecomeKey: Bool { false }
 }
 
-/// "Sending in 4 s · Undo  z": the pill itself.
+/// "Sending in 4 s · Undo  z": the toast itself.
 struct SendToastView: View {
     let state: ToastState
     let dismiss: @MainActor () -> Void
@@ -119,12 +119,12 @@ struct SendToastView: View {
                         dismiss()
                     } label: {
                         HStack(spacing: 6) {
-                            Text("Undo").font(.ui(13, .medium)).foregroundStyle(Color(Theme.accentInk))
+                            Text("Undo").font(.ui(13, .medium)).foregroundStyle(Color(Theme.ink))
                             Text("Z")
                                 .font(.mono(11))
                                 .foregroundStyle(Color(Theme.text3))
                                 .frame(width: 16, height: 16)
-                                .background(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(Theme.hairlineStrong)))
+                                .background(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(Color(Theme.hairlineStrong)))
                         }
                     }
                     .buttonStyle(.plain)
@@ -132,8 +132,8 @@ struct SendToastView: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 36)
-            .background(Capsule().fill(Color(Theme.raised)))
-            .overlay(Capsule().strokeBorder(Color(Theme.hairline)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
             .shadow(color: .black.opacity(0.14), radius: 15, y: 8)
             .padding(.horizontal, 30)
             .padding(.vertical, 24)

@@ -2,11 +2,13 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The one account control in the main window: a pill showing the scope; click for the menu.
+/// The one account control in the main window: a field showing the scope; click for the menu.
 struct AccountSwitcher: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
+
+    private let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
 
     var body: some View {
         Button(action: showMenu) {
@@ -20,10 +22,10 @@ struct AccountSwitcher: View {
                 IconView(icon: .chevronDown, size: 12)
             }
             .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(Capsule().fill(Color(scheme == .dark ? Theme.raised : Theme.bg)))
-            .overlay(Capsule().strokeBorder(Color(hovering ? Theme.hairlineStrong : Theme.hairline), lineWidth: 1))
-            .contentShape(Capsule())
+            .frame(height: 32)
+            .background(shape.fill(Color(scheme == .dark ? Theme.raised : Theme.bg)))
+            .overlay(shape.strokeBorder(Color(hovering ? Theme.hairlineStrong : Theme.hairline), lineWidth: 1))
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

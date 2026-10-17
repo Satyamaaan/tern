@@ -305,7 +305,7 @@ final class TokenInputField: NSTextField {
     }
 }
 
-/// One recipient pill.
+/// One recipient token. An address that doesn't parse gets a dashed outline instead of a fill.
 final class TokenView: NSView, NSDraggingSource {
     let participant: Participant
     weak var field: RecipientTokenField?
@@ -314,7 +314,7 @@ final class TokenView: NSView, NSDraggingSource {
 
     private var title: NSAttributedString {
         NSAttributedString(string: participant.name.isEmpty ? participant.email : participant.name, attributes: [
-            .font: Theme.ui(13), .foregroundColor: isValid ? Theme.text1 : Theme.accentInk,
+            .font: Theme.ui(13), .foregroundColor: isValid ? Theme.text1 : Theme.text2,
         ])
     }
 
@@ -334,10 +334,21 @@ final class TokenView: NSView, NSDraggingSource {
     var preferredWidth: CGFloat { ceil(title.size().width) + 20 }
 
     override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
-        let fill: NSColor = !isValid ? Theme.accentSoft : isSelected ? Theme.hairlineStrong : Theme.pill
-        fill.setFill()
-        path.fill()
+        if isValid {
+            let path = NSBezierPath(roundedRect: bounds, xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip)
+            (isSelected ? Theme.hairlineStrong : Theme.pill).setFill()
+            path.fill()
+        } else {
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip)
+            if isSelected {
+                Theme.pill.setFill()
+                path.fill()
+            }
+            path.lineWidth = 1
+            path.setLineDash([3, 2], count: 2, phase: 0)
+            Theme.text2.setStroke()
+            path.stroke()
+        }
         let text = title
         let size = text.size()
         let rect = CGRect(x: 10, y: (bounds.height - size.height) / 2, width: bounds.width - 20, height: size.height)

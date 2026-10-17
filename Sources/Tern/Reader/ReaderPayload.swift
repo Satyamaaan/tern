@@ -225,7 +225,7 @@ enum ReaderPayload {
         if mine { return ReaderResources.hex(Theme.accountColor(context.accountColorIndex)) }
         var hash: UInt32 = 2_166_136_261
         for byte in email.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-        let hues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0xC08A3E, 0xB05C7A, 0x6B7F4A, 0x5E6B7A, 0x9A6B4F]
+        let hues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0x8F7F62, 0xB05C7A, 0x6B7F4A, 0x5E6B7A, 0x7A6A5C]
         return ReaderResources.hex(Theme.rgb(hues[Int(hash % UInt32(hues.count))]))
     }
 

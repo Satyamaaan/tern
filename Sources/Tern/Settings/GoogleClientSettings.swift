@@ -20,7 +20,7 @@ struct GoogleClientSection: View {
             SettingsRow(title: "Google client", detail: detail) {
                 if !editing {
                     Button(stored == nil ? "Add…" : "Replace…") { editing = true }
-                        .buttonStyle(PillButtonStyle(primary: false))
+                        .buttonStyle(TernButtonStyle(.secondary))
                 }
             }
             if editing { editor }
@@ -48,14 +48,14 @@ struct GoogleClientSection: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 10)
             HStack(spacing: 8) {
-                Button("Choose file…") { chooseFile() }.buttonStyle(PillButtonStyle(primary: false))
+                Button("Choose file…") { chooseFile() }.buttonStyle(TernButtonStyle(.secondary))
                 if let message {
-                    Text(message).font(.ui(12)).foregroundStyle(Color(Theme.accentInk)).lineLimit(2)
+                    Text(message).font(.ui(12, .medium)).foregroundStyle(Color(Theme.ink)).lineLimit(2)
                 }
                 Spacer()
-                Button("Cancel") { close() }.buttonStyle(PillButtonStyle(primary: false))
+                Button("Cancel") { close() }.buttonStyle(TernButtonStyle(.secondary))
                 Button(working ? "Saving…" : "Save") { save() }
-                    .buttonStyle(PillButtonStyle(primary: true))
+                    .buttonStyle(TernButtonStyle(.primary))
                     .disabled(working || clientId.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.vertical, 14)

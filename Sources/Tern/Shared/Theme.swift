@@ -15,16 +15,20 @@ enum Theme {
     static let text1 = dynamic(light: 0x161616, dark: 0xECECEA)
     static let text2 = dynamic(light: 0x5F5F5A, dark: 0xA3A39E)
     static let text3 = dynamic(light: 0x74746E, dark: 0x85857F)
-    static let accent = dynamic(light: 0xE5461E, dark: 0xFF6B3F)
-    static let accentInk = dynamic(light: 0xC23A16, dark: 0xFF8C66)
-    static let accentSoft = dynamic(light: 0xFDECE6, dark: 0x2E1913)
-    /// Label on a primary (accent) button.
-    static let onAccent = dynamic(light: 0xFFFFFF, dark: 0x141414)
-    /// Primary button fill.
-    static let primaryFill = dynamic(light: 0xC23A16, dark: 0xFF6B3F)
+    /// The one strong colour: near-black in light, near-white in dark. Primary button fill, unread and
+    /// needs-reply dots, the Flock, focus rings, links. The UI has no hue of its own.
+    static let ink = dynamic(light: 0x18181B, dark: 0xEDEDEA)
+    /// `ink` under the pointer.
+    static let inkHover = dynamic(light: 0x2E2E33, dark: 0xD9D9D5)
+    /// `ink` while pressed.
+    static let inkPressed = dynamic(light: 0x45454B, dark: 0xC4C4BF)
+    /// Soft neutral fill for "needs you" chips and other soft states.
+    static let inkSoft = dynamic(light: 0xE4E4E0, dark: 0x303030)
+    /// Label on an `ink` fill.
+    static let onInk = dynamic(light: 0xFFFFFF, dark: 0x141414)
 
-    static let accountHues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0xC08A3E, 0xB05C7A, 0x6B7F4A]
-    static let projectHues: [UInt32] = [0xE5461E, 0x2F6FD8, 0x23764A, 0x8A6FB3, 0xC08A3E, 0xB05C7A, 0x3E9A86, 0x5E6B7A]
+    static let accountHues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0x8F7F62, 0xB05C7A, 0x6B7F4A]
+    static let projectHues: [UInt32] = [0x6B6B66, 0x2F6FD8, 0x23764A, 0x8A6FB3, 0x8F7F62, 0xB05C7A, 0x3E9A86, 0x5E6B7A]
 
     static func accountColor(_ index: Int) -> NSColor { rgb(accountHues[abs(index) % accountHues.count]) }
     static func projectColor(_ index: Int) -> NSColor { rgb(projectHues[abs(index) % projectHues.count]) }
@@ -42,10 +46,24 @@ enum Theme {
         }
     }
 
+    /// Corner radii. Only avatars, status dots and the Flock are round; nothing is a pill.
     enum Radius {
-        static let row: CGFloat = 8
-        static let card: CGFloat = 12
-        static let chip: CGFloat = 6
+        /// Chips, recipient tokens, keycaps, search marks.
+        static let chip: CGFloat = 4
+        /// Buttons, icon buttons, fields, segmented controls.
+        static let control: CGFloat = 6
+        /// List, sidebar, menu and palette rows.
+        static let row: CGFloat = 6
+        /// Small floating things: toasts, the chord HUD, the formatting bar, the link preview.
+        static let overlay: CGFloat = 8
+        /// Panels: ⌘K, dropdowns, popovers, the composer card, the shortcut sheet.
+        static let card: CGFloat = 10
+    }
+
+    /// Control heights.
+    enum Control {
+        static let regular: CGFloat = 28
+        static let small: CGFloat = 24
     }
 
     // MARK: Fonts
@@ -118,11 +136,9 @@ extension Font {
 // MARK: - Shell additions
 
 extension Theme {
-    /// Status dot for "Up to date".
-    static let syncOK = rgb(0x3E9A86)
 
     /// Names for `projectHues`, in order, for colour menus.
-    static let projectColorNames = ["Vermilion", "Blue", "Green", "Violet", "Ochre", "Rose", "Teal", "Slate"]
+    static let projectColorNames = ["Graphite", "Blue", "Green", "Violet", "Sand", "Rose", "Teal", "Slate"]
 
     /// A small filled circle for menu items (account and project colours).
     static func swatch(_ color: NSColor, size: CGFloat = 10) -> NSImage {

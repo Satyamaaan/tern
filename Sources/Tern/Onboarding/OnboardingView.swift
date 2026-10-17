@@ -55,10 +55,10 @@ struct OnboardingView: View {
                     .foregroundStyle(Color(Theme.text3))
                 Spacer()
                 if let message {
-                    Text(message).font(.ui(12)).foregroundStyle(Color(Theme.accentInk)).lineLimit(2)
+                    Text(message).font(.ui(12, .medium)).foregroundStyle(Color(Theme.ink)).lineLimit(2)
                 }
                 if step > 0 && step < 3 {
-                    Button("Back") { message = nil; step -= 1 }.buttonStyle(PillButtonStyle(primary: false))
+                    Button("Back") { message = nil; step -= 1 }.buttonStyle(TernButtonStyle(.secondary))
                 }
                 primaryButton
             }
@@ -67,6 +67,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 44)
         .frame(width: 640, height: 560)
         .background(Color(Theme.bg))
+        .tint(Color(Theme.ink))
         .googleClientFileDrop { data in if step == 0 { importClient(data) } }
     }
 
@@ -75,7 +76,7 @@ struct OnboardingView: View {
             ForEach(steps.indices, id: \.self) { index in
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color(index <= step ? Theme.accent : Theme.hairlineStrong))
+                        .fill(Color(index <= step ? Theme.ink : Theme.hairlineStrong))
                         .frame(width: 6, height: 6)
                     Text(steps[index])
                         .font(.ui(12, index == step ? .medium : .regular))
@@ -89,20 +90,20 @@ struct OnboardingView: View {
         switch step {
         case 0:
             Button(working ? "Saving…" : "Continue") { saveClient() }
-                .buttonStyle(PillButtonStyle(primary: true))
+                .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
                 .disabled(working)
         case 1:
             Button("Continue") { message = nil; step = 2 }
-                .buttonStyle(PillButtonStyle(primary: true))
+                .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
         case 2:
             Button("Continue") { saveAI(); step = 3 }
-                .buttonStyle(PillButtonStyle(primary: true))
+                .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
         default:
             Button("Open Tern", action: onFinish)
-                .buttonStyle(PillButtonStyle(primary: true))
+                .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -120,17 +121,15 @@ struct OnboardingView: View {
             GoogleClientFields(clientId: $clientId, clientSecret: $clientSecret)
             HStack(spacing: 16) {
                 Button("Choose file…") { chooseClientFile() }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LinkButtonStyle())
                     .font(.ui(12, .medium))
-                    .foregroundStyle(Color(Theme.accentInk))
                 Text("or drop the client_secret_….json file here")
                     .font(.ui(12))
                     .foregroundStyle(Color(Theme.text3))
                 Spacer()
                 Button(showWhy ? "Why your own client" : "Why?") { withAnimation(.easeOut(duration: 0.15)) { showWhy.toggle() } }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LinkButtonStyle())
                     .font(.ui(12, .medium))
-                    .foregroundStyle(Color(Theme.accentInk))
             }
             .padding(.top, 12)
             if showWhy {
@@ -161,7 +160,7 @@ struct OnboardingView: View {
                 Hairline()
             }
             Button(working ? "Opening Google…" : "Add Gmail account") { addAccount() }
-                .buttonStyle(PillButtonStyle(primary: model.accounts.isEmpty))
+                .buttonStyle(TernButtonStyle(model.accounts.isEmpty ? .primary : .secondary))
                 .disabled(working)
                 .padding(.top, 16)
         }
@@ -177,14 +176,14 @@ struct OnboardingView: View {
             ForEach(AIProvider.allCases) { option in
                 HStack(spacing: 12) {
                     Circle()
-                        .strokeBorder(Color(provider == option ? Theme.accent : Theme.hairlineStrong), lineWidth: provider == option ? 5 : 1.5)
+                        .strokeBorder(Color(provider == option ? Theme.ink : Theme.hairlineStrong), lineWidth: provider == option ? 5 : 1.5)
                         .frame(width: 16, height: 16)
                     Text(option.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                     Spacer()
                     if let executable = option.executable {
                         Text(CLITool.find(executable) == nil ? "Not found" : "Found")
                             .font(.ui(12))
-                            .foregroundStyle(Color(CLITool.find(executable) == nil ? Theme.text3 : Theme.syncOK))
+                            .foregroundStyle(Color(CLITool.find(executable) == nil ? Theme.text3 : Theme.text1))
                     }
                 }
                 .frame(height: 40)

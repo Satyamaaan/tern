@@ -157,6 +157,7 @@ struct SettingsView: View {
             .background(Color(Theme.bg))
         }
         .frame(minWidth: 720, minHeight: 500)
+        .tint(Color(Theme.ink))
     }
 
     @ViewBuilder private var content: some View {
@@ -197,8 +198,9 @@ struct SettingsRow<Control: View>: View {
     }
 }
 
-/// Segmented choice as pills: the selected option gets the `selected` fill.
-struct PillPicker<Value: Hashable>: View {
+/// Segmented choice: a 28 pt track in `selected`; the chosen option sits on a raised segment with a
+/// hairline border.
+struct SegmentedPicker<Value: Hashable>: View {
     let options: [Value]
     @Binding var selection: Value
     let title: (Value) -> String
@@ -206,30 +208,35 @@ struct PillPicker<Value: Hashable>: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
+                let chosen = selection == option
                 Text(title(option))
                     .font(.ui(12, .medium))
-                    .foregroundStyle(Color(selection == option ? Theme.text1 : Theme.text2))
+                    .foregroundStyle(Color(chosen ? Theme.text1 : Theme.text2))
                     .padding(.horizontal, 10)
-                    .frame(height: 24)
-                    .background(Capsule().fill(Color(Theme.bg).opacity(selection == option ? 1 : 0)))
-                    .contentShape(Capsule())
+                    .frame(height: Theme.Control.small)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
+                            .fill(Color(Theme.raised).opacity(chosen ? 1 : 0))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
+                                .strokeBorder(Color(Theme.hairlineStrong).opacity(chosen ? 1 : 0), lineWidth: 1)))
+                    .contentShape(Rectangle())
                     .onTapGesture { selection = option }
             }
         }
         .padding(2)
-        .background(Capsule().fill(Color(Theme.selected)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected)))
     }
 }
 
-/// An on/off pill switch.
-struct PillToggle: View {
+/// An on/off switch in `ink`.
+struct InkToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
         Toggle("", isOn: $isOn)
             .toggleStyle(.switch)
             .controlSize(.small)
-            .tint(Color(Theme.primaryFill))
+            .tint(Color(Theme.ink))
             .labelsHidden()
     }
 }
@@ -255,14 +262,14 @@ private struct AccountsSettings: View {
                 SettingsRow(title: model.accountTitle(account), detail: "\(account.email) · \(syncText(account))") {
                     HStack(spacing: 8) {
                         if account.syncState == .needsAuth || account.syncState == .error {
-                            Button("Sign in again") { reauth(account) }.buttonStyle(PillButtonStyle(primary: false))
+                            Button("Sign in again") { reauth(account) }.buttonStyle(TernButtonStyle(.secondary))
                         }
-                        Button("Remove") { state.remove(account) }.buttonStyle(PillButtonStyle(primary: false))
+                        Button("Remove") { state.remove(account) }.buttonStyle(TernButtonStyle(.secondary))
                     }
                 }
             }
             HStack(spacing: 12) {
-                Button("Add Gmail account") { add() }.buttonStyle(PillButtonStyle(primary: true))
+                Button("Add Gmail account") { add() }.buttonStyle(TernButtonStyle(.primary))
                 if let message { Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
             }
             .padding(.top, 16)
@@ -307,7 +314,7 @@ private struct AISettings: View {
                 .padding(.bottom, 8)
             Hairline()
             SettingsRow(title: "Provider", detail: providerDetail) {
-                PillPicker(options: AIProvider.allCases, selection: $state.provider) { $0.title }
+                SegmentedPicker(options: AIProvider.allCases, selection: $state.provider) { $0.title }
             }
             SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
                 TextField("Default", text: $state.aiModel)
@@ -318,7 +325,7 @@ private struct AISettings: View {
                     .disabled(state.provider == .off)
             }
             SettingsRow(title: "Suggest projects", detail: "Let AI file mail into projects when no rule matches.") {
-                PillToggle(isOn: $state.autoProjects).disabled(state.provider == .off)
+                InkToggle(isOn: $state.autoProjects).disabled(state.provider == .off)
             }
         }
         .onChange(of: state.provider) { state.saveAI() }
@@ -340,16 +347,16 @@ private struct AppearanceSettings: View {
         @Bindable var prefs = model.prefs
         VStack(alignment: .leading, spacing: 0) {
             SettingsRow(title: "Theme") {
-                PillPicker(options: AppearanceMode.allCases, selection: $prefs.appearance) { $0.title }
+                SegmentedPicker(options: AppearanceMode.allCases, selection: $prefs.appearance) { $0.title }
             }
             SettingsRow(title: "Density", detail: "Auto shows one line per thread when the list is wide, two when it's narrow.") {
-                PillPicker(options: Density.allCases, selection: $prefs.density) { $0.title }
+                SegmentedPicker(options: Density.allCases, selection: $prefs.density) { $0.title }
             }
             SettingsRow(title: "Dim old read mail", detail: "Fade read conversations older than a month.") {
-                PillToggle(isOn: $prefs.dimReadByAge)
+                InkToggle(isOn: $prefs.dimReadByAge)
             }
             SettingsRow(title: "Split inbox", detail: "Important, People, Notifications, Newsletters, Other.") {
-                PillToggle(isOn: Binding(get: { prefs.splitInbox }, set: { model.setSplitInbox($0) }))
+                InkToggle(isOn: Binding(get: { prefs.splitInbox }, set: { model.setSplitInbox($0) }))
             }
         }
     }
@@ -379,9 +386,9 @@ private struct NotificationSettings: View {
     var body: some View {
         @Bindable var prefs = model.prefs
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Notify about new mail") { PillToggle(isOn: $prefs.notificationsEnabled) }
+            SettingsRow(title: "Notify about new mail") { InkToggle(isOn: $prefs.notificationsEnabled) }
             SettingsRow(title: "Only important mail", detail: "People, needs reply, calendar and security.") {
-                PillToggle(isOn: $prefs.notifyOnlyImportant).disabled(!prefs.notificationsEnabled)
+                InkToggle(isOn: $prefs.notifyOnlyImportant).disabled(!prefs.notificationsEnabled)
             }
         }
     }
@@ -395,16 +402,16 @@ private struct AdvancedSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsRow(title: "Database", detail: model.databaseURL.path) {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.databaseURL]) }
-                    .buttonStyle(PillButtonStyle(primary: false))
+                    .buttonStyle(TernButtonStyle(.secondary))
             }
             SettingsRow(title: "Search index", detail: state.indexStatus ?? "Rebuild if search misses mail you know is there.") {
                 Button("Rebuild") { state.rebuildSearchIndex() }
-                    .buttonStyle(PillButtonStyle(primary: false))
+                    .buttonStyle(TernButtonStyle(.secondary))
                     .disabled(state.indexStatus == "Rebuilding…")
             }
             if model.isFake {
                 SettingsRow(title: "Demo mail", detail: "Start over with a fresh demo mailbox. Tern restarts.") {
-                    Button("Reset") { state.resetDemoMail() }.buttonStyle(PillButtonStyle(primary: false))
+                    Button("Reset") { state.resetDemoMail() }.buttonStyle(TernButtonStyle(.secondary))
                 }
             }
         }
