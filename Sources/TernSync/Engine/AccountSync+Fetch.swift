@@ -438,9 +438,11 @@ extension AccountSync {
         try await listRefs(labelIds: labelIds, query: nil).map(\.id)
     }
 
-    /// Ids per call so one request costs at most `maxUnitsPerRequest`.
+    /// Ids per call so one request costs at most `maxUnitsPerRequest`, or
+    /// `backgroundMaxUnitsPerRequest` for bulk and background work.
     func batchSize(cost: Int) -> Int {
-        max(1, min(configuration.fetchBatchSize, configuration.maxUnitsPerRequest / max(1, cost)))
+        let limit = QuotaPriority.current == .interactive ? configuration.maxUnitsPerRequest : configuration.backgroundMaxUnitsPerRequest
+        return max(1, min(configuration.fetchBatchSize, limit / max(1, cost)))
     }
 
     /// `ids` that aren't stored with a full body, in order.

@@ -75,7 +75,8 @@ public actor AccountSync {
         self.accountId = account.id
         self.store = store
         let budget = QuotaBudget(unitsPerMinute: configuration.quota.unitsPerMinute, bulkReserve: configuration.bulkReserve,
-                                 backgroundReserve: configuration.backgroundReserve, clock: clock)
+                                 backgroundReserve: configuration.backgroundReserve, paceWindow: configuration.paceWindow,
+                                 clock: clock)
         self.budget = budget
         self.api = BudgetedGmail(base: api, budget: budget, quota: configuration.quota)
         self.encodeDraft = encodeDraft

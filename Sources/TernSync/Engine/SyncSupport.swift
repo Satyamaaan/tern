@@ -33,8 +33,13 @@ public struct SyncConfiguration: Sendable {
     public var bulkReserve: Int = 600
     /// Units per minute background work (older mail, body trickle) leaves for everything else.
     public var backgroundReserve: Int = 1_500
+    /// Bulk and background spending is smoothed over this many seconds: in any such window they
+    /// spend at most their per-minute share for that long (360 and 300 units by default), so they
+    /// never burst and interactive calls don't queue behind them in the HTTP client's limiter.
+    public var paceWindow: Double = 4
     /// Most units one bulk step may spend before the loop checks for polls and actions again.
-    public var bulkStepUnits: Int = 1_200
+    /// Fits in one pace window, so a step runs without waiting.
+    public var bulkStepUnits: Int = 360
 
     /// Initial sync fetches this many days of All Mail in full, after the inbox.
     public var recentDays: Int = 30
@@ -48,10 +53,14 @@ public struct SyncConfiguration: Sendable {
     /// Most quota units one call may cost, so no single request outgrows the budget's headroom
     /// (16 full messages, 50 metadata, 8 full threads).
     public var maxUnitsPerRequest: Int = 1_000
+    /// The same for bulk and background calls (4 full messages, 12 metadata, 2 full threads): one
+    /// of them takes Gmail's quota rate about 2.4 s to cover, so an interactive call that arrives
+    /// behind it in the HTTP client's limiter waits about a second at most.
+    public var backgroundMaxUnitsPerRequest: Int = 240
     /// Messages per write transaction, so the UI fills in progressively.
     public var writeBatchSize: Int = 250
     /// Older mail is backfilled as metadata (20 units each), this many per background step.
-    public var backfillBatchSize: Int = 50
+    public var backfillBatchSize: Int = 14
     /// New mail per history poll fetched in full (30 × 60 units); beyond it, metadata, with bodies
     /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
     public var historyFullFetchLimit: Int = 30

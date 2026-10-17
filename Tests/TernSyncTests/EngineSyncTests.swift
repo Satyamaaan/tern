@@ -298,8 +298,15 @@ final class PhaseLog: @unchecked Sendable {
     try await h.sync.initialSync()
     #expect(try h.messages().count == 60)
     let calls = await h.fake.fetchCalls
-    #expect(calls.allSatisfy { $0.ids.count * 60 <= configuration.maxUnitsPerRequest })
-    #expect(calls.contains { $0.ids.count == 16 })
+    // The initial sync is bulk work: 4 full messages (240 units) a call.
+    #expect(calls.allSatisfy { $0.ids.count * 60 <= configuration.backgroundMaxUnitsPerRequest })
+    #expect(calls.contains { $0.ids.count == 4 })
+
+    // Interactive calls may be bigger: a poll that brings 20 new messages fetches 16, then 4.
+    await h.fake.resetCallLog()
+    for index in 0..<20 { await h.fake.deliver(FakeEmail(subject: "New \(index)", date: testNow)) }
+    try await h.sync.pollHistory()
+    #expect(await h.fake.fetchCalls.map(\.ids.count) == [16, 4])
 }
 
 @Test func aStaleBackfillTokenRestartsTheBackfill() async throws {
