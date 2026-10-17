@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             let integration = Integration(services: services, model: model)
             integration.wire()
             self.integration = integration
+            if !options.isFake { SenderLogos.shared.start() }
         }
 
         mainMenu = MainMenu(registry: registry)

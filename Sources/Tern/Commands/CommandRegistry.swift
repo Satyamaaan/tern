@@ -200,6 +200,8 @@ final class CommandRegistry {
         }
         list.append(Command(id: "dimRead", title: "Dim Old Read Mail", group: .settings, menu: .view, section: 2,
                             currentTitle: { m.prefs.dimReadByAge ? "Don't Dim Old Read Mail" : "Dim Old Read Mail" }) { m.prefs.dimReadByAge.toggle() })
+        list.append(Command(id: "senderLogos", title: "Hide Sender Logos", group: .settings, menu: .view, section: 2, aliases: ["avatars", "icons", "favicons"],
+                            currentTitle: { m.prefs.showSenderLogos ? "Hide Sender Logos" : "Show Sender Logos" }) { m.prefs.showSenderLogos.toggle() })
 
         // The open conversation. The reader page answers n, p, Enter and Space itself while it has the
         // keyboard; these run the same actions from the list, the menus and the palette.
