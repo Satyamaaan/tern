@@ -213,3 +213,32 @@ private func links(_ store: MailStore, _ projectId: String) throws -> [String: T
     #expect(try store.sidebarCounts().projectUnread[acme.id] == 1)
     #expect(try SearchService(store.database).search("project:acme").map(\.id) == [redesign])
 }
+
+@Test func removingAnAccountDropsRulesThatOnlyMatchedIt() throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    let home = Account(email: "me@home.example", displayName: "Personal")
+    let office = Account(email: "me@office.example", displayName: "Office")
+    try store.database.writer.write { db in
+        try home.insert(db)
+        try office.insert(db)
+        for label in [MailLabel(accountId: office.id, id: "Label_9", name: "Clients"), MailLabel(accountId: office.id, id: "Label_3", name: "Travel"),
+                      MailLabel(accountId: home.id, id: "Label_3", name: "Travel")] {
+            try label.insert(db)
+        }
+        var project = Project(id: "p1", name: "Acme")
+        try project.insert(db)
+        project = Project(id: "p2", name: "Trips")
+        try project.insert(db)
+        for (projectId, field, value) in [("p1", ProjectRule.Field.account, "me@office.example"), ("p1", .account, "Office"),
+                                          ("p1", .label, "Label_9"), ("p1", .fromDomain, "acme.com"),
+                                          ("p2", .account, "Personal"), ("p2", .label, "Label_3"), ("p2", .label, "clients")] {
+            var rule = ProjectRule(projectId: projectId, field: field, value: value)
+            try rule.insert(db)
+        }
+    }
+    try store.removeAccount(office.id)
+    let rules = try store.database.reader.read { db in try ProjectRule.order(Column("id")).fetchAll(db) }
+    #expect(rules.map(\.value) == ["acme.com", "Personal", "Label_3", "clients"],
+            "the office account and its own label id go; another account's rule, a shared label id and a name stay")
+    #expect(try store.projects().map(\.id).sorted() == ["p1", "p2"], "projects stay")
+}
