@@ -29,6 +29,30 @@ final class AppServices {
     /// Drafts and their Gmail operations (compose lane).
     var drafts: DraftStore { DraftStore(store.database, filesDirectory: draftFilesDirectory) }
 
+    // MARK: Shell hooks (the shell provides no-op defaults; integration wires the real ones)
+
+    /// Runs Google sign-in for a new account and returns it once stored. Wired to the Google lane.
+    var connectAccount: () async throws -> Account? = { throw ShellError.notAvailable }
+    /// Signs an existing account in again after its token stopped working.
+    var reauthAccount: (Account) async throws -> Void = { _ in throw ShellError.notAvailable }
+    /// Stores the user's own Google OAuth client (onboarding step 1) in the Keychain.
+    var saveGoogleClient: (_ clientId: String, _ clientSecret: String) async throws -> Void = { _, _ in
+        throw ShellError.notAvailable
+    }
+    /// Whether a Google OAuth client is stored.
+    var hasGoogleClient: () -> Bool = { false }
+    /// Live sync progress, set by the sync engine. Nil shows the state stored on the accounts.
+    var syncProgress: SyncProgress?
+    /// True while the network is unreachable.
+    var isOffline = false
+    /// Set while an editor outside AppKit text views (e.g. a web-based rich text body) has focus, so
+    /// bare-key shortcuts stay off.
+    var isComposing = false
+    /// Called after a project or its rules change, so rules can be applied to existing mail.
+    var projectRulesChanged: (String) -> Void = { _ in }
+    /// Brings a thread to the front (notifications, mailto links). Set by the shell.
+    var showThread: (ThreadKey) -> Void = { _ in }
+
     init(store: MailStore) {
         self.store = store
         self.search = SearchService(store.database)
@@ -68,4 +92,20 @@ struct SendUndoNotice {
     let duration: TimeInterval
     /// Cancels the send (and a send-and-archive) and reopens the draft.
     let undo: @MainActor () -> Void
+}
+
+/// Sync progress reported by the sync engine, shown in the sidebar's status line.
+struct SyncProgress: Hashable {
+    var done: Int
+    var total: Int
+}
+
+enum ShellError: LocalizedError {
+    case notAvailable
+
+    var errorDescription: String? {
+        switch self {
+        case .notAvailable: "Not available yet"
+        }
+    }
 }

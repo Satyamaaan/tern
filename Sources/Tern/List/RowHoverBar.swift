@@ -1,0 +1,127 @@
+import AppKit
+import SwiftUI
+import TernCore
+
+/// The three buttons that replace a row's time on hover: Done, Snooze, `…`.
+struct RowHoverBar: View {
+    let model: AppModel
+    let keys: [ThreadKey]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            HoverButton(icon: .done, help: "Done (e)") { model.perform(.archive, on: keys) }
+            Menu {
+                SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
+            } label: {
+                // Menu labels on macOS only render text and images.
+                Image(nsImage: Icon.snoozed.image(size: 14))
+                    .foregroundStyle(Color(Theme.text2))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .frame(width: 24, height: 22)
+            .help("Snooze (h)")
+            HoverButton(icon: .ellipsis, help: "More") {
+                guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
+                // The menu's commands act on the selection, so make the hovered row the selection first.
+                if keys.count == 1, let key = keys.first, !model.isSelected(key) { model.select(key) }
+                let menu = ThreadMenu.make(registry: registry, model: model)
+                menu.popUp(positioning: nil, at: view.convert(event.locationInWindow, from: nil), in: view)
+            }
+        }
+        .environment(model.services)
+        .frame(width: 80, height: 24, alignment: .trailing)
+    }
+}
+
+private struct HoverButton: View {
+    let icon: Icon
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            IconView(icon: icon, size: 14)
+                .frame(width: 24, height: 22)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(Theme.selected).opacity(hovering ? 1 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+    }
+}
+
+/// Every thread action with its shortcut, for the row `…` button and right-click.
+@MainActor
+enum ThreadMenu {
+    static func make(registry: CommandRegistry, model: AppModel) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let target = MenuTarget.shared
+        target.registry = registry
+        var section: Int?
+        for command in registry.commands where command.menu == .message {
+            if let section, section != command.section { menu.addItem(.separator()) }
+            section = command.section
+            if command.id == "snooze" {
+                menu.addItem(snoozeItem(model: model))
+                continue
+            }
+            let key = command.menuKey
+            let item = NSMenuItem(title: command.displayTitle, action: #selector(MenuTarget.run(_:)), keyEquivalent: key?.keyEquivalent ?? "")
+            item.target = target
+            item.representedObject = command.id
+            if let key, case .char(let c) = key.key, c != c.lowercased() { item.keyEquivalentModifierMask = key.modifiers.subtracting(.shift) } else if let key {
+                item.keyEquivalentModifierMask = key.modifiers
+            }
+            item.isEnabled = command.isEnabled()
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private static func snoozeItem(model: AppModel) -> NSMenuItem {
+        let target = MenuTarget.shared
+        let submenu = NSMenu()
+        let keys = model.targets
+        for option in SnoozeOption.presets() {
+            let item = NSMenuItem(title: "\(option.title)  —  \(option.detail)", action: #selector(MenuTarget.runClosure(_:)), keyEquivalent: "")
+            item.target = target
+            item.representedObject = MenuTarget.Closure { model.perform(.snooze(until: option.date), on: keys) }
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let pick = NSMenuItem(title: "Pick date…", action: #selector(MenuTarget.runClosure(_:)), keyEquivalent: "")
+        pick.target = target
+        pick.representedObject = MenuTarget.Closure { model.snoozeDateFor = keys }
+        submenu.addItem(pick)
+        let item = NSMenuItem(title: "Snooze", action: nil, keyEquivalent: "h")
+        item.keyEquivalentModifierMask = []
+        item.submenu = submenu
+        return item
+    }
+}
+
+/// Target for menus built outside the main menu.
+@MainActor
+final class MenuTarget: NSObject {
+    static let shared = MenuTarget()
+    weak var registry: CommandRegistry?
+
+    final class Closure: NSObject {
+        let run: @MainActor () -> Void
+        init(_ run: @escaping @MainActor () -> Void) { self.run = run }
+    }
+
+    @objc func run(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        registry?.run(id)
+    }
+
+    @objc func runClosure(_ sender: NSMenuItem) {
+        (sender.representedObject as? Closure)?.run()
+    }
+}

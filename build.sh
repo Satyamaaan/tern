@@ -25,7 +25,7 @@ if [[ -d Resources/Web ]]; then
   cp -R Resources/Web $APP/Contents/Resources/Web
 fi
 
-if [[ -f scripts/icon.swift && ! -f build/AppIcon.icns ]]; then
+if [[ -f scripts/icon.swift && ( ! -f build/AppIcon.icns || scripts/icon.swift -nt build/AppIcon.icns ) ]]; then
   ICONSET=build/AppIcon.iconset
   mkdir -p $ICONSET
   swift scripts/icon.swift build/icon-1024.png
