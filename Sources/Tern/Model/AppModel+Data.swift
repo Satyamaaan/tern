@@ -78,7 +78,8 @@ extension AppModel {
 
     /// Infinite scroll: read another page when the user nears the end.
     func loadMore() {
-        guard hasMore, !isSearching else { return }
+        if isSearching { return loadMoreResults() }
+        guard hasMore else { return }
         limit += Self.pageSize
         hasMore = false
         observeRows(immediate: false)
@@ -119,7 +120,8 @@ extension AppModel {
         snapshot = ListSnapshot(
             rows: rows,
             needsReplyFirst: !isSearching && source.needsReplyFirst,
-            groupsByDate: isSearching || source.groupsByDate)
+            groupsByDate: isSearching || source.groupsByDate,
+            footer: serverSearchFooter.map(ListItem.serverSearch))
 
         let stillChecked = checked.filter { snapshot.rows[$0] != nil }
         if stillChecked != checked { checked = stillChecked }

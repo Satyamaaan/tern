@@ -92,10 +92,21 @@ final class KeyRouter {
         }
         if model.searchFieldFocused {
             switch event.keyCode {
-            case 53: model.endSearch(restoreFocus: true); return true
-            case 125: model.focusResults(open: false); return true
-            case 36, 76: model.focusResults(open: !model.snapshot.isEmpty); return true
-            default: return false
+            case 53:
+                if !model.dismissSuggestions() { model.endSearch(restoreFocus: true) }
+                return true
+            case 125:
+                if !model.moveSuggestion(1) { model.focusResults(open: false) }
+                return true
+            case 126:
+                return model.moveSuggestion(-1)
+            case 48 where flags.isEmpty:
+                return model.completeSuggestion()
+            case 36, 76:
+                model.submitSearch()
+                return true
+            default:
+                return false
             }
         }
         return false

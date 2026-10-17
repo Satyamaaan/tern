@@ -22,11 +22,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var snapshot = ListSnapshot.empty
     private(set) var style: RowStyle = .twoLines
     private var hoveredRow: Int?
+    private var footerHovered: Int?
     private let hoverBar: NSHostingView<RowHoverBar>
     private var lastWidth: CGFloat = 0
 
     static let headerHeight: CGFloat = 30
     static let waterlineHeight: CGFloat = 16
+    static let footerHeight: CGFloat = 44
 
     init(model: AppModel) {
         self.model = model
@@ -153,6 +155,10 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     func refreshVisibleRows() {
         table.enumerateAvailableRowViews { rowView, row in
             if let view = rowView as? ThreadRowView { view.model = rowModel(row) }
+            if let view = rowView as? ServerSearchRowView, items.indices.contains(row), case .serverSearch(let text) = items[row] {
+                view.text = text
+                view.isHovered = row == footerHovered
+            }
         }
         updateHoverBar()
     }
@@ -167,6 +173,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         case .header: return Self.headerHeight
         case .waterline: return Self.waterlineHeight
         case .thread: return style.height
+        case .serverSearch: return Self.footerHeight
         }
     }
 
@@ -194,6 +201,12 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             let view = tableView.makeView(withIdentifier: .init("thread"), owner: nil) as? ThreadRowView ?? ThreadRowView()
             view.identifier = .init("thread")
             view.model = rowModel(row)
+            return view
+        case .serverSearch(let text):
+            let view = tableView.makeView(withIdentifier: .init("serverSearch"), owner: nil) as? ServerSearchRowView ?? ServerSearchRowView()
+            view.identifier = .init("serverSearch")
+            view.text = text
+            view.isHovered = row == footerHovered
             return view
         }
     }
@@ -224,6 +237,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         if model.prefs.dimReadByAge, row.thread.unreadCount == 0, row.thread.lastDate < Date().addingTimeInterval(-30 * 86_400) {
             result.dimmed = true
         }
+        if model.isSearching { result.highlight = model.highlight(for: key) }
         return result
     }
 
@@ -283,6 +297,23 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let point = table.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         let row = scrollView.contentView.bounds.contains(table.convert(point, to: scrollView.contentView)) ? table.row(at: point) : -1
         setHovered(row >= 0 && items.indices.contains(row) && items[row].threadKey != nil ? row : nil)
+        let footer = row >= 0 && items.indices.contains(row) && isFooter(row) ? row : nil
+        if footer != footerHovered {
+            footerHovered = footer
+            refreshVisibleRows()
+        }
+    }
+
+    private func isFooter(_ row: Int) -> Bool {
+        if case .serverSearch = items[row] { return true }
+        return false
+    }
+
+    /// A click on the "Search older mail on Gmail" row.
+    func clickedFooter(_ row: Int) -> Bool {
+        guard items.indices.contains(row), isFooter(row) else { return false }
+        model.searchOnServer()
+        return true
     }
 
     func setHovered(_ row: Int?) {
@@ -366,6 +397,7 @@ final class MessageTableView: NSTableView {
         mouseDownRow = row
         pendingClick = nil
         MainActor.assumeIsolated {
+            if controller?.clickedFooter(row) == true { return }
             guard let controller, let key = controller.key(atRow: row) else { return }
             let flags = event.modifierFlags
             if event.clickCount == 2 {

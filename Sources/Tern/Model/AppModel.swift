@@ -76,6 +76,16 @@ final class AppModel {
     var isSearching = false
     /// Mirrors the search pill's focus.
     var searchFieldFocused = false
+    /// The dropdown under the search pill: people, labels, projects, operators, recent searches.
+    var suggestions: [SearchSuggestion] = []
+    /// The highlighted dropdown row (into `suggestionItems`); nil while the caret is in the text.
+    var suggestionIndex: Int?
+    /// Esc closed the dropdown; it opens again with the next keystroke.
+    var suggestionsDismissed = false
+    /// True while ✦ Ask turns the text into a query.
+    var askingAI = false
+    /// The "Search older mail on Gmail" row at the end of the results.
+    var serverSearchState = ServerSearchState.idle
 
     // MARK: Overlays
 
@@ -114,6 +124,13 @@ final class AppModel {
     @ObservationIgnored var source: ListSource
     @ObservationIgnored var rawRows: [ThreadRow] = []
     @ObservationIgnored var searchRows: [ThreadRow] = []
+    @ObservationIgnored var searchHits: [ThreadKey: SearchHit] = [:]
+    @ObservationIgnored var searchHighlights: [ThreadKey: RowHighlight] = [:]
+    /// Results asked for: a page per keystroke, more as the list scrolls.
+    @ObservationIgnored var searchLimit = AppModel.searchPage
+    @ObservationIgnored var searchHasMore = false
+    @ObservationIgnored var suggestionTask: Task<Void, Never>?
+    @ObservationIgnored var lastRecordedSearch: String?
     @ObservationIgnored var limit = AppModel.pageSize
     @ObservationIgnored var hidden: [ThreadKey: HiddenState] = [:]
     @ObservationIgnored var pendingCursor: ThreadKey?
@@ -265,6 +282,7 @@ final class AppModel {
         } else {
             checked = []
             setCursor(key, open: true)
+            recordSearch()
         }
     }
 
@@ -318,6 +336,7 @@ final class AppModel {
         focus = .reader
         if listOnly { readerExpanded = true }
         markRead([cursor])
+        recordSearch()
         services.reader.focus()
     }
 

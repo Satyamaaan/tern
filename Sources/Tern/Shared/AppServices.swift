@@ -69,6 +69,10 @@ final class AppServices {
     var fetchBodies: ((ThreadKey) async throws -> Void)?
     /// Asks sync for the bodies of the threads around the selection, when quota allows.
     var prefetchBodies: (([ThreadKey]) -> Void)?
+    /// Searches Gmail for older mail matching the search text and stores what it finds; returns how many
+    /// threads Gmail matched. Nil until sync can search; the results then end with
+    /// "Search older mail on Gmail".
+    var serverSearch: ((String) async throws -> Int)?
 
     init(store: MailStore) {
         self.store = store
