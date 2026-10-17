@@ -100,9 +100,12 @@ struct Snapshotter {
         // A narrow window: tabs that don't fit move into `…`, rows take two lines.
         let size = window.contentView?.frame.size ?? MainWindow.defaultSize
         window.setContentSize(NSSize(width: 980, height: 700))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         shot("narrow-light")
         shot("narrow-dark", dark: true)
         model.toggleReadingPane()
+        // The reader's page lays out again at its new width before WebKit's snapshot of it is taken.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         shot("narrow-pane-light")
         model.toggleReadingPane()
         window.setContentSize(size)
