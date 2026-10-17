@@ -135,7 +135,6 @@ final class ReaderModel {
         }
         renderedSignature = signature
         let (payload, deferred) = ReaderPayload.make(detail, context: context)
-        engine.setRemoteImages(allowed: detail.messages.contains { ReaderPayload.isTrusted($0, context) })
         engine.render(payload)
         loadBodies(deferred, key: key, context: context)
         if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
@@ -148,7 +147,8 @@ final class ReaderModel {
         let names = Dictionary(labels(for: accountId).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         return ReaderContext(
             accountEmails: emails, accountColorIndex: services?.account(accountId)?.colorIndex ?? 0,
-            labelNames: names, trustedSenders: Self.trustedSenders ?? [], summary: summaryPayload())
+            labelNames: names, trustedSenders: Self.trustedSenders ?? [], remoteImages: engine.blocksRemoteLoads,
+            summary: summaryPayload())
     }
 
     func labels(for accountId: String) -> [MailLabel] {
@@ -181,11 +181,13 @@ final class ReaderModel {
         let store = services.store
         let trusted = Self.trustedSenders ?? []
         let mine = Set(services.accounts.map { $0.email.lowercased() })
+        let remoteImages = engine.blocksRemoteLoads
         Task.detached(priority: .utility) {
             for key in keys.prefix(4) {
                 guard let detail = try? store.threadDetail(key), let target = ReaderPayload.targetMessage(detail) else { continue }
                 let sender = target.fromEmail.lowercased()
-                _ = ReaderBodies.shared.body(for: target, trusted: trusted.contains(sender) || mine.contains(sender) || sender == key.accountId)
+                let allowed = remoteImages && (trusted.contains(sender) || mine.contains(sender) || sender == key.accountId)
+                _ = ReaderBodies.shared.body(for: target, trusted: allowed)
             }
         }
     }

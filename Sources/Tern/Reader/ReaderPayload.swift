@@ -9,6 +9,8 @@ struct ReaderContext {
     var labelNames: [String: String]
     /// Lowercased senders whose remote images load.
     var trustedSenders: Set<String>
+    /// False when the reader can't block remote loads; then no message gets its images.
+    var remoteImages = true
     var summary: [String: Any]
     var now = Date()
 
@@ -54,7 +56,8 @@ enum ReaderPayload {
     }
 
     static func isTrusted(_ message: MailMessage, _ context: ReaderContext) -> Bool {
-        context.trustedSenders.contains(message.fromEmail.lowercased()) || context.isMe(message.fromEmail)
+        guard context.remoteImages else { return false }
+        return context.trustedSenders.contains(message.fromEmail.lowercased()) || context.isMe(message.fromEmail)
     }
 
     static func bodyPayload(_ mail: SanitizedMail) -> [String: Any] {
@@ -253,9 +256,12 @@ final class ReaderBodies: @unchecked Sendable {
     static func sanitize(_ message: MailMessage, trusted: Bool) -> SanitizedMail {
         if let html = message.bodyHtml, !html.isEmpty {
             let account = message.accountId, id = message.id
-            return MailSanitizer.sanitize(html: html, options: .init(allowRemoteImages: trusted) { contentId in
+            let options = MailSanitizer.Options(
+                allowRemoteImages: trusted, remoteImageURL: ReaderRemoteImages.readerURL(for:)
+            ) { contentId in
                 MailSanitizer.contentIdURL(accountId: account, messageId: id, contentId: contentId)
-            })
+            }
+            return MailSanitizer.sanitize(html: html, options: options)
         }
         if let text = message.bodyText, !text.isEmpty { return PlainTextMail.html(text) }
         var placeholder = PlainTextMail.html(message.snippet)

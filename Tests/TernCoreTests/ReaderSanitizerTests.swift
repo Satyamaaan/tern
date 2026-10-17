@@ -97,6 +97,37 @@ private func clean(_ html: String, images: Bool = false) -> SanitizedMail {
     #expect(mail.html.contains("style=\"color: red; top: 0\""))
 }
 
+@Test func everyCSSFetchGoesThroughTheImagePolicy() {
+    let mail = clean("""
+        <style>.a { background-image: image-set('https://evil.example/a.png' 1x, "https://evil.example/b.png" 2x) }
+        .b { background: -webkit-image-set(url(https://evil.example/c.png) 1x) }
+        .c { content: src("https://evil.example/d.png") } .d { background-image: cross-fade("https://evil.example/e.png", url(https://evil.example/f.png), 50%) }
+        .e { background: image-set(var(--x) 1x) } .f { --x: "https://evil.example/g.png" } .g { background: element(#x) }
+        .h { background: image-set("cid:logo@acme" type("image/png")) } .i { list-style-image: IMAGE-SET("https://evil.example/h.png" 1x) }
+        @font-face { font-family: Y; src: src("https://fonts.example/y.woff2") }</style>
+        <div style="background-image:-webkit-image-set('https://evil.example/i.png' 1x)">x</div>
+        """)
+    // A string in a custom property fetches nothing by itself; every way to feed it to a fetch is dropped.
+    let fetching = mail.css.replacingOccurrences(of: ".f { --x: \"https://evil.example/g.png\" }", with: "")
+    #expect(!fetching.contains("evil.example"), "\(mail.css)")
+    #expect(!mail.html.contains("evil.example"))
+    #expect(!mail.css.contains("fonts.example"))
+    #expect(!mail.css.contains("var(--x) 1x"), "a variable could smuggle a URL into image-set()")
+    #expect(!mail.css.contains("element("))
+    #expect(mail.css.contains("image-set(url(\"tern-cid://m/a/m/logo@acme\") type(\"image/png\"))"))
+    #expect(mail.blockedRemoteCount == 8, "every remote image counts, so the Load images note shows")
+
+    let trusted = MailSanitizer.sanitize(html: """
+        <style>.a { background-image: image-set("https://cdn.example/a.png" 1x) }</style>
+        <img src="https://cdn.example/b.png"><div style="background:url(//cdn.example/c.png)">x</div>
+        """, options: .init(allowRemoteImages: true, remoteImageURL: { "tern-remote://i/sig/" + $0.suffix(5) }))
+    #expect(trusted.blockedRemoteCount == 0)
+    #expect(trusted.css.contains("image-set(url(\"tern-remote://i/sig/a.png\") 1x)"))
+    #expect(trusted.html.contains("src=\"tern-remote://i/sig/b.png\" referrerpolicy=\"no-referrer\" loading=\"lazy\""))
+    #expect(trusted.html.contains("url(&quot;tern-remote://i/sig/c.png&quot;)"))
+    #expect(!trusted.html.contains("cdn.example") && !trusted.css.contains("cdn.example"), "remote images load only through the reader's own URLs")
+}
+
 @Test func classifiesSimpleAndRichMail() {
     let simple = clean("""
         <div dir="ltr"><div style="color:rgb(34,34,34);font-family:Arial">Hi Alex,</div>
