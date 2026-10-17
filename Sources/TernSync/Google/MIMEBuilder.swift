@@ -82,7 +82,7 @@ public struct MIMEBuilder {
 
     private func headers(draft: Draft, from: Participant, inReplyTo: String?, references: String?) -> [String] {
         var lines: [String] = []
-        lines.append("From: " + MIMEEncoding.mailbox(from))
+        if let sender = MIMEEncoding.addressHeader("From", [from]) { lines.append(sender) }
         if let to = MIMEEncoding.addressHeader("To", draft.toList) { lines.append(to) }
         if let cc = MIMEEncoding.addressHeader("Cc", draft.ccList) { lines.append(cc) }
         // Gmail delivers to Bcc recipients and removes the header from what others receive.

@@ -16,6 +16,8 @@ public enum HTMLText {
         var atLineStart = true
         var lastWasSpace = true
         var quoteDepth = 0
+        /// Quote depth of the last line written, so blank lines between quoted lines keep their ">".
+        var lineDepth = 0
         var preDepth = 0
         var links: [String?] = []
         var linkTextStart: [Int] = []
@@ -91,7 +93,7 @@ public enum HTMLText {
                     }
                 }
             case "td", "th":
-                if !tag.isClosing, !atLineStart { raw("  ") }
+                if !tag.isClosing, !atLineStart, pendingBreaks == 0 { raw("  ") }
             case "a":
                 if tag.isClosing {
                     guard let href = links.popLast() ?? nil, let start = linkTextStart.popLast() else { break }
@@ -148,8 +150,9 @@ public enum HTMLText {
 
         mutating func emit(_ scalar: Unicode.Scalar) {
             flushBreaks()
-            if atLineStart, quoteDepth > 0 {
+            if atLineStart {
                 out.append(contentsOf: String(repeating: "> ", count: quoteDepth).unicodeScalars)
+                lineDepth = quoteDepth
             }
             out.append(scalar)
             atLineStart = false
@@ -160,8 +163,8 @@ public enum HTMLText {
             if !out.isEmpty {
                 for index in 0..<pendingBreaks {
                     out.append("\n")
-                    if index < pendingBreaks - 1, quoteDepth > 0 {
-                        out.append(contentsOf: String(repeating: ">", count: quoteDepth).unicodeScalars)
+                    if index < pendingBreaks - 1 {
+                        out.append(contentsOf: String(repeating: ">", count: min(quoteDepth, lineDepth)).unicodeScalars)
                     }
                 }
             }

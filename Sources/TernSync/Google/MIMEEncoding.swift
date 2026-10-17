@@ -20,10 +20,11 @@ enum MIMEEncoding {
         text.utf8.allSatisfy { $0 >= 0x20 && $0 < 0x7F }
     }
 
-    /// RFC 2047 "B" encoded words, each at most 75 characters, never splitting a character.
+    /// RFC 2047 "B" encoded words, never splitting a character. Each is at most 68 characters
+    /// (RFC 2047 allows 75) so "Subject: " plus one word fits a 78-character line.
     static func encodedWords(_ text: String) -> [String] {
         let prefix = "=?UTF-8?B?"
-        let maxBytes = 45  // 60 base64 characters + 12 for the wrapper = 72
+        let maxBytes = 42  // 56 base64 characters + 12 for the wrapper
         var words: [String] = []
         var chunk = Data()
         for character in text {
@@ -58,7 +59,7 @@ enum MIMEEncoding {
         var lineLength = head.count
         for (index, token) in tokens.enumerated() {
             let glue = index == 0 ? " " : separator
-            if lineLength + glue.count + token.count > foldWidth && lineLength > 1 {
+            if index > 0 && lineLength + glue.count + token.count > foldWidth {
                 let trimmedGlue = glue.trimmingCharacters(in: .whitespaces)
                 result += trimmedGlue + crlf + " " + token
                 lineLength = 1 + token.count
@@ -70,27 +71,32 @@ enum MIMEEncoding {
         return result
     }
 
-    /// `"Name" <email>`, `=?UTF-8?B?…?= <email>` or a bare address.
-    static func mailbox(_ participant: Participant) -> String {
+    /// `"Name" <email>`, `=?UTF-8?B?…?= <email>` or a bare address, as foldable pieces.
+    static func mailboxTokens(_ participant: Participant) -> [String] {
         let email = sanitize(participant.email).trimmingCharacters(in: .whitespaces)
         let name = sanitize(participant.name).trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, name != email else { return email }
-        return "\(phrase(name)) <\(email)>"
+        guard !name.isEmpty, name != email else { return [email] }
+        return phrase(name) + ["<\(email)>"]
     }
 
     /// A display name as an atom sequence, a quoted string, or encoded words.
-    static func phrase(_ name: String) -> String {
-        guard isPlainASCII(name), !name.contains("=?") else { return encodedWords(name).joined(separator: " ") }
+    static func phrase(_ name: String) -> [String] {
+        guard isPlainASCII(name), !name.contains("=?") else { return encodedWords(name) }
         let atext = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~ ")
-        if name.unicodeScalars.allSatisfy({ atext.contains($0) }) { return name }
+        if name.unicodeScalars.allSatisfy({ atext.contains($0) }) { return [name] }
         let escaped = name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        return ["\"\(escaped)\""]
     }
 
+    /// From/To/Cc/Bcc, folded between mailboxes and between encoded words. Nil when empty.
     static func addressHeader(_ name: String, _ participants: [Participant]) -> String? {
-        let mailboxes = participants.filter { !$0.email.trimmingCharacters(in: .whitespaces).isEmpty }.map(mailbox)
+        let mailboxes = participants.filter { !$0.email.trimmingCharacters(in: .whitespaces).isEmpty }.map(mailboxTokens)
         guard !mailboxes.isEmpty else { return nil }
-        let tokens = mailboxes.enumerated().map { $0.offset < mailboxes.count - 1 ? $0.element + "," : $0.element }
+        var tokens: [String] = []
+        for (index, var mailbox) in mailboxes.enumerated() {
+            if index < mailboxes.count - 1 { mailbox[mailbox.count - 1] += "," }
+            tokens += mailbox
+        }
         return fold("\(name):", tokens, separator: " ")
     }
 
