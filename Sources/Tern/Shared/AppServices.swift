@@ -21,6 +21,13 @@ final class AppServices {
     var loadAttachment: (MailAttachment) async throws -> URL = { _ in throw CocoaError(.featureUnsupported) }
     /// AI helpers; nil when AI is off or unavailable.
     var ai: AIActions?
+    /// Where drafts keep pasted images and attached copies. Nil uses Application Support/Tern/Draft Files.
+    var draftFilesDirectory: URL?
+    /// Shows the "Sending in 5 s · Undo" notice after Send. When nil the composer shows its own floating pill.
+    var showSendUndo: ((SendUndoNotice) -> Void)?
+
+    /// Drafts and their Gmail operations (compose lane).
+    var drafts: DraftStore { DraftStore(store.database, filesDirectory: draftFilesDirectory) }
 
     init(store: MailStore) {
         self.store = store
@@ -45,4 +52,20 @@ struct AIActions {
     var suggestReplies: (ThreadKey) async throws -> [String]
     var draftReply: (ThreadKey, String) async throws -> String
     var naturalLanguageQuery: (String) async throws -> String
+    /// Writes a new message (not a reply) from an instruction that includes recipients and subject.
+    /// Returns plain text or simple HTML. Nil hides ✦ Write with AI for new mail.
+    var writeDraft: ((String) async throws -> String)? = nil
+}
+
+/// What the composer reports after Send or Send later, for the shell's toast area.
+struct SendUndoNotice {
+    let draftId: String
+    /// "Sending" or "Scheduled for Tue 8:00".
+    let message: String
+    /// End of the undo window for a countdown ("Sending in 4 s"); nil for scheduled sends.
+    let deadline: Date?
+    /// How long to keep the notice up.
+    let duration: TimeInterval
+    /// Cancels the send (and a send-and-archive) and reopens the draft.
+    let undo: @MainActor () -> Void
 }

@@ -12,8 +12,28 @@ public enum RecipientParser {
     /// Characters that end an entry outside quotes and angle brackets.
     public static let separators: Set<Character> = [",", ";", "\n", "\r", "\r\n"]
 
-    /// The separate entries of a list, trimmed, empty ones dropped.
+    /// For a field being typed into: the entries already ended by a separator, and the unfinished rest.
+    public static func splitCompleted(_ text: String) -> (complete: [String], remainder: String) {
+        var parts = rawSegments(text)
+        let remainder = parts.removeLast()
+        return (parts.flatMap(splitBareAddresses).filter { !$0.isEmpty }, remainder.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The separate entries of a list, trimmed, empty ones dropped. Whitespace between bare addresses
+    /// also separates them ("a@b.co c@d.co").
     public static func segments(_ text: String) -> [String] {
+        rawSegments(text).flatMap(splitBareAddresses).filter { !$0.isEmpty }
+    }
+
+    private static func splitBareAddresses(_ segment: String) -> [String] {
+        let trimmed = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.contains("<"), !trimmed.contains("\""), trimmed.contains(where: \.isWhitespace) else { return [trimmed] }
+        let pieces = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        return pieces.allSatisfy { $0.contains("@") } ? pieces : [trimmed]
+    }
+
+    /// Splits on unquoted separators, keeping every piece (the last may be empty).
+    private static func rawSegments(_ text: String) -> [String] {
         var result: [String] = []
         var current = ""
         var inQuotes = false
@@ -33,7 +53,7 @@ public enum RecipientParser {
             current.append(character)
         }
         result.append(current)
-        return result.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return result
     }
 
     /// One entry: `Name <email>`, `"Name" <email>`, `<email>`, `email`, or `mailto:email`.
@@ -48,9 +68,17 @@ public enum RecipientParser {
             name = name.replacingOccurrences(of: "\\\"", with: "\"")
             return Participant(name: name == email ? "" : name, email: email)
         }
+        // "Maya Chen maya@lumen.io": a name, then the address.
+        let words = text.split(whereSeparator: \.isWhitespace)
+        if words.count > 1, let last = words.last, last.contains("@"), !words.dropLast().contains(where: { $0.contains("@") }) {
+            return Participant(name: words.dropLast().joined(separator: " "), email: clean(String(last)))
+        }
         // A bare address, possibly with stray quotes or trailing punctuation from prose.
-        let email = text.trimmingCharacters(in: CharacterSet(charactersIn: "\"'()[] .:"))
-        return Participant(email: email)
+        return Participant(email: clean(text))
+    }
+
+    private static func clean(_ address: String) -> String {
+        address.trimmingCharacters(in: CharacterSet(charactersIn: "\"'()[] .:<>"))
     }
 
     /// A practical check, not RFC 5322: one `@`, a dot-separated domain with a 2+ letter TLD,

@@ -16,6 +16,15 @@ import Testing
     ])
 }
 
+@Test func splitsTypedInputAtSeparators() {
+    #expect(RecipientParser.splitCompleted("maya@lumen.io, jo") == (["maya@lumen.io"], "jo"))
+    #expect(RecipientParser.splitCompleted(#""Ng, Jo"#) == ([], #""Ng, Jo"#))
+    #expect(RecipientParser.splitCompleted("a@b.co c@d.co;") == (["a@b.co", "c@d.co"], ""))
+    #expect(RecipientParser.splitCompleted("Maya Chen") == ([], "Maya Chen"))
+    #expect(RecipientParser.parse("a@b.co c@d.co") == [Participant(email: "a@b.co"), Participant(email: "c@d.co")])
+    #expect(RecipientParser.parse("Maya Chen maya@lumen.io") == [Participant(name: "Maya Chen", email: "maya@lumen.io")])
+}
+
 @Test func validatesAddresses() {
     for good in ["a@b.co", "first.last+tag@sub.domain.dev", "x_y@a-b.io", "jürgen@exämple.de"] {
         #expect(RecipientParser.isValidEmail(good), "\(good)")
