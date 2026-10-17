@@ -26,8 +26,8 @@ struct ComposerAccessory: View {
             }
             if model.attachmentBytes > ComposerModel.gmailLimit {
                 Text("Attachments are over Gmail's 25 MB limit and may not send.")
-                    .font(.ui(12))
-                    .foregroundStyle(Color(Theme.accentInk))
+                    .font(.ui(12, .medium))
+                    .foregroundStyle(Color(Theme.ink))
             }
         }
         .padding(.horizontal, model.mode == .window ? 20 : 16)
@@ -53,7 +53,7 @@ struct SignatureBlock: View {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
                     .frame(width: 18, height: 18)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IconButtonStyle())
             .opacity(hovering ? 1 : 0)
             .help("Remove signature from this message")
         }
@@ -74,7 +74,8 @@ struct QuoteBlock: View {
                         .font(.ui(11, .semibold))
                         .foregroundStyle(Color(hovering ? Theme.text1 : Theme.text2))
                         .frame(width: 32, height: 18)
-                        .background(Capsule().fill(Color(Theme.pill)))
+                        .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .fill(Color(hovering ? Theme.hairlineStrong : Theme.pill)))
                 }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
@@ -118,16 +119,16 @@ struct AttachmentChip: View {
                 .foregroundStyle(Color(Theme.text3))
             Button(action: remove) {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
-                    .frame(width: 14, height: 14)
+                    .frame(width: 16, height: 16)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IconButtonStyle())
             .opacity(hovering ? 1 : 0)
             .help("Remove")
         }
         .padding(.leading, 10)
-        .padding(.trailing, 6)
-        .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Color(Theme.pill)))
+        .padding(.trailing, 5)
+        .frame(height: Theme.Control.regular)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.pill)))
         .onHover { hovering = $0 }
         .help(attachment.needsFetch ? "\(attachment.filename) — from the original message" : attachment.filename)
     }
@@ -198,26 +199,25 @@ struct ComposerBottomArea: View {
                         }
                         .foregroundStyle(Color(model.aiInstruction != nil ? Theme.text1 : Theme.text2))
                         .padding(.horizontal, 8)
-                        .frame(height: 28)
-                        .contentShape(Rectangle())
+                        .frame(height: Theme.Control.regular)
                     }
-                    .buttonStyle(HoverFillStyle())
+                    .buttonStyle(IconButtonStyle())
                     .help("Write with AI  ⌘J")
                 }
                 Spacer(minLength: 8)
                 if let notice = model.notice {
                     Text(notice)
-                        .font(.ui(12))
-                        .foregroundStyle(Color(Theme.accentInk))
+                        .font(.ui(12, .medium))
+                        .foregroundStyle(Color(Theme.ink))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
                 if model.confirmingDiscard {
                     Text("Discard this draft?").font(.ui(12)).foregroundStyle(Color(Theme.text2))
                     Button("Keep") { model.confirmingDiscard = false }
-                        .buttonStyle(.plain).font(.ui(12, .medium)).foregroundStyle(Color(Theme.text2)).padding(.horizontal, 6)
+                        .buttonStyle(TernButtonStyle(.quiet, size: .small))
                     Button("Discard") { model.discard() }
-                        .buttonStyle(.plain).font(.ui(12, .medium)).foregroundStyle(Color(Theme.accentInk))
+                        .buttonStyle(TernButtonStyle(.secondary, size: .small))
                 } else {
                     ComposerIconButton(symbol: "trash", help: "Discard draft  ⌘⇧D") { model.requestDiscard() }
                 }
@@ -228,45 +228,60 @@ struct ComposerBottomArea: View {
     }
 }
 
-/// The primary pill: Send, and a chevron for Send and archive / Send later.
+/// The primary button: Send, and a chevron for Send and archive / Send later. One `ink` block with
+/// two halves that each step lighter under the pointer and while pressed.
 struct SendButton: View {
     @Bindable var model: ComposerModel
-    @State private var hoveringSend = false
-    @State private var hoveringMenu = false
 
     var body: some View {
         HStack(spacing: 0) {
             Button { model.send() } label: {
                 Text("Send")
-                    .font(.ui(13, .semibold))
-                    .foregroundStyle(Color(Theme.onAccent))
-                    .padding(.leading, 14)
+                    .font(.ui(13, .medium))
+                    .padding(.leading, 12)
                     .padding(.trailing, 10)
-                    .frame(height: 30)
-                    .background(Color.white.opacity(hoveringSend ? 0.08 : 0))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .onHover { hoveringSend = $0 }
+            .buttonStyle(SendHalfStyle())
             .help("Send  ⌘↵")
-            Rectangle().fill(Color(Theme.onAccent).opacity(0.28)).frame(width: 1, height: 16)
+            Rectangle().fill(Color(Theme.onInk).opacity(0.22)).frame(width: 1, height: 14)
             Button { model.sendLaterOpen.toggle() } label: {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color(Theme.onAccent))
-                    .frame(width: 26, height: 30)
-                    .background(Color.white.opacity(hoveringMenu ? 0.08 : 0))
-                    .contentShape(Rectangle())
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 24)
             }
-            .buttonStyle(.plain)
-            .onHover { hoveringMenu = $0 }
+            .buttonStyle(SendHalfStyle())
             .help("Send later  ⌘⇧L")
             .popover(isPresented: $model.sendLaterOpen, arrowEdge: .top) {
                 SendLaterPopover(model: model)
             }
         }
-        .background(Capsule().fill(Color(Theme.primaryFill)))
-        .clipShape(Capsule())
+        .background(Color(Theme.ink))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+    }
+}
+
+/// One half of `SendButton`: `onInk` label, a lighter `ink` step on hover and press.
+private struct SendHalfStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Half(configuration: configuration)
+    }
+
+    private struct Half: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(Color(Theme.onInk))
+                .frame(height: Theme.Control.regular)
+                .background(Color(configuration.isPressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink))
+                .overlay(Rectangle().strokeBorder(Color(Theme.onInk).opacity(isFocused ? 0.6 : 0), lineWidth: 1.5))
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovering = $0 && isEnabled }
+        }
     }
 }
 
@@ -304,12 +319,7 @@ struct SendLaterPopover: View {
                     Spacer()
                     Button("Schedule") { model.scheduleSend(at: date) }
                         .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.plain)
-                        .font(.ui(13, .semibold))
-                        .foregroundStyle(Color(Theme.onAccent))
-                        .padding(.horizontal, 12)
-                        .frame(height: 26)
-                        .background(Capsule().fill(Color(Theme.primaryFill)))
+                        .buttonStyle(TernButtonStyle(.primary, size: .small))
                 }
                 .padding(.horizontal, 8)
             }
@@ -343,14 +353,13 @@ struct MenuRow: View {
                         .font(.mono(11))
                         .foregroundStyle(Color(Theme.text3))
                         .frame(width: 18, height: 18)
-                        .background(RoundedRectangle(cornerRadius: 4).strokeBorder(Color(Theme.hairlineStrong)))
+                        .background(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(Color(Theme.hairlineStrong)))
                 }
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(HoverFillStyle())
+        .buttonStyle(IconButtonStyle())
     }
 }
 
@@ -360,7 +369,7 @@ struct AIInstructionBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("✦").font(.ui(13)).foregroundStyle(Color(Theme.accentInk))
+            Text("✦").font(.ui(13)).foregroundStyle(Color(Theme.text2))
             ComposerTextField(
                 model: model, field: .ai, text: model.aiInstruction ?? "",
                 placeholder: model.kind == .reply || model.kind == .replyAll ? "Tell AI how to reply…" : "Describe the email to write…",
@@ -374,7 +383,7 @@ struct AIInstructionBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Color(Theme.hover)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
         .padding(.horizontal, model.mode == .window ? 16 : 10)
         .padding(.top, 4)
     }
@@ -391,10 +400,9 @@ struct ComposerIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 13))
                 .foregroundStyle(Color(Theme.text2))
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+                .frame(width: Theme.Control.regular, height: Theme.Control.regular)
         }
-        .buttonStyle(HoverFillStyle())
+        .buttonStyle(IconButtonStyle())
         .help(help)
         .accessibilityLabel(help.components(separatedBy: "  ").first ?? help)
     }
@@ -415,20 +423,3 @@ extension View {
     }
 }
 
-struct HoverFillStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HoverFill(configuration: configuration)
-    }
-
-    private struct HoverFill: View {
-        let configuration: Configuration
-        @State private var hovering = false
-
-        var body: some View {
-            configuration.label
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.row)
-                    .fill(Color(configuration.isPressed ? Theme.selected : hovering ? Theme.hover : .clear)))
-                .onHover { hovering = $0 }
-        }
-    }
-}

@@ -42,7 +42,7 @@ struct SidebarView: View {
     @ViewBuilder private var mailboxes: some View {
         let counts = model.counts
         row(.inbox, "Inbox", .inbox, count: counts.inboxUnread, countColor: Theme.text1)
-        row(.needsReply, "Needs reply", .needsReply, count: counts.needsReply, countColor: Theme.accentInk)
+        row(.needsReply, "Needs reply", .needsReply, count: counts.needsReply, countColor: Theme.ink, countWeight: .medium)
         row(.snoozed, "Snoozed", .snoozed, count: counts.snoozed)
         row(.starred, "Starred", .starred)
         row(.drafts, "Drafts", .drafts, count: counts.drafts)
@@ -62,9 +62,12 @@ struct SidebarView: View {
         }
     }
 
-    private func row(_ kind: Mailbox.Kind, _ title: String, _ icon: Icon, count: Int = 0, countColor: NSColor = Theme.text3) -> some View {
+    private func row(
+        _ kind: Mailbox.Kind, _ title: String, _ icon: Icon, count: Int = 0, countColor: NSColor = Theme.text3,
+        countWeight: Theme.Weight = .regular
+    ) -> some View {
         SidebarRow(
-            title: title, count: count > 0 ? count : nil, countColor: countColor,
+            title: title, count: count > 0 ? count : nil, countColor: countColor, countWeight: countWeight,
             selected: model.kind == kind && !model.isSearching
         ) {
             IconView(icon: icon, size: 15)
@@ -97,6 +100,7 @@ struct SidebarRow<Leading: View>: View {
     let title: String
     var count: Int?
     var countColor: NSColor = Theme.text3
+    var countWeight: Theme.Weight = .regular
     let selected: Bool
     var titleColor: NSColor = Theme.text1
     var dropTargeted = false
@@ -119,7 +123,7 @@ struct SidebarRow<Leading: View>: View {
                 trailing
             } else if let count {
                 Text(count.formatted())
-                    .font(.mono(12))
+                    .font(.mono(12, countWeight))
                     .foregroundStyle(Color(countColor))
             }
         }
@@ -279,17 +283,17 @@ struct SyncStatusLine: View {
         let services = model.services
         let accounts = model.accounts
         if let account = accounts.first(where: { $0.syncState == .needsAuth }) {
-            Dot(color: Theme.accent, size: 6)
+            Dot(color: Theme.ink, size: 6)
             Button("Sign in again") {
                 Task { try? await services.reauthAccount(account) }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color(Theme.accentInk))
+            .buttonStyle(LinkButtonStyle())
+            .font(.ui(12, .medium))
         } else if services.isOffline {
             Dot(color: Theme.text3, size: 6)
             Text("Offline — changes will sync").foregroundStyle(Color(Theme.text3))
         } else if let line = services.syncLine {
-            Dot(color: line.tone == .attention ? Theme.accent : Theme.text3, size: 6)
+            Dot(color: line.tone == .attention ? Theme.ink : Theme.text3, size: 6)
             if let url = line.url {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Text(line.text).underline().foregroundStyle(Color(Theme.text2)).lineLimit(1).truncationMode(.tail)
@@ -306,13 +310,13 @@ struct SyncStatusLine: View {
         } else if accounts.isEmpty {
             Text(model.isSeeding ? "Preparing demo mail…" : "No accounts yet").foregroundStyle(Color(Theme.text3))
         } else if accounts.contains(where: { $0.syncState == .error }) {
-            Dot(color: Theme.accent, size: 6)
+            Dot(color: Theme.ink, size: 6)
             Text("Couldn't sync — retrying").foregroundStyle(Color(Theme.text3))
         } else if accounts.contains(where: { $0.syncState == .new || $0.syncState == .backfilling }) {
             Dot(color: Theme.text3, size: 6)
             Text("Syncing…").foregroundStyle(Color(Theme.text3))
         } else {
-            Dot(color: Theme.syncOK, size: 6)
+            Dot(color: Theme.text3, size: 6, ring: true)
             Text(model.isFake ? "Demo mail · Up to date" : "Up to date").foregroundStyle(Color(Theme.text3))
         }
     }

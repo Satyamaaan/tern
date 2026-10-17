@@ -16,7 +16,7 @@ struct ComposerFields: View {
             FieldRow(label: "To", inset: inset) {
                 RecipientFieldView(model: model, kind: .to, tokens: model.to)
             } trailing: {
-                HStack(spacing: 10) {
+                HStack(spacing: 2) {
                     if !model.showCc { RevealButton(title: "Cc", help: "Add Cc  ⌘⇧C") { model.focus(.cc) } }
                     if !model.showBcc { RevealButton(title: "Bcc", help: "Add Bcc  ⌘⇧B") { model.focus(.bcc) } }
                 }
@@ -80,8 +80,10 @@ struct RevealButton: View {
     var body: some View {
         Button(action: action) {
             Text(title).font(.ui(13)).foregroundStyle(Color(hovering ? Theme.text1 : Theme.text3))
+                .padding(.horizontal, 6)
+                .frame(height: Theme.Control.small)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle())
         .onHover { hovering = $0 }
         .help(help)
     }

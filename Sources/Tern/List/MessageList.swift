@@ -477,17 +477,17 @@ extension MessageTableView {
     }
 }
 
-/// The pill that follows the pointer while dragging rows.
+/// The badge that follows the pointer while dragging rows.
 enum DragBadge {
     static func image(count: Int, appearance: NSAppearance) -> NSImage {
         let text = count == 1 ? "1 conversation" : "\(count) conversations"
-        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(12, .medium), .foregroundColor: NSColor.white]
+        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(12, .medium), .foregroundColor: Theme.onInk]
         let size = (text as NSString).size(withAttributes: attributes)
         let image = NSImage(size: NSSize(width: ceil(size.width) + 24, height: 26))
         image.lockFocus()
         appearance.performAsCurrentDrawingAppearance {
-            Theme.accentInk.setFill()
-            NSBezierPath(roundedRect: NSRect(origin: .zero, size: image.size), xRadius: 13, yRadius: 13).fill()
+            Theme.ink.setFill()
+            NSBezierPath(roundedRect: NSRect(origin: .zero, size: image.size), xRadius: Theme.Radius.control, yRadius: Theme.Radius.control).fill()
             (text as NSString).draw(at: NSPoint(x: 12, y: (26 - size.height) / 2), withAttributes: attributes)
         }
         image.unlockFocus()

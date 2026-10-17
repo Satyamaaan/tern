@@ -77,8 +77,7 @@ enum ReaderResources {
         let colors: [(String, NSColor)] = [
             ("bg", Theme.bg), ("raised", Theme.raised), ("hover", Theme.hover), ("selected", Theme.selected),
             ("hairline", Theme.hairline), ("hairlineStrong", Theme.hairlineStrong), ("text1", Theme.text1),
-            ("text2", Theme.text2), ("text3", Theme.text3), ("accent", Theme.accent), ("accentInk", Theme.accentInk),
-            ("accentSoft", Theme.accentSoft),
+            ("text2", Theme.text2), ("text3", Theme.text3), ("ink", Theme.ink), ("inkSoft", Theme.inkSoft),
         ] + MailCategory.allCases.map { ("cat-\($0.rawValue)", Theme.categoryColor($0)) }
         func block(_ name: NSAppearance.Name) -> String {
             var css = ""

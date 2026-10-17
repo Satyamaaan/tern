@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The middle column: header with the Flock, search pill, split tabs, the list, toasts.
+/// The middle column: header with the Flock, search field, split tabs, the list, toasts.
 struct ListColumn: View {
     @Environment(AppModel.self) private var model
     /// Leaves room for the traffic lights when the sidebar is hidden.
@@ -11,7 +11,7 @@ struct ListColumn: View {
     var body: some View {
         VStack(spacing: 0) {
             ListHeader(leadingInset: leadingInset)
-            SearchPill()
+            SearchField()
                 .padding(.horizontal, 12)
             if model.showsSplits {
                 SplitTabs()
@@ -91,7 +91,7 @@ struct ListHeader: View {
     }
 }
 
-/// One accent dot per thread that needs you (max 12, then "+n"). Each triage action lifts a dot away.
+/// One ink dot per thread that needs you (max 12, then "+n"). Each triage action lifts a dot away.
 struct FlockView: View {
     let count: Int
     @State private var lifts: [UUID] = []
@@ -99,7 +99,7 @@ struct FlockView: View {
     var body: some View {
         HStack(spacing: 5) {
             ForEach(0..<min(count, 12), id: \.self) { _ in
-                Circle().fill(Color(Theme.accent)).frame(width: 6, height: 6)
+                Circle().fill(Color(Theme.ink)).frame(width: 6, height: 6)
             }
             if count > 12 {
                 Text("+\(count - 12)")
@@ -130,7 +130,7 @@ private struct LiftingDot: View {
 
     var body: some View {
         Circle()
-            .fill(Color(Theme.accent))
+            .fill(Color(Theme.ink))
             .frame(width: 6, height: 6)
             .offset(x: offsetX, y: lifted ? -6 : 0)
             .opacity(lifted ? 0 : 1)
@@ -141,9 +141,9 @@ private struct LiftingDot: View {
     }
 }
 
-// MARK: - Search pill
+// MARK: - Search field
 
-struct SearchPill: View {
+struct SearchField: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
 
@@ -166,10 +166,12 @@ struct SearchPill: View {
                 Keycap(text: "/")
             }
         }
-        .padding(.leading, 12)
+        .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 32)
-        .background(Capsule().fill(Color(Theme.hover)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            .strokeBorder(Color(focused ? Theme.hairlineStrong : .clear), lineWidth: 1))
         .onChange(of: focused) { _, value in
             if model.searchFieldFocused != value { model.searchFieldFocused = value }
             if value {
@@ -185,7 +187,7 @@ struct SearchPill: View {
 
 // MARK: - Search suggestions
 
-/// The dropdown under the search pill. ↑↓ move, Tab completes, Return picks, Esc closes.
+/// The dropdown under the search field. ↑↓ move, Tab completes, Return picks, Esc closes.
 struct SearchSuggestions: View {
     @Environment(AppModel.self) private var model
 
@@ -233,7 +235,7 @@ private struct SuggestionRow: View {
             case .ask(let text):
                 Text("✦")
                     .font(.ui(12))
-                    .foregroundStyle(Color(Theme.accentInk))
+                    .foregroundStyle(Color(Theme.text2))
                     .frame(width: 16)
                 (Text("Ask: ").foregroundStyle(Color(Theme.text2)) + Text(text).foregroundStyle(Color(Theme.text1)))
                     .font(.ui(13))
@@ -247,7 +249,7 @@ private struct SuggestionRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(highlighted ? Color(Theme.hover) : .clear))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(highlighted ? Color(Theme.selected) : .clear))
     }
 
     private static func icon(_ kind: SearchSuggestion.Kind) -> Icon {
@@ -331,10 +333,10 @@ private struct ToastPill: View {
         }
         .font(.ui(13))
         .foregroundStyle(Color(Theme.bg))
-        .padding(.leading, 16)
-        .padding(.trailing, toast.undo == nil ? 16 : 8)
+        .padding(.leading, 14)
+        .padding(.trailing, toast.undo == nil ? 14 : 8)
         .frame(height: 36)
-        .background(Capsule().fill(Color(Theme.text1).opacity(0.92)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.ink)))
         .overlayShadow()
     }
 }

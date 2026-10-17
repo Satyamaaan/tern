@@ -194,20 +194,15 @@ struct ReaderIconButton: View {
     let help: String
     let action: () -> Void
 
-    @State private var hovering = false
-
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(Color(Theme.text2))
-                .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(hovering ? Color(Theme.hover) : .clear))
-                .contentShape(Rectangle())
+                .frame(width: Theme.Control.regular, height: Theme.Control.regular)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle())
         .help(help)
-        .onHover { hovering = $0 }
     }
 }
 
@@ -228,8 +223,8 @@ struct ReaderMenuButton<Items: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .frame(width: 28, height: 28)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(hovering ? Color(Theme.hover) : .clear))
+        .frame(width: Theme.Control.regular, height: Theme.Control.regular)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(hovering ? Color(Theme.hover) : .clear))
         .contentShape(Rectangle())
         .help(help)
         .onHover { hovering = $0 }
@@ -250,7 +245,9 @@ struct ReaderSnoozePicker: View {
                 .labelsHidden()
             HStack {
                 Spacer()
-                Button("Snooze") { onPick(date) }.keyboardShortcut(.defaultAction)
+                Button("Snooze") { onPick(date) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(TernButtonStyle(.primary, size: .small))
             }
         }
         .padding(14)
@@ -291,10 +288,10 @@ struct ReaderFindBar: View {
             ReaderIconButton(symbol: "chevron.down", help: "Next match  ⌘G") { model.find() }
             ReaderIconButton(symbol: "xmark", help: "Close  Esc") { model.closeFind() }
         }
-        .padding(.leading, 12)
+        .padding(.leading, 10)
         .padding(.trailing, 2)
         .frame(height: 32)
-        .background(Capsule().fill(Color(Theme.hover)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
         .padding(.horizontal, 32)
         .padding(.bottom, 8)
         .onAppear { focused = true }
@@ -309,7 +306,7 @@ struct ReaderLinkPill: View {
             if let warning = link.warning {
                 Label(warning, systemImage: "exclamationmark.triangle")
                     .font(.ui(11, .medium))
-                    .foregroundStyle(Color(Theme.accentInk))
+                    .foregroundStyle(Color(Theme.ink))
             }
             Text(link.destination)
                 .font(.ui(11))
@@ -320,9 +317,9 @@ struct ReaderLinkPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.chip)
+            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
                 .fill(Color(Theme.raised))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip).stroke(Color(Theme.hairlineStrong), lineWidth: 1)))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1)))
         .frame(maxWidth: 520, alignment: .leading)
         .padding(8)
         .allowsHitTesting(false)
@@ -336,9 +333,9 @@ struct ReaderToast: View {
         Text(text)
             .font(.ui(13))
             .foregroundStyle(Color(Theme.bg))
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .frame(height: 36)
-            .background(Capsule().fill(Color(Theme.text1, opacity: 0.92)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.ink)))
             .shadow(color: .black.opacity(0.14), radius: 15, y: 8)
             .allowsHitTesting(false)
     }
@@ -364,10 +361,10 @@ struct ReaderReplyBar: View {
                 }
                 .font(.ui(13))
                 .foregroundStyle(Color(Theme.text3))
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
-                .background(Capsule().fill(Color(Theme.hover)))
-                .contentShape(Capsule())
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Reply  R")
@@ -398,19 +395,14 @@ struct ReaderQuickReply: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text("✦").foregroundStyle(Color(Theme.accentInk))
-                Text(text).foregroundStyle(Color(Theme.text2)).lineLimit(1)
+                Text("✦").foregroundStyle(Color(Theme.text3))
+                Text(text).foregroundStyle(Color(hovering ? Theme.text1 : Theme.text2)).lineLimit(1)
             }
             .font(.ui(13))
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(Capsule().fill(hovering ? Color(Theme.hover) : .clear))
-            .overlay(Capsule().stroke(Color(Theme.hairline), lineWidth: 1))
             .frame(maxWidth: 200)
             .fixedSize(horizontal: true, vertical: false)
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TernButtonStyle(.secondary))
         .onHover { hovering = $0 }
     }
 }

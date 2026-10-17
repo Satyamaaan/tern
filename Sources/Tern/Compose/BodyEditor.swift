@@ -50,7 +50,7 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
         textView.insertionPointColor = Theme.text1
         textView.selectedTextAttributes = [.backgroundColor: Theme.hairlineStrong]
         textView.linkTextAttributes = [
-            .foregroundColor: Theme.accentInk, .underlineStyle: NSUnderlineStyle.single.rawValue, .cursor: NSCursor.iBeam,
+            .foregroundColor: Theme.ink, .underlineStyle: NSUnderlineStyle.single.rawValue, .cursor: NSCursor.iBeam,
         ]
         textView.setAccessibilityLabel("Message body")
 
@@ -691,8 +691,8 @@ struct FormattingBar: View {
             button("text.quote", .quote, on: state.block == .quote, help: "Quote  ⌘⇧9")
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row).strokeBorder(Color(Theme.hairline)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
         .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
         .padding(Self.shadowRoom)
         .fixedSize()
@@ -703,11 +703,10 @@ struct FormattingBar: View {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color(on ? Theme.text1 : Theme.text2))
-                .frame(width: 26, height: 24)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(on ? Theme.selected : .clear)))
-                .contentShape(Rectangle())
+                .frame(width: 26, height: Theme.Control.small)
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).fill(Color(on ? Theme.selected : .clear)))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle())
         .help(help)
     }
 }
@@ -730,10 +729,10 @@ struct LinkEditor: View {
                 .onSubmit { apply(url) }
             if canRemove {
                 Button("Remove", action: remove)
-                    .buttonStyle(.plain).font(.ui(12, .medium)).foregroundStyle(Color(Theme.text2))
+                    .buttonStyle(TernButtonStyle(.quiet, size: .small))
             }
             Button("Apply") { apply(url) }
-                .buttonStyle(.plain).font(.ui(12, .medium)).foregroundStyle(Color(Theme.accentInk))
+                .buttonStyle(TernButtonStyle(.primary, size: .small))
                 .keyboardShortcut(.defaultAction)
         }
         .padding(12)

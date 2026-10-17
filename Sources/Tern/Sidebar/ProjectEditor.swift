@@ -42,7 +42,7 @@ struct ProjectEditor: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color(draft.icon == icon ? Theme.projectColor(draft.colorIndex) : Theme.text2))
                             .frame(width: 24, height: 24)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(Theme.selected).opacity(draft.icon == icon ? 1 : 0)))
+                            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Color(Theme.selected).opacity(draft.icon == icon ? 1 : 0)))
                             .contentShape(Rectangle())
                             .onTapGesture { draft.icon = icon }
                     }
@@ -54,9 +54,8 @@ struct ProjectEditor: View {
                 CapsLabel(text: "Rules")
                 Spacer()
                 Button("Add rule") { draft.rules.append(.init(field: .fromDomain, value: "")) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LinkButtonStyle())
                     .font(.ui(12, .medium))
-                    .foregroundStyle(Color(Theme.accentInk))
             }
             .padding(.top, 16)
             .padding(.bottom, 6)
@@ -92,10 +91,10 @@ struct ProjectEditor: View {
                 Spacer()
                 Button("Cancel") { model.projectEditor = nil }
                     .keyboardShortcut(.cancelAction)
-                    .buttonStyle(PillButtonStyle(primary: false))
+                    .buttonStyle(TernButtonStyle(.secondary))
                 Button(draft.isNew ? "Create project" : "Save", action: save)
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(PillButtonStyle(primary: true))
+                    .buttonStyle(TernButtonStyle(.primary))
                     .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -118,24 +117,4 @@ struct ProjectEditor: View {
     }
 
     private func save() { model.saveProject(draft) }
-}
-
-/// The spec's pill buttons: primary = accent fill, secondary = hairline outline.
-struct PillButtonStyle: ButtonStyle {
-    let primary: Bool
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.ui(13, .medium))
-            .foregroundStyle(Color(primary ? Theme.onAccent : Theme.text1))
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .background(
-                Capsule().fill(primary ? Color(Theme.primaryFill) : Color(Theme.hover).opacity(configuration.isPressed ? 1 : 0))
-            )
-            .overlay(Capsule().strokeBorder(Color(Theme.hairlineStrong), lineWidth: primary ? 0 : 1))
-            .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.45)
-            .contentShape(Capsule())
-    }
 }
