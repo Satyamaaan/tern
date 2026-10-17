@@ -276,7 +276,9 @@ extension MailStore {
         "refs", "listUnsubscribe", "listUnsubscribePost", "sizeEstimate", "searchSender", "searchRecipients",
     ]
 
-    private static let bodyColumns: Set<String> = ["bodyText", "bodyHtml", "bodyState"]
+    /// Columns only a full fetch knows (the body, and whether it has files): a metadata-only record
+    /// never overwrites them for a message stored with its body.
+    private static let bodyColumns: Set<String> = ["bodyText", "bodyHtml", "bodyState", "hasAttachments"]
 
     private static let upsertMessageSQL: String = {
         let names = messageColumns.joined(separator: ", ")
