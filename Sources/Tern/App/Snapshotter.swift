@@ -18,7 +18,8 @@ struct Snapshotter {
             view.layoutSubtreeIfNeeded()
             view.cacheDisplay(in: view.bounds, to: bitmap)
         }
-        print(String(format: "launch: list rendered %.0f ms after process start (%d rows)", Timing.sinceProcessStart(), model.snapshot.order.count))
+        print(String(format: "launch: list rendered %.0f ms after process start (%d rows; app code started at %.0f ms)",
+                     Timing.sinceProcessStart(), model.snapshot.order.count, Timing.appStarted))
 
         if ProcessInfo.processInfo.environment["TERN_SNAPSHOT_WIDTH"].flatMap(Double.init) == nil {
             measureKeyboard(window)

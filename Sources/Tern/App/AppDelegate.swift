@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private var snoozeTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Timing.appStarted = Timing.sinceProcessStart()
         let launch = Timing.begin("launch")
         Theme.registerFonts()
         NSApp.appearance = Preferences.shared.appearance.appearance

@@ -4,6 +4,8 @@ import os
 /// Signpost intervals for the speed budget (view them in Instruments → os_signpost, subsystem dev.tern).
 enum Timing {
     static let signposter = OSSignposter(subsystem: "dev.tern", category: "speed")
+    /// Milliseconds from process start to `applicationDidFinishLaunching`.
+    nonisolated(unsafe) static var appStarted: Double = 0
 
     /// One measured span. Ending it twice is harmless (observations call back more than once).
     final class Interval: @unchecked Sendable {
