@@ -113,8 +113,7 @@ extension AccountSync {
     /// The cache path: one folder per MIME part, so names that differ only in characters the file
     /// system can't keep apart (`a:b.pdf` and `a-b.pdf`, `Report.pdf` and `report.pdf`) never share a file.
     private func cacheURL(for attachment: MailAttachment) -> URL {
-        configuration.attachmentCacheDirectory
-            .appendingPathComponent(AccountSync.safeFilename(accountId, fallback: "account"), isDirectory: true)
+        configuration.attachmentFolder(for: accountId)
             .appendingPathComponent(AccountSync.safeFilename(attachment.messageId, fallback: "message"), isDirectory: true)
             .appendingPathComponent(AccountSync.safeFilename(attachment.partId, fallback: "part"), isDirectory: true)
             .appendingPathComponent(AccountSync.safeFilename(attachment.filename, fallback: "attachment-\(attachment.partId)"))

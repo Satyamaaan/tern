@@ -90,7 +90,7 @@ final class AppServices {
         self.store = store
         self.search = SearchService(store.database)
         removeAccount = { account in
-            try await Task.detached { try store.removeAccount(account.id) }.value
+            _ = try await Task.detached { try store.removeAccount(account.id) }.value
         }
     }
 

@@ -139,12 +139,21 @@ public final class SyncCoordinator {
         if isRunning { launch(sync) }
     }
 
-    /// Stops syncing an account. Delete its data separately with `MailStore.removeAccount`.
-    public func removeAccount(id: String) {
-        tasks.removeValue(forKey: id)?.cancel()
+    /// Removes an account from this Mac: stops its sync and waits until it has stopped, so nothing
+    /// writes the account back, then deletes its data (`MailStore.removeAccount`), its downloaded
+    /// attachments and its drafts' files.
+    public func removeAccount(id: String) async throws {
+        let task = tasks.removeValue(forKey: id)
+        task?.cancel()
         syncs.removeValue(forKey: id)
         statuses.removeValue(forKey: id)
         lastOpCounts.removeValue(forKey: id)
+        await task?.value
+        let store = self.store, configuration = self.configuration
+        try await Task.detached(priority: .userInitiated) {
+            try store.removeAccount(id).delete(draftFilesDirectory: configuration.draftFilesDirectory,
+                                               folders: [configuration.attachmentFolder(for: id)])
+        }.value
     }
 
     /// The account signed in again after `syncState == .needsAuth`; sync resumes with a fresh client.

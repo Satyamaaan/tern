@@ -111,6 +111,11 @@ public struct SyncConfiguration: Sendable {
 
     public init() {}
 
+    /// The folder holding one account's downloaded attachments.
+    public func attachmentFolder(for accountId: String) -> URL {
+        attachmentCacheDirectory.appendingPathComponent(AccountSync.safeFilename(accountId, fallback: "account"), isDirectory: true)
+    }
+
     /// ~/Library/Caches/Tern/attachments
     public static var defaultAttachmentDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
