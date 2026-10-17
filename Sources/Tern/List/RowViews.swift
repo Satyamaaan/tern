@@ -86,6 +86,13 @@ final class ThreadRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override var isOpaque: Bool { false }
 
+    /// The content is laid out against the bounds (centred column, one or two lines): redraw on resize.
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { needsDisplay = true }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let model else { return }
         let column = ListLayout.column(in: bounds)
@@ -361,6 +368,12 @@ final class HeaderRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override var isFloating: Bool { didSet { needsDisplay = true } }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { needsDisplay = true }
+    }
+
     static let attributes: [NSAttributedString.Key: Any] = [
         .font: Theme.ui(10.5, .medium), .foregroundColor: Theme.text3, .kern: 0.9,
     ]
@@ -383,6 +396,12 @@ final class HeaderRowView: NSTableRowView {
 final class ServerSearchRowView: NSTableRowView {
     var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
     var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { needsDisplay = true }
+    }
 
     override var isFlipped: Bool { true }
     override func drawBackground(in dirtyRect: NSRect) {}

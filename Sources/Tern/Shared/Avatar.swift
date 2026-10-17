@@ -27,15 +27,15 @@ enum Avatar {
         (text as NSString).draw(at: CGPoint(x: rect.midX - width / 2, y: y), withAttributes: attributes)
     }
 
-    /// A logo clipped round on a white disc (most site icons are drawn for white), with a faint ring so
-    /// it holds its edge on any background.
+    /// A logo clipped round on a white disc (most site icons are drawn for white), full bleed, with a
+    /// faint ring so it holds its edge on any background.
     static func drawLogo(_ image: NSImage, in rect: CGRect) {
         let circle = NSBezierPath(ovalIn: rect)
         NSGraphicsContext.saveGraphicsState()
         circle.addClip()
         NSColor.white.setFill()
         rect.fill()
-        image.draw(in: rect.insetBy(dx: rect.width * 0.08, dy: rect.width * 0.08), from: .zero, operation: .sourceOver,
+        image.draw(in: rect, from: .zero, operation: .sourceOver,
                    fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         NSGraphicsContext.restoreGraphicsState()
         let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.25, dy: 0.25))

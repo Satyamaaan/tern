@@ -89,6 +89,23 @@ struct Snapshotter {
         shot("sidebar-open-dark", dark: true)
         model.prefs.sidebarOpen = false
 
+        // The search field revealed above the list, before typing: suggestions only.
+        model.beginSearch()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        shot("search-open-light")
+        shot("search-open-dark", dark: true)
+        model.endSearch(restoreFocus: true)
+
+        // A narrow window: tabs that don't fit move into `…`, rows take two lines.
+        let size = window.contentView?.frame.size ?? MainWindow.defaultSize
+        window.setContentSize(NSSize(width: 980, height: 700))
+        shot("narrow-light")
+        shot("narrow-dark", dark: true)
+        model.toggleReadingPane()
+        shot("narrow-pane-light")
+        model.toggleReadingPane()
+        window.setContentSize(size)
+
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-light.png"), dark: false)
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-dark.png"), dark: true)
         let settings = SettingsState(model: model, shell: nil)

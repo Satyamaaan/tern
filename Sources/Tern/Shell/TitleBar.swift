@@ -48,6 +48,7 @@ struct TabBar: View {
             .frame(height: geometry.size.height)
         }
         .frame(height: 28)
+        .clipped()
     }
 
     private var displayed: [ListTab] {
@@ -93,7 +94,8 @@ struct TabButton: View {
     static func width(title: String, count: Int?) -> CGFloat {
         let text = min(ceil((title as NSString).size(withAttributes: [.font: titleFont]).width), maxTitle)
         let number = count.map { 6 + ceil(("\($0)" as NSString).size(withAttributes: [.font: Theme.numeric(12)]).width) } ?? 0
-        return 8 + 14 + 6 + text + number + 10
+        // Two points of slack so a tab never gets squeezed by rounding in text layout.
+        return 8 + 14 + 6 + text + number + 10 + 2
     }
 
     var body: some View {
@@ -122,6 +124,7 @@ struct TabButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .onHover { hovering = $0 }
         .help(help)
         .contextMenu {
