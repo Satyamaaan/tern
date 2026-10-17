@@ -54,17 +54,31 @@ enum ReaderPayload {
         return sent.last(where: \.isUnread) ?? sent.last ?? detail.messages.last
     }
 
-    static func make(_ detail: ThreadDetail, context: ReaderContext) -> (payload: [String: Any], deferred: [MailMessage]) {
+    /// Bodies up to this many bytes are sanitized while building the payload (a few milliseconds);
+    /// bigger ones that aren't cached yet are sanitized off the main thread and arrive after the first paint.
+    static let inlineSanitizeLimit = 100_000
+
+    /// The payload, and the messages whose bodies are sanitized off the main thread: open ones still
+    /// loading (`loading`), and the collapsed ones (`deferred`).
+    static func make(_ detail: ThreadDetail, context: ReaderContext)
+        -> (payload: [String: Any], loading: [MailMessage], deferred: [MailMessage]) {
         let target = targetMessage(detail)
         var messages: [[String: Any]] = []
+        var loading: [MailMessage] = []
         var deferred: [MailMessage] = []
         for message in detail.messages {
             let expanded = message.id == target?.id || detail.messages.count == 1
             var item = messagePayload(message, detail: detail, context: context)
             item["expanded"] = expanded
             item["target"] = message.id == target?.id
-            if expanded {
-                item["body"] = bodyPayload(ReaderBodies.shared.body(for: message, trusted: isTrusted(message, context)))
+            let trusted = isTrusted(message, context)
+            if expanded, let body = ReaderBodies.shared.cachedBody(for: message, trusted: trusted)
+                ?? (bodyLength(message) <= inlineSanitizeLimit ? ReaderBodies.shared.body(for: message, trusted: trusted) : nil) {
+                item["body"] = bodyPayload(body)
+            } else if expanded {
+                // The page shows the snippet and waits for `setBodies` instead of asking for it.
+                item["bodyLoading"] = true
+                loading.append(message)
             } else {
                 deferred.append(message)
             }
@@ -77,7 +91,7 @@ enum ReaderPayload {
             "summary": context.summary,
             "messages": messages,
         ]
-        return (payload, deferred)
+        return (payload, loading, deferred)
     }
 
     static func header(_ detail: ThreadDetail, context: ReaderContext) -> [String: Any] {
@@ -256,10 +270,21 @@ final class ReaderBodies: @unchecked Sendable {
     /// Bodies are kept until they add up to this many bytes of markup.
     private let budget = 48 * 1_024 * 1_024
 
-    func body(for message: MailMessage, trusted: Bool) -> SanitizedMail {
-        let key = Key(
-            accountId: message.accountId, messageId: message.id,
+    /// The sanitized body if it is already cached.
+    func cachedBody(for message: MailMessage, trusted: Bool) -> SanitizedMail? {
+        let key = Self.key(message, trusted: trusted)
+        lock.lock()
+        defer { lock.unlock() }
+        return storage[key]
+    }
+
+    private static func key(_ message: MailMessage, trusted: Bool) -> Key {
+        Key(accountId: message.accountId, messageId: message.id,
             version: "\(message.bodyState.rawValue):\(ReaderPayload.bodyLength(message))", trusted: trusted)
+    }
+
+    func body(for message: MailMessage, trusted: Bool) -> SanitizedMail {
+        let key = Self.key(message, trusted: trusted)
         lock.lock()
         if let cached = storage[key] {
             lock.unlock()

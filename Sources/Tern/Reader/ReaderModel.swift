@@ -136,9 +136,9 @@ final class ReaderModel {
             return
         }
         renderedSignature = signature
-        let (payload, deferred) = ReaderPayload.make(detail, context: context)
+        let (payload, loading, deferred) = ReaderPayload.make(detail, context: context)
         engine.render(payload)
-        loadBodies(deferred, key: key, context: context)
+        loadBodies([loading, deferred], key: key, context: context)
         if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
     }
 
@@ -163,18 +163,21 @@ final class ReaderModel {
         return labels
     }
 
-    /// Sanitizes collapsed messages off the main thread so expanding one is instant.
-    private func loadBodies(_ messages: [MailMessage], key: ThreadKey, context: ReaderContext) {
-        guard !messages.isEmpty else { return }
-        let work = messages.map { ($0, ReaderPayload.isTrusted($0, context)) }
+    /// Sanitizes bodies off the main thread, a batch at a time: large open ones first, then the collapsed
+    /// ones so expanding one is instant.
+    private func loadBodies(_ batches: [[MailMessage]], key: ThreadKey, context: ReaderContext) {
+        let work = batches.filter { !$0.isEmpty }.map { batch in batch.map { ($0, ReaderPayload.isTrusted($0, context)) } }
+        guard !work.isEmpty else { return }
         Task { [weak self] in
-            let bodies = await Task.detached(priority: .userInitiated) {
-                work.map { ($0.0.id, ReaderBodies.shared.body(for: $0.0, trusted: $0.1)) }
-            }.value
-            guard let self, self.key == key else { return }
-            var payload: [String: Any] = [:]
-            for (id, body) in bodies { payload[id] = ReaderPayload.bodyPayload(body) }
-            self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": payload])
+            for batch in work {
+                let bodies = await Task.detached(priority: .userInitiated) {
+                    batch.map { ($0.0.id, ReaderBodies.shared.body(for: $0.0, trusted: $0.1)) }
+                }.value
+                guard let self, self.key == key else { return }
+                var payload: [String: Any] = [:]
+                for (id, body) in bodies { payload[id] = ReaderPayload.bodyPayload(body) }
+                self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": payload])
+            }
         }
     }
 
@@ -238,10 +241,20 @@ final class ReaderModel {
         Self.renderObserver?(key, milliseconds)
     }
 
+    /// A body the page asked for (a collapsed message opened before its body arrived), sanitized off
+    /// the main thread unless it is cached.
     private func sendBody(_ id: String) {
         guard let key, let detail, let message = detail.messages.first(where: { $0.id == id }) else { return }
-        let body = ReaderBodies.shared.body(for: message, trusted: ReaderPayload.isTrusted(message, context(for: detail)))
-        engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+        let trusted = ReaderPayload.isTrusted(message, context(for: detail))
+        if let body = ReaderBodies.shared.cachedBody(for: message, trusted: trusted) {
+            engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+            return
+        }
+        Task { [weak self] in
+            let body = await Task.detached(priority: .userInitiated) { ReaderBodies.shared.body(for: message, trusted: trusted) }.value
+            guard let self, self.key == key else { return }
+            self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
+        }
     }
 
     /// "Load images": this message only.

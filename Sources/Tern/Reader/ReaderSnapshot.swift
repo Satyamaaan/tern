@@ -122,6 +122,7 @@ enum ReaderSnapshot {
                         note("\(fixture.name): no render")
                         continue
                     }
+                    if fixture.name == "big-newsletter" { await waitForBody(since: milliseconds) }
                     try? await Task.sleep(for: .milliseconds(350))
                     if fixture.name == "reply-chain", appearance == .aqua {
                         await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
@@ -262,6 +263,21 @@ enum ReaderSnapshot {
             let open = try? await js("return document.querySelectorAll('.msg.open').length + ' of ' + document.querySelectorAll('.msg').length")
             note("checks: messages open after find (expand all) = \(open.map { "\($0)" } ?? "?")")
             model.closeFind()
+        }
+
+        /// A body over the inline sanitize limit arrives after the first paint; notes when.
+        func waitForBody(since openMilliseconds: Double) async {
+            let started = CACurrentMediaTime()
+            for _ in 0..<1_000 {
+                let mounted = (try? await js("return !!document.querySelector('.msg.open .mbody')?.shadowRoot")) as? Bool
+                if mounted == true {
+                    note(String(format: "big-newsletter: header painted in %.1f ms, body mounted %.0f ms later",
+                                openMilliseconds, (CACurrentMediaTime() - started) * 1000))
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            note("big-newsletter: body never arrived")
         }
 
         /// Proves the hostile fixture ran nothing and kept nothing dangerous.

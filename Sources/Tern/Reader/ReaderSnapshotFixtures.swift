@@ -51,6 +51,12 @@ enum ReaderSnapshotFixtures {
         ai.append(ThreadAI(accountId: account.id, threadId: "fx-evil", category: .security, messageCount: 1))
         fixtures.append(Fixture(name: "hostile", key: key("fx-evil")))
 
+        // A newsletter far over the inline sanitize limit: the header paints first, the body follows.
+        message("fx-big", thread: "fx-big", from: Participant(name: "The Long Read", email: "digest@longread.example"),
+                to: [me], subject: "Everything that happened this month", minutesAgo: 40, html: bigNewsletter, unread: true,
+                labels: ["INBOX", "CATEGORY_UPDATES"])
+        fixtures.append(Fixture(name: "big-newsletter", key: key("fx-big")))
+
         // Mail that tries to draw over the reader's own header with offsets, margins and transforms.
         message("fx-overlay", thread: "fx-overlay", from: Participant(name: "Account Team", email: "team@overlay.example"),
                 to: [me], subject: "Your statement is ready", minutesAgo: 35, html: overlay, unread: true)
@@ -192,6 +198,17 @@ enum ReaderSnapshotFixtures {
         <img src="https://t.weeklybuild.example/open?id=8812" width="1" height="1" alt="">
         </td></tr></table></body></html>
         """
+
+    static let bigNewsletter: String = {
+        var html = "<html><body><table width=\"600\" style=\"font:14px/20px Helvetica,Arial,sans-serif;color:#333\">"
+        var index = 0
+        while html.utf8.count < 800_000 {
+            html += "<tr><td style=\"padding:8px 0;border-bottom:1px solid #eee\"><a href=\"https://longread.example/\(index)\" style=\"color:#5b4bdb\">Story \(index + 1): a headline that runs a little long</a>"
+                + "<p style=\"margin:4px 0 0\">A two-line summary of the story, long enough to wrap in the reader column.</p></td></tr>"
+            index += 1
+        }
+        return html + "</table></body></html>"
+    }()
 
     static let overlay = """
         <html><head><style>

@@ -205,8 +205,10 @@
     if (host.shadowRoot) return true;
     const body = state.bodies.get(id);
     if (!body) {
-      host.innerHTML = `<span class="pending">${esc(state.messages.get(id).snippet || '')}</span>`;
-      post({ type: 'needBody', id });
+      const m = state.messages.get(id);
+      host.innerHTML = `<span class="pending">${esc(m.snippet || '')}</span>`;
+      // A large body is being sanitized in the background and arrives through setBodies.
+      if (!m.bodyLoading) post({ type: 'needBody', id });
       return false;
     }
     host.textContent = '';
