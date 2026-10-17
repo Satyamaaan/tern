@@ -33,17 +33,41 @@ enum Theme {
     static func accountColor(_ index: Int) -> NSColor { rgb(accountHues[abs(index) % accountHues.count]) }
     static func projectColor(_ index: Int) -> NSColor { rgb(projectHues[abs(index) % projectHues.count]) }
 
-    /// Chip text color for a category; the chip background is this color at 12%.
+    /// Letter avatars: initials on a soft neutral disc.
+    static let avatarFill = dynamic(light: 0xE8E8E4, dark: 0x2E2E2E)
+    static let avatarText = dynamic(light: 0x55554F, dark: 0xB4B4AE)
+
+    /// The small colour on tab and tag icons, the only hue in the chrome. Labels stay `text2`; "needs
+    /// reply" stays `ink`, because what needs you reads through ink, not colour.
     static func categoryColor(_ category: MailCategory) -> NSColor {
         switch category {
-        case .newsletter: dynamic(light: 0x6E5BD0, dark: 0xA89BF5)
-        case .receipt: dynamic(light: 0x23764A, dark: 0x5CCB91)
-        case .notification: dynamic(light: 0x5E6B7A, dark: 0x94A3B3)
-        case .calendar: dynamic(light: 0x2F6FD8, dark: 0x78A8FF)
-        case .promotion: dynamic(light: 0x96620E, dark: 0xE0B04F)
-        case .security: dynamic(light: 0xB4232F, dark: 0xFF8A93)
-        case .people, .other: text2
+        case .people: dynamic(light: 0x2F6FD8, dark: 0x6EA2FF)
+        case .newsletter: dynamic(light: 0x1E9E5A, dark: 0x4CC38A)
+        case .notification: dynamic(light: 0xC98500, dark: 0xF0B429)
+        case .receipt: dynamic(light: 0x138A7E, dark: 0x3CC8B4)
+        case .calendar: dynamic(light: 0x4F5BD5, dark: 0x8C95FF)
+        case .promotion: dynamic(light: 0xDD6B1D, dark: 0xFF9E57)
+        case .security: dynamic(light: 0xC2334A, dark: 0xFF6B81)
+        case .other: text3
         }
+    }
+
+    /// The Important tab's purple tag.
+    static let importantColor = dynamic(light: 0x7C5CDB, dark: 0xA78BFA)
+
+    /// Avatar tint for an account in the unified view: the account hue, soft, readable in both themes.
+    static func accountTint(_ index: Int) -> (fill: NSColor, text: NSColor) {
+        let hue = accountHues[abs(index) % accountHues.count]
+        let base = rgb(hue)
+        return (
+            NSColor(name: nil) { appearance in
+                base.withAlphaComponent(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.32 : 0.18)
+            },
+            NSColor(name: nil) { appearance in
+                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return base.blended(withFraction: dark ? 0.55 : 0.35, of: dark ? .white : .black) ?? base
+            }
+        )
     }
 
     /// Corner radii. Only avatars, status dots and the Flock are round; nothing is a pill.
