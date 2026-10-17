@@ -104,23 +104,13 @@ public struct ProjectStore: Sendable {
 
     /// Puts threads in a project by hand. Manual assignments survive rule changes.
     public func assign(_ keys: [ThreadKey], to projectId: String) throws {
-        try database.writer.write { db in
-            for key in keys {
-                try ThreadProject(accountId: key.accountId, threadId: key.threadId, projectId: projectId, source: .manual).upsert(db)
-            }
-        }
+        try database.writer.write { db in try ProjectRules.assignByHand(db, keys, to: projectId) }
     }
 
-    /// Takes threads out of a project, whatever put them there. A matching rule adds them back the
-    /// next time it is evaluated for those threads.
+    /// Takes threads out of a project, whatever put them there. Rules and AI suggestions leave them out
+    /// afterwards, until they are assigned by hand again.
     public func unassign(_ keys: [ThreadKey], from projectId: String) throws {
-        try database.writer.write { db in
-            for key in keys {
-                try db.execute(sql: """
-                    DELETE FROM thread_project WHERE accountId = ? AND threadId = ? AND projectId = ?
-                    """, arguments: [key.accountId, key.threadId, projectId])
-            }
-        }
+        try database.writer.write { db in try ProjectRules.removeByHand(db, keys, from: projectId) }
     }
 
     /// Drops every AI-suggested assignment, e.g. when the user turns off automatic projects.

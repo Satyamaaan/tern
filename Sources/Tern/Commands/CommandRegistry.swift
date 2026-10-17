@@ -187,6 +187,31 @@ final class CommandRegistry {
         list.append(Command(id: "dimRead", title: "Dim Old Read Mail", group: .settings, menu: .view, section: 2,
                             currentTitle: { m.prefs.dimReadByAge ? "Don't Dim Old Read Mail" : "Dim Old Read Mail" }) { m.prefs.dimReadByAge.toggle() })
 
+        // The open conversation. The reader page answers n, p, Enter and Space itself while it has the
+        // keyboard; these run the same actions from the list, the menus and the palette.
+        let reader = m.services.reader
+        func reading() -> Bool { reader.isActive && m.readerKey != nil }
+        list += [
+            Command(id: "nextMessage", title: "Next Message", group: .goTo, keys: [.key("n")], menu: .go, section: 2,
+                    isEnabled: reading) { reader.nextMessage() },
+            Command(id: "previousMessage", title: "Previous Message", group: .goTo, keys: [.key("p")], menu: .go, section: 2,
+                    isEnabled: { reading() && m.focus == .reader }) { reader.previousMessage() },
+            Command(id: "quickLook", title: "Quick Look Attachment", group: .actions, keys: [.special(.space)], menu: .message, section: 4,
+                    aliases: ["preview"], isEnabled: { reading() && m.focus == .reader }) { reader.quickLook() },
+            Command(id: "summarize", title: "Summarize", group: .actions, keys: [.command("s", shift: true)], menu: .message, section: 4,
+                    aliases: ["tl;dr", "ai"], isEnabled: { reading() && m.services.ai != nil }) { reader.summarize() },
+            Command(id: "showOriginal", title: "Show Original", group: .actions, menu: .message, section: 4,
+                    aliases: ["source", "headers", "raw"], isEnabled: reading) { reader.showOriginal() },
+            Command(id: "find", title: "Find in Conversation…", group: .actions, keys: [.command("f")], menu: .edit,
+                    isEnabled: reading) { reader.find() },
+            Command(id: "findNext", title: "Find Next", group: .actions, keys: [.command("g")], menu: .edit,
+                    hiddenInPalette: true, isEnabled: reading) { reader.findNext() },
+            Command(id: "findPrevious", title: "Find Previous", group: .actions, keys: [.command("g", shift: true)], menu: .edit,
+                    hiddenInPalette: true, isEnabled: reading) { reader.findPrevious() },
+            Command(id: "print", title: "Print Conversation…", group: .actions, keys: [.command("p")], menu: .file, section: 2,
+                    isEnabled: reading) { reader.printThread() },
+        ]
+
         // App and settings
         list += [
             Command(id: "settings", title: "Settings…", group: .settings, keys: [.command(",")], menu: .app,

@@ -92,6 +92,10 @@ final class ComposerModel: Identifiable {
             minTextHeight: mode == .window ? 120 : 60)
 
         editor.richText = content.body
+        if let prefill = Self.takePrefill(services, kind: content.draft.kind, thread: content.draft) {
+            editor.richText = content.body.isEmpty ? prefill : RichText(content.body.blocks + [RichText.Block()] + prefill.blocks)
+            dirty = true
+        }
         editor.onChange = { [weak self] in self?.changed() }
         editor.onEscape = { [weak self] in self?.escape() }
         editor.onBacktab = { [weak self] in self?.focusNext(from: .body, forward: false) }
@@ -109,6 +113,15 @@ final class ComposerModel: Identifiable {
             enqueue { _ = try await drafts.cancelSend(id) }
             notice = "Scheduled send cancelled. Send again when ready."
         }
+    }
+
+    /// The text a ✦ quick reply chose for this thread's reply, taken out of `replyPrefill`.
+    private static func takePrefill(_ services: AppServices, kind: Draft.Kind, thread draft: Draft) -> RichText? {
+        guard kind == .reply || kind == .replyAll, let threadId = draft.threadId,
+              let text = services.replyPrefill.removeValue(forKey: ThreadKey(accountId: draft.accountId, threadId: threadId)),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return RichText(plainText: text)
     }
 
     static func intent(for request: ComposeRequest) -> DraftIntent {
@@ -378,8 +391,12 @@ final class ComposerModel: Identifiable {
         }
         var archiving: Task<UndoToken?, Never>?
         if archive, let threadKey {
-            let store = services.store
-            archiving = Task.detached { try? store.perform(.archive, on: [threadKey]) }
+            if let archiveSent = services.archiveSent {
+                archiving = Task { await archiveSent(threadKey) }
+            } else {
+                let store = services.store
+                archiving = Task.detached { try? store.perform(.archive, on: [threadKey]) }
+            }
         }
         let window = hostWindow
         onClose()

@@ -25,6 +25,10 @@ final class AppServices {
     var draftFilesDirectory: URL?
     /// Shows the "Sending in 5 s · Undo" notice after Send. When nil the composer shows its own floating pill.
     var showSendUndo: ((SendUndoNotice) -> Void)?
+    /// Archives a thread after "Send and archive", without a toast of its own: the shell takes the row
+    /// out of the list at once and selects the next one. Returns what undoing the send needs. When nil
+    /// the composer archives through the store directly.
+    var archiveSent: ((ThreadKey) async -> UndoToken?)?
 
     /// Drafts and their Gmail operations (compose lane).
     var drafts: DraftStore { DraftStore(store.database, filesDirectory: draftFilesDirectory) }
@@ -41,8 +45,17 @@ final class AppServices {
     }
     /// Whether a Google OAuth client is stored.
     var hasGoogleClient: () -> Bool = { false }
+    /// The stored client's ID, for Settings to show masked.
+    var googleClientId: () -> String? = { nil }
+    /// Stores the client from the JSON file Google offers when it is created (`client_secret_….json`).
+    var importGoogleClient: (Data) async throws -> Void = { _ in throw ShellError.notAvailable }
     /// Live sync progress, set by the sync engine. Nil shows the state stored on the accounts.
     var syncProgress: SyncProgress?
+    /// What the sidebar's sync line says, from the sync engine's live status. Nil falls back to
+    /// `syncProgress` and the state stored on the accounts.
+    var syncLine: SyncLine?
+    /// Removes an account: stops its sync, deletes its mail from this Mac and signs it out of Google.
+    var removeAccount: (Account) async throws -> Void
     /// True while the network is unreachable.
     var isOffline = false
     /// Set while an editor outside AppKit text views (e.g. a web-based rich text body) has focus, so
@@ -60,10 +73,22 @@ final class AppServices {
     /// Mutes threads (archive now, keep later replies out of the inbox). Nil until sync supports it;
     /// the reader's Mute item is disabled meanwhile.
     var mute: (([ThreadKey]) -> Void)?
+    /// Downloads the bodies of a thread's messages stored without one. Set by sync; the reader calls
+    /// it when a thread opens and re-renders when they land.
+    var fetchBodies: ((ThreadKey) async throws -> Void)?
+    /// Asks sync for the bodies of the threads around the selection, when quota allows.
+    var prefetchBodies: (([ThreadKey]) -> Void)?
+    /// Searches Gmail for older mail matching the search text and stores what it finds; returns how many
+    /// threads Gmail matched. Nil until sync can search; the results then end with
+    /// "Search older mail on Gmail".
+    var serverSearch: ((String) async throws -> Int)?
 
     init(store: MailStore) {
         self.store = store
         self.search = SearchService(store.database)
+        removeAccount = { account in
+            try await Task.detached { try store.removeAccount(account.id) }.value
+        }
     }
 
     func account(_ id: String) -> Account? { accounts.first { $0.id == id } }
@@ -106,6 +131,23 @@ struct SendUndoNotice {
 struct SyncProgress: Hashable {
     var done: Int
     var total: Int
+}
+
+/// The sidebar's one line of sync status.
+struct SyncLine: Hashable {
+    enum Tone: Hashable {
+        /// Work in the background, or waiting on Gmail: a quiet dot.
+        case quiet
+        /// The first sync of an account, which the user is waiting on.
+        case working
+        /// Something the user should know about (changes Gmail refused).
+        case attention
+    }
+
+    var text: String
+    var tone: Tone
+    /// The longer form, shown on hover.
+    var detail: String?
 }
 
 enum ShellError: LocalizedError {

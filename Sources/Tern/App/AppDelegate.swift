@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         let launch = Timing.begin("launch")
         Theme.registerFonts()
         NSApp.appearance = Preferences.shared.appearance.appearance
+        // Start the reader's web content process now, so it loads while the list fills.
+        ReaderWebEngine.prewarm()
 
         DemoReset.applyIfRequested(options)
         let database: AppDatabase
@@ -64,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         router.mainWindow = window
         router.install()
         window.makeKeyAndOrderFront(nil)
+        // A window shown for the first time gives its first text field (the search pill) the keyboard;
+        // the list should have it, or j and k would type.
+        model.focusList()
         window.displayIfNeeded()
         NSApp.activate()
 
@@ -91,6 +96,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Lets sync put in-flight work back in its queue before the app goes (at most 2 s).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let integration, integration.sync != nil else { return .terminateNow }
+        Task {
+            await integration.shutdown()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         integration?.stop()
     }
@@ -113,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             self.showMainWindow()
             self.model.reveal(key)
         }
+        services.archiveSent = { [weak model] key in await model?.archiveSent(key) }
+        ReaderWebEngine.shared.webView.didTakeFocus = { [weak model] in model?.focus = .reader }
     }
 
     // MARK: Windows
@@ -129,8 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     }
 
     func showMainWindow() {
-        if window == nil { router.mainWindow = makeMainWindow() }
+        let created = window == nil
+        if created { router.mainWindow = makeMainWindow() }
         window?.makeKeyAndOrderFront(nil)
+        if created { model.focusList() }
         NSApp.activate()
     }
 

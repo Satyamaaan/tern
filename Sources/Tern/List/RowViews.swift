@@ -28,11 +28,14 @@ struct RowModel: Equatable {
     /// Replaces the compact time (snoozed list shows when it wakes).
     var timeOverride: String?
     var dimmed = false
+    /// While searching: the matched words, and the excerpt shown in place of the preview.
+    var highlight: RowHighlight?
 
     static func == (a: RowModel, b: RowModel) -> Bool {
         a.row == b.row && a.style == b.style && a.isSelected == b.isSelected && a.hasFocusRing == b.hasFocusRing
             && a.isHovered == b.isHovered && a.accountColor == b.accountColor && a.chip?.text == b.chip?.text
             && a.chip?.color == b.chip?.color && a.timeOverride == b.timeOverride && a.dimmed == b.dimmed
+            && a.highlight == b.highlight
     }
 }
 
@@ -212,10 +215,30 @@ private struct RowPainter {
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, .medium), .foregroundColor: Theme.text1]
         let subjectWidth = min(Self.width(subject, subjectAttrs), rect.width * 0.72)
-        Self.drawText(subject, subjectAttrs, in: CGRect(x: rect.minX, y: rect.minY, width: subjectWidth, height: rect.height))
+        let subjectRect = CGRect(x: rect.minX, y: rect.minY, width: subjectWidth, height: rect.height)
+        if let highlight = model.highlight, !highlight.subject.isEmpty, !thread.subject.isEmpty {
+            Self.drawMarked(NSAttributedString(string: subject, attributes: subjectAttrs), ranges: highlight.subject, in: subjectRect)
+        } else {
+            Self.drawText(subject, subjectAttrs, in: subjectRect)
+        }
 
         let x = rect.minX + subjectWidth + 7
         guard rect.maxX - x > 24 else { return }
+        let tailRect = CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height)
+        if let highlight = model.highlight {
+            // While searching, the excerpt around the match replaces the preview and the summary.
+            let prefix = "— "
+            let text = NSMutableAttributedString(
+                string: prefix + highlight.snippet.replacingOccurrences(of: "\n", with: " "),
+                attributes: [.font: Theme.ui(13), .foregroundColor: quiet])
+            let shift = (prefix as NSString).length
+            let ranges = highlight.snippetRanges.map { NSRange(location: $0.location + shift, length: $0.length) }
+            for range in ranges where NSMaxRange(range) <= text.length {
+                text.addAttribute(.foregroundColor, value: Theme.text1, range: range)
+            }
+            Self.drawMarked(text, ranges: ranges, in: tailRect)
+            return
+        }
         let tail: NSAttributedString
         if let summary = model.row.summary, !summary.isEmpty {
             let text = NSMutableAttributedString(string: "✦ ", attributes: [.font: Theme.ui(12), .foregroundColor: Theme.accentInk])
@@ -225,7 +248,7 @@ private struct RowPainter {
             let snippet = thread.snippet.replacingOccurrences(of: "\n", with: " ")
             tail = NSAttributedString(string: "— " + snippet, attributes: [.font: Theme.ui(13), .foregroundColor: quiet])
         }
-        Self.draw(tail, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
+        Self.draw(tail, in: tailRect)
     }
 
     // MARK: Text
@@ -243,6 +266,26 @@ private struct RowPainter {
         style.lineBreakMode = .byTruncatingTail
         return style
     }()
+
+    /// Draws `text` with a soft accent mark behind each range (search matches). Marks past the visible
+    /// width are clipped with the text.
+    static func drawMarked(_ text: NSAttributedString, ranges: [NSRange], in rect: CGRect) {
+        guard rect.width > 4 else { return }
+        let font = (text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) ?? Theme.ui(13)
+        let lineHeight = ceil(font.ascender - font.descender)
+        let y = rect.minY + (rect.height - lineHeight) / 2
+        let line = CTLineCreateWithAttributedString(text)
+        Theme.accentSoft.setFill()
+        for range in ranges where range.location < text.length {
+            let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
+            let end = CTLineGetOffsetForStringIndex(line, min(NSMaxRange(range), text.length), nil)
+            let mark = CGRect(x: rect.minX + start - 2, y: y - 1, width: end - start + 4, height: lineHeight + 2)
+                .intersection(rect.insetBy(dx: -2, dy: -2))
+            guard mark.width > 3 else { continue }
+            NSBezierPath(roundedRect: mark, xRadius: 4, yRadius: 4).fill()
+        }
+        draw(text, in: rect)
+    }
 
     static func drawText(_ text: String, _ attributes: [NSAttributedString.Key: Any], in rect: CGRect) {
         guard rect.width > 4 else { return }
@@ -310,5 +353,28 @@ final class WaterlineRowView: NSTableRowView {
         line.setLineDash([3, 3], count: 2, phase: 0)
         Theme.text3.withAlphaComponent(0.4).setStroke()
         line.stroke()
+    }
+}
+
+/// The quiet last row of search results: "Search older mail on Gmail", then what that found.
+final class ServerSearchRowView: NSTableRowView {
+    var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
+    var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
+
+    override var isFlipped: Bool { true }
+    override func drawBackground(in dirtyRect: NSRect) {}
+    override func drawSelection(in dirtyRect: NSRect) {}
+
+    override func draw(_ dirtyRect: NSRect) {
+        let pill = CGRect(x: ThreadRowView.inset, y: 4, width: bounds.width - 2 * ThreadRowView.inset, height: bounds.height - 8)
+        if isHovered {
+            Theme.hover.setFill()
+            NSBezierPath(roundedRect: pill, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row).fill()
+        }
+        let left = pill.minX + 2 + ThreadRowView.gutter
+        Icon.search.draw(in: CGRect(x: left, y: pill.midY - 6, width: 12, height: 12), color: Theme.text3, lineWidth: 1.6)
+        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text3]
+        let size = (text as NSString).size(withAttributes: attributes)
+        (text as NSString).draw(at: CGPoint(x: left + 20, y: pill.midY - size.height / 2), withAttributes: attributes)
     }
 }

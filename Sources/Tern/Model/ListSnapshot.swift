@@ -8,6 +8,8 @@ enum ListItem: Hashable {
     /// The dashed line under the needs-reply group, with that group's size.
     case waterline(Int)
     case thread(ThreadKey)
+    /// The quiet last row of search results that asks Gmail for older mail, with its current text.
+    case serverSearch(String)
 
     var threadKey: ThreadKey? {
         if case .thread(let key) = self { return key }
@@ -30,7 +32,8 @@ struct ListSnapshot {
 
     init() {}
 
-    init(rows input: [ThreadRow], needsReplyFirst: Bool, groupsByDate: Bool, now: Date = Date(), calendar: Calendar = .current) {
+    init(rows input: [ThreadRow], needsReplyFirst: Bool, groupsByDate: Bool, footer: ListItem? = nil,
+         now: Date = Date(), calendar: Calendar = .current) {
         var waiting: ArraySlice<ThreadRow> = []
         var rest = input[...]
         if needsReplyFirst {
@@ -61,6 +64,7 @@ struct ListSnapshot {
         } else {
             for row in rest { append(row) }
         }
+        if let footer { items.append(footer) }
     }
 
     private mutating func append(_ row: ThreadRow) {

@@ -62,6 +62,8 @@ final class SettingsState {
     var aiModel: String
     var autoProjects: Bool
     var indexStatus: String?
+    /// Opens the Google client editor at once (snapshots).
+    var editsGoogleClient = false
 
     init(model: AppModel, shell: ShellActions?) {
         self.model = model
@@ -100,13 +102,15 @@ final class SettingsState {
     func remove(_ account: Account) {
         let alert = NSAlert()
         alert.messageText = "Remove \(account.email)?"
-        alert.informativeText = "Its mail is deleted from this Mac. Nothing changes in Gmail."
+        alert.informativeText = "Its mail is deleted from this Mac and Tern signs out of it. Nothing changes in Gmail."
         alert.addButton(withTitle: "Remove")
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let store = model.store
-        model.writes.async { try? store.removeAccount(account.id) }
+        let services = model.services
+        Task {
+            do { try await services.removeAccount(account) } catch { NSLog("Tern: removing an account failed: \(error)") }
+        }
     }
 
     /// Demo mode only: wipe the demo mailbox and start again with a fresh one.
@@ -262,6 +266,9 @@ private struct AccountsSettings: View {
                 if let message { Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
             }
             .padding(.top, 16)
+            .padding(.bottom, 28)
+            Hairline()
+            GoogleClientSection(startEditing: state.editsGoogleClient)
         }
     }
 

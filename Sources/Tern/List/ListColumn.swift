@@ -29,6 +29,15 @@ struct ListColumn: View {
         }
         .background(Color(Theme.bg))
         .overlay(alignment: .bottom) { ToastStack() }
+        .overlay(alignment: .top) {
+            if model.showsSuggestions {
+                SearchSuggestions()
+                    .padding(.top, MainWindow.headerHeight + 32 + 6)
+                    .padding(.horizontal, 12)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.09), value: model.showsSuggestions)
     }
 }
 
@@ -163,9 +172,91 @@ struct SearchPill: View {
         .background(Capsule().fill(Color(Theme.hover)))
         .onChange(of: focused) { _, value in
             if model.searchFieldFocused != value { model.searchFieldFocused = value }
+            if value {
+                model.suggestionsDismissed = false
+                model.refreshSuggestions()
+            }
         }
         .onChange(of: model.searchFieldFocused) { _, value in
             if focused != value { focused = value }
+        }
+    }
+}
+
+// MARK: - Search suggestions
+
+/// The dropdown under the search pill. ↑↓ move, Tab completes, Return picks, Esc closes.
+struct SearchSuggestions: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let items = model.suggestionItems
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                SuggestionRow(item: item, highlighted: model.suggestionIndex == index, asking: model.askingAI)
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.choose(item) }
+                    .onHover { inside in if inside { model.suggestionIndex = index } }
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color(Theme.raised)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairline), lineWidth: 1))
+        .overlayShadow()
+    }
+}
+
+private struct SuggestionRow: View {
+    let item: AppModel.SuggestionItem
+    let highlighted: Bool
+    let asking: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            switch item {
+            case .suggestion(let suggestion):
+                IconView(icon: Self.icon(suggestion.kind), size: 14, color: Color(Theme.text3))
+                    .frame(width: 16)
+                Text(suggestion.title)
+                    .font(.ui(13))
+                    .foregroundStyle(Color(Theme.text1))
+                    .lineLimit(1)
+                if let detail = suggestion.detail {
+                    Text(detail)
+                        .font(.ui(12))
+                        .foregroundStyle(Color(Theme.text3))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+            case .ask(let text):
+                Text("✦")
+                    .font(.ui(12))
+                    .foregroundStyle(Color(Theme.accentInk))
+                    .frame(width: 16)
+                (Text("Ask: ").foregroundStyle(Color(Theme.text2)) + Text(text).foregroundStyle(Color(Theme.text1)))
+                    .font(.ui(13))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                if asking {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 30)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(highlighted ? Color(Theme.hover) : .clear))
+    }
+
+    private static func icon(_ kind: SearchSuggestion.Kind) -> Icon {
+        switch kind {
+        case .contact, .account: .person
+        case .label, .project: .label
+        case .category: .inbox
+        case .operator: .search
+        case .recent: .snoozed
         }
     }
 }

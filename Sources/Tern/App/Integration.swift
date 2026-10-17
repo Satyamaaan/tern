@@ -1,18 +1,28 @@
 import AppKit
 import GRDB
+import Network
 import TernAI
 import TernCore
 import TernSync
 
-/// Connects the shell's hooks to Google sign-in, the AI assistant, project rules and the composer.
+/// Connects the shell's hooks to Google sign-in, sync, notifications, the AI assistant, project rules
+/// and the composer.
 @MainActor
 final class Integration {
     let services: AppServices
     let model: AppModel
     let assistant: MailAssistant
     let triage: TriageQueue
-    private var google: GoogleAccounts?
+    private var google: GoogleAccounts? { didSet { googleBox.set(google) } }
     private var settingsObservation: AnyDatabaseCancellable?
+    /// The Google client for sync's `apiProvider`, which runs off the main actor.
+    let googleBox = GoogleBox()
+    /// Gmail sync for the real mailbox; nil for demo mail.
+    var sync: SyncCoordinator?
+    var pathMonitor: NWPathMonitor?
+    var activityObservers: [any NSObjectProtocol] = []
+    var rateLimitTimer: Timer?
+    var notifications: MailNotifications?
 
     init(services: AppServices, model: AppModel) {
         self.services = services
@@ -40,25 +50,57 @@ final class Integration {
         return google
     }
 
+    /// A thread-safe slot for the current Google client.
+    final class GoogleBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var accounts: GoogleAccounts?
+
+        func set(_ accounts: GoogleAccounts?) { lock.withLock { self.accounts = accounts } }
+        func get() -> GoogleAccounts? { lock.withLock { accounts } }
+    }
+
     func wire() {
         wireGoogle()
         wireAI()
         wireRules()
         wireComposer()
+        // Sync and notifications start after the window is up, so they never hold up launch.
+        if !model.isFake {
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.startSync()
+                    self?.startNotifications()
+                }
+            }
+        }
+    }
+
+    /// Banners for new mail while Tern is in the background.
+    func startNotifications() {
+        let notifications = MailNotifications(services: services, prefs: model.prefs)
+        notifications.start()
+        self.notifications = notifications
     }
 
     // MARK: Google
 
     private func wireGoogle() {
         services.hasGoogleClient = { (try? GoogleClientConfigStore().load()) != nil }
+        services.googleClientId = { (try? GoogleClientConfigStore().load())?.clientId }
 
         services.saveGoogleClient = { [weak self] clientId, clientSecret in
             let config = GoogleClientConfig(
                 clientId: clientId.trimmingCharacters(in: .whitespacesAndNewlines),
                 clientSecret: clientSecret.trimmingCharacters(in: .whitespacesAndNewlines))
-            try config.validate()
-            try GoogleClientConfigStore().save(config)
-            self?.google = GoogleAccounts(config: config)
+            try self?.useGoogleClient(config)
+        }
+
+        services.importGoogleClient = { [weak self] data in
+            let config: GoogleClientConfig
+            do { config = try GoogleClientConfig(downloadedJSON: data) } catch let error as GoogleClientConfigError {
+                throw ClientProblem(error)
+            }
+            try self?.useGoogleClient(config)
         }
 
         services.connectAccount = { [weak self] in
@@ -66,7 +108,12 @@ final class Integration {
             let info = try await google.connect { url in
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
-            return try await self.saveAccount(info)
+            let account = try await self.saveAccount(info)
+            if let sync = self.sync {
+                // Signing in again with an account that was already there resumes its sync.
+                if sync.status(for: account.id) == nil { sync.addAccount(account) } else { sync.reauthorized(accountId: account.id) }
+            }
+            return account
         }
 
         services.reauthAccount = { [weak self] account in
@@ -75,6 +122,10 @@ final class Integration {
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
             guard info.email.lowercased() == account.id else { throw Failure.differentAccount(info.email) }
+            if let sync = self.sync {
+                sync.reauthorized(accountId: account.id)
+                return
+            }
             let store = self.services.store
             try await Task.detached {
                 try store.updateAccount(account.id) { account in
@@ -82,6 +133,39 @@ final class Integration {
                     account.syncError = nil
                 }
             }.value
+        }
+
+        services.removeAccount = { [weak self] account in
+            self?.sync?.removeAccount(id: account.id)
+            let store = self?.services.store
+            try await Task.detached { try store?.removeAccount(account.id) }.value
+            await self?.googleAccounts?.signOut(account.email)
+        }
+    }
+
+    /// Validates and stores the user's OAuth client; accounts sign in through it from now on.
+    private func useGoogleClient(_ config: GoogleClientConfig) throws {
+        do {
+            try config.validate()
+            try GoogleClientConfigStore().save(config)
+        } catch let error as GoogleClientConfigError {
+            throw ClientProblem(error)
+        }
+        google = GoogleAccounts(config: config)
+    }
+
+    /// What went wrong with an entered or imported OAuth client, in words for the person entering it.
+    struct ClientProblem: LocalizedError {
+        let error: GoogleClientConfigError
+        init(_ error: GoogleClientConfigError) { self.error = error }
+
+        var errorDescription: String? {
+            switch error {
+            case .invalidClientId: "That client ID doesn't look right. It ends in .apps.googleusercontent.com."
+            case .invalidClientSecret: "Add the client secret too (it starts with GOCSPX-)."
+            case .notDesktopClient: "That file is for a Web application client. Tern needs a Desktop app client."
+            case .unreadableFile: "That isn't the JSON file Google offers when you create an OAuth client."
+            }
         }
     }
 
@@ -174,5 +258,19 @@ final class Integration {
     func stop() {
         let triage = self.triage
         Task { await triage.stop() }
+    }
+
+    /// Quitting: lets sync put in-flight work back in its queue, for at most `timeout` seconds.
+    func shutdown(timeout: TimeInterval = 2) async {
+        notifications?.stop()
+        stopObservingActivity()
+        pathMonitor?.cancel()
+        guard let sync else { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await sync.shutdown() }
+            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 }

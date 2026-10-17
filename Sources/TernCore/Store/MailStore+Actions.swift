@@ -168,15 +168,10 @@ extension MailStore {
     /// Adds or removes threads from a project by hand. Local only.
     public func setProject(_ projectId: String, on threads: [ThreadKey], assigned: Bool) throws {
         try database.writer.write { db in
-            for key in threads {
-                if assigned {
-                    try ThreadProject(accountId: key.accountId, threadId: key.threadId, projectId: projectId, source: .manual)
-                        .upsert(db)
-                } else {
-                    _ = try ThreadProject.deleteOne(db, key: [
-                        "accountId": key.accountId, "threadId": key.threadId, "projectId": projectId,
-                    ])
-                }
+            if assigned {
+                try ProjectRules.assignByHand(db, threads, to: projectId)
+            } else {
+                try ProjectRules.removeByHand(db, threads, from: projectId)
             }
         }
     }

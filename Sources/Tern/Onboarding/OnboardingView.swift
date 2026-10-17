@@ -67,6 +67,7 @@ struct OnboardingView: View {
         .padding(.horizontal, 44)
         .frame(width: 640, height: 560)
         .background(Color(Theme.bg))
+        .googleClientFileDrop { data in if step == 0 { importClient(data) } }
     }
 
     private var stepper: some View {
@@ -116,17 +117,22 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 14)
             Hairline()
-            inputRow("Client ID") {
-                TextField("1234567890-abc.apps.googleusercontent.com", text: $clientId).textFieldStyle(.plain).font(.mono(12))
+            GoogleClientFields(clientId: $clientId, clientSecret: $clientSecret)
+            HStack(spacing: 16) {
+                Button("Choose file…") { chooseClientFile() }
+                    .buttonStyle(.plain)
+                    .font(.ui(12, .medium))
+                    .foregroundStyle(Color(Theme.accentInk))
+                Text("or drop the client_secret_….json file here")
+                    .font(.ui(12))
+                    .foregroundStyle(Color(Theme.text3))
+                Spacer()
+                Button(showWhy ? "Why your own client" : "Why?") { withAnimation(.easeOut(duration: 0.15)) { showWhy.toggle() } }
+                    .buttonStyle(.plain)
+                    .font(.ui(12, .medium))
+                    .foregroundStyle(Color(Theme.accentInk))
             }
-            inputRow("Client secret") {
-                SecureField("GOCSPX-…", text: $clientSecret).textFieldStyle(.plain).font(.mono(12))
-            }
-            Button(showWhy ? "Why your own client" : "Why?") { withAnimation(.easeOut(duration: 0.15)) { showWhy.toggle() } }
-                .buttonStyle(.plain)
-                .font(.ui(12, .medium))
-                .foregroundStyle(Color(Theme.accentInk))
-                .padding(.top, 12)
+            .padding(.top, 12)
             if showWhy {
                 Text("Tern is open source and has no servers. With your own client, your mail goes straight from Google to this Mac, and nobody else holds a key to it. The ID and secret stay in your Keychain.")
                     .font(.ui(12))
@@ -201,17 +207,6 @@ struct OnboardingView: View {
         }
     }
 
-    private func inputRow<Field: View>(_ title: String, @ViewBuilder field: () -> Field) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text2)).frame(width: 100, alignment: .leading)
-                field()
-            }
-            .frame(height: 40)
-            Hairline()
-        }
-    }
-
     // MARK: Actions
 
     private func saveClient() {
@@ -229,7 +224,26 @@ struct OnboardingView: View {
                 message = ShellError.notAvailable.localizedDescription
                 step = 1
             } catch {
-                message = error.localizedDescription
+                message = GoogleClientText.message(for: error)
+            }
+        }
+    }
+
+    private func chooseClientFile() {
+        Task { if let data = await GoogleClientFile.choose() { importClient(data) } }
+    }
+
+    /// The JSON file Google offers at creation carries both the ID and the secret.
+    private func importClient(_ data: Data) {
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                try await services.importGoogleClient(data)
+                message = nil
+                step = 1
+            } catch {
+                message = GoogleClientText.message(for: error)
             }
         }
     }

@@ -2,8 +2,9 @@ import Foundation
 import GRDB
 
 /// Keeps rule-based project membership (`thread_project` rows with source `.rule`) in step with
-/// `project_rule`. A thread joins a project when any of the project's rules matches. Manual rows are
-/// never touched; an AI row for a project a rule now matches becomes a rule row.
+/// `project_rule`. A thread joins a project when any of the project's rules matches, unless the user
+/// took it out by hand (`ProjectExclusion`). Manual rows are never touched; an AI row for a project a
+/// rule now matches becomes a rule row.
 public enum ProjectRules {
     public struct Changes: Hashable, Sendable {
         public var added = 0
@@ -47,6 +48,20 @@ public enum ProjectRules {
         return facts[key].map { rules.projects(matching: $0) } ?? []
     }
 
+    /// The threads among `keys` that one of the project's rules matches.
+    static func keysMatching(_ db: Database, _ keys: [ThreadKey], projectId: String) throws -> Set<ThreadKey> {
+        let rules = try CompiledRules.load(db, projectId: projectId, scope: keys)
+        guard !rules.checks.isEmpty else { return [] }
+        var matched = Set<ThreadKey>()
+        for chunk in keys.chunked(by: 400) {
+            for (key, thread) in try ThreadFacts.load(db, chunk, needsMessages: rules.needsMessages)
+            where rules.projects(matching: thread).contains(projectId) {
+                matched.insert(key)
+            }
+        }
+        return matched
+    }
+
     // MARK: Evaluation
 
     private static func evaluate(_ db: Database, _ keys: [ThreadKey], rules: CompiledRules, projectId: String?) throws -> Changes {
@@ -63,10 +78,12 @@ public enum ProjectRules {
             existing[ThreadKey(accountId: link.accountId, threadId: link.threadId), default: [:]][link.projectId] = link.source
         }
 
+        let excluded = try exclusions(db, keys, projectId: projectId)
+
         var changes = Changes()
         for key in keys {
             guard let thread = facts[key] else { continue }
-            let wanted = rules.projects(matching: thread)
+            let wanted = rules.projects(matching: thread).subtracting(excluded[key] ?? [])
             let current = existing[key] ?? [:]
             for project in wanted {
                 switch current[project] {
@@ -89,7 +106,7 @@ public enum ProjectRules {
         return changes
     }
 
-    fileprivate static func keyValues(_ keys: [ThreadKey]) -> (String, StatementArguments) {
+    static func keyValues(_ keys: [ThreadKey]) -> (String, StatementArguments) {
         var arguments: StatementArguments = []
         for key in keys { _ = arguments.append(contentsOf: [key.accountId, key.threadId]) }
         return (keys.map { _ in "(?, ?)" }.joined(separator: ", "), arguments)

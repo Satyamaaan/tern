@@ -144,3 +144,72 @@ private func links(_ store: MailStore, _ projectId: String) throws -> [String: T
     #expect(changes.added == before.count)
     #expect(try database.reader.read { db in Set(try ThreadProject.fetchAll(db)) } == before)
 }
+
+@Test func removingByHandSticksAcrossRuleRuns() throws {
+    let store = try makeStore()
+    let projects = ProjectStore(store.database)
+    let acme = try projects.create(name: "Acme")
+    try projects.addRule(projectId: acme.id, field: .fromDomain, value: "brightpath.co")
+    #expect(Set(try links(store, acme.id).keys) == ["client", "redesign"])
+
+    let client = ThreadKey(accountId: work.id, threadId: "client")
+    try store.setProject(acme.id, on: [client], assigned: false)
+    #expect(Set(try links(store, acme.id).keys) == ["redesign"])
+
+    // Neither a sync pass over the thread, a full recompute, nor a rule edit brings it back.
+    try store.database.writer.write { db in
+        try ProjectRules.apply(db, keys: [client])
+        try ProjectRules.recomputeAll(db)
+    }
+    var rule = try #require(try projects.rules(projectId: acme.id).first)
+    rule.value = "@brightpath.co"
+    try projects.updateRule(rule)
+    #expect(Set(try links(store, acme.id).keys) == ["redesign"])
+    #expect(try store.database.reader.read { db in try ProjectRules.isExcluded(db, client, from: acme.id) })
+
+    // Putting it back by hand forgets the removal, and a recompute keeps it.
+    try store.setProject(acme.id, on: [client], assigned: true)
+    try store.database.writer.write { db in _ = try ProjectRules.recomputeAll(db) }
+    #expect(try links(store, acme.id) == ["client": .manual, "redesign": .rule])
+    #expect(try store.database.reader.read { db in try ProjectExclusion.fetchCount(db) } == 0)
+}
+
+@Test func removingAManualThreadNoRuleMatchesLeavesNoTrace() throws {
+    let store = try makeStore()
+    let acme = try ProjectStore(store.database).create(name: "Acme")
+    let lisbon = ThreadKey(accountId: home.id, threadId: "lisbon")
+    try store.setProject(acme.id, on: [lisbon], assigned: true)
+    try store.setProject(acme.id, on: [lisbon], assigned: false)
+    #expect(try links(store, acme.id).isEmpty)
+    #expect(try store.database.reader.read { db in try ProjectExclusion.fetchCount(db) } == 0)
+}
+
+@Test func removingAnAISuggestionByHandSticks() throws {
+    let store = try makeStore()
+    let acme = try ProjectStore(store.database).create(name: "Acme")
+    let lisbon = ThreadKey(accountId: home.id, threadId: "lisbon")
+    try store.database.writer.write { db in
+        try ThreadProject(accountId: home.id, threadId: "lisbon", projectId: acme.id, source: .ai).insert(db)
+    }
+    try store.setProject(acme.id, on: [lisbon], assigned: false)
+    #expect(try store.database.reader.read { db in try ProjectRules.isExcluded(db, lisbon, from: acme.id) })
+}
+
+@Test func excludedThreadsAreLeftOutOfEveryRead() throws {
+    let store = try makeStore()
+    let acme = try ProjectStore(store.database).create(name: "Acme")
+    try ProjectStore(store.database).addRule(projectId: acme.id, field: .fromDomain, value: "brightpath.co")
+    let client = ThreadKey(accountId: work.id, threadId: "client")
+    let redesign = ThreadKey(accountId: work.id, threadId: "redesign")
+    try store.setProject(acme.id, on: [client], assigned: false)
+    try store.database.writer.write { db in _ = try ProjectRules.recomputeAll(db) }
+
+    #expect(try store.threadRows(in: Mailbox(.project(acme.id))).map(\.id) == [redesign])
+    let rows = try store.database.reader.read { db in try MailStore.fetchThreadRows(db, keys: [client, redesign]) }
+    #expect(rows.map(\.projectIds) == [[], [acme.id]])
+    #expect(try store.threadDetail(client)?.projects.isEmpty == true)
+    _ = try store.perform(.markUnread, on: [client, redesign])
+    #expect(try store.scopeCounts(accountId: nil).projectUnread[acme.id] == 1)
+    #expect(try store.sidebarCounts().projectUnread[acme.id] == 1)
+    #expect(try SearchService(store.database).search("project:acme").map(\.id) == [redesign])
+}

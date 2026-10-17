@@ -168,6 +168,9 @@ struct InlineComposerView: View {
         Group {
             if let model {
                 InlineComposerCard(model: model)
+            } else {
+                // An empty Group never appears, so it would never build the composer.
+                Color.clear.frame(height: 1)
             }
         }
         .onAppear(perform: start)

@@ -249,6 +249,8 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
 final class ReaderWebView: WKWebView {
     /// Called with the current hovered link when the context menu opens on one.
     var openLinkFromMenu: (() -> Void)?
+    /// Called when the page takes the keyboard (a click into the conversation).
+    var didTakeFocus: (() -> Void)?
     var hoveredLink: String?
     let quickLook = ReaderQuickLook()
 
@@ -278,6 +280,12 @@ final class ReaderWebView: WKWebView {
     }
 
     @objc private func openHoveredLink() { openLinkFromMenu?() }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { didTakeFocus?() }
+        return accepted
+    }
 
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { !quickLook.items.isEmpty }
 

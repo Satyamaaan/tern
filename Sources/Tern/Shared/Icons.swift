@@ -5,7 +5,7 @@ import SwiftUI
 /// they stay identical to `design/mockup.html`.
 enum Icon: String, CaseIterable {
     case inbox, needsReply, snoozed, starred, drafts, sent, allMail, more, spam, trash, label
-    case compose, search, done, ellipsis, chevronDown, paperclip, plus, file, archive, pencil
+    case compose, search, done, ellipsis, chevronDown, paperclip, plus, file, archive, pencil, person
 
     var svg: String {
         switch self {
@@ -27,6 +27,7 @@ enum Icon: String, CaseIterable {
         case .plus: "M8 3v10 M3 8h10"
         case .file: "M4 2h5l3 3v9H4z M9 2v3h3"
         case .archive: "M2 3h12v3H2z M3 6v7h10V6 M6.5 9h3"
+        case .person: "M5.5 5.5a2.5 2.5 0 105 0a2.5 2.5 0 10-5 0 M2.5 13.5c.7-2.3 2.8-3.5 5.5-3.5s4.8 1.2 5.5 3.5"
         }
     }
 

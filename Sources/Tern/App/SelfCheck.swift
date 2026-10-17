@@ -10,8 +10,8 @@ final class SelfCheck {
     let model: AppModel
     let registry: CommandRegistry
     private var failures = 0
-    private let window: MainWindow
-    private let router: KeyRouter
+    let window: MainWindow
+    let router: KeyRouter
     private let palette: PaletteController
 
     init(model: AppModel, registry: CommandRegistry) {
@@ -44,6 +44,7 @@ final class SelfCheck {
         scope()
         keys()
         paletteSearch()
+        integration()
         if ProcessInfo.processInfo.environment["TERN_CHECK_MENUS"] == "1" { printMenus() }
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
         exit(failures == 0 ? 0 : 1)
@@ -248,8 +249,8 @@ final class SelfCheck {
         check("search shows results", model.isSearching && !model.snapshot.isEmpty)
         print(String(format: "  search: results %.1f ms after the keystroke (debounce %.0f ms included)", elapsed, Double(AppModel.searchDebounce) / 1_000_000))
         let interval = Timing.begin("search-raw")
-        _ = try? model.services.search.search("invoice", accountId: nil, limit: 200)
-        print(String(format: "  search: %.1f ms for the query itself", Timing.end(interval)))
+        _ = try? model.services.search.searchHits("invoice", options: SearchOptions(limit: AppModel.searchPage))
+        print(String(format: "  search: %.1f ms for the query itself (%d hits with excerpts)", Timing.end(interval), AppModel.searchPage))
         model.endSearch(restoreFocus: true)
         check("esc restores the mailbox", !model.isSearching && model.snapshot.rows.count > 0)
     }
@@ -366,7 +367,7 @@ final class SelfCheck {
         }
     }
 
-    private func send(_ characters: String, modifiers: NSEvent.ModifierFlags = [], keyCode: UInt16 = 0) {
+    func send(_ characters: String, modifiers: NSEvent.ModifierFlags = [], keyCode: UInt16 = 0) {
         guard let event = NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, characters: characters,
@@ -376,17 +377,17 @@ final class SelfCheck {
         wait(0.02)
     }
 
-    private func check(_ name: String, _ ok: Bool) {
+    func check(_ name: String, _ ok: Bool) {
         if !ok { failures += 1 }
         print("\(ok ? "PASS" : "FAIL")  \(name)")
     }
 
-    private func wait(_ seconds: TimeInterval) {
+    func wait(_ seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
     /// Spins the run loop for `seconds`, calling `body` every few milliseconds.
-    private func poll(_ seconds: TimeInterval, _ body: () -> Void) {
+    func poll(_ seconds: TimeInterval, _ body: () -> Void) {
         let end = Date().addingTimeInterval(seconds)
         while Date() < end {
             body()

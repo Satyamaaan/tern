@@ -147,7 +147,7 @@ struct ReaderColumn: View {
             if model.checked.count > 1 {
                 MultiSelectionView(count: model.checked.count)
             } else {
-                ReaderView(key: model.readerKey)
+                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition)
             }
         }
         .frame(minWidth: MainView.readerMinWidth, maxWidth: .infinity, maxHeight: .infinity)

@@ -153,6 +153,20 @@ private func queue(_ database: AppDatabase, _ provider: FakeProvider, batchSize:
     }
 }
 
+@Test func triageNeverRefilesAThreadTakenOutByHand() async throws {
+    let mails = [TestMail(id: "a", thread: "t1"), TestMail(id: "b", thread: "t2")]
+    let lumen = Project(id: "p-lumen", name: "Lumen redesign")
+    let database = try makeDatabase(mails, settings: AISettings(enabled: true, provider: "codex", autoProjects: true))
+    try await database.writer.write { db in
+        try lumen.insert(db)
+        try ProjectExclusion(accountId: me.id, threadId: "t1", projectId: "p-lumen").insert(db)
+    }
+    let provider = FakeProvider { request, _ in triageAnswer(request, project: "Lumen redesign") }
+    try await queue(database, provider).processBatch()
+    let links = try await database.reader.read { db in Set(try ThreadProject.fetchAll(db).map(\.threadId)) }
+    #expect(links == ["t2"])
+}
+
 @Test func triagePausesOnRateLimitAndSignOut() async throws {
     let database = try makeDatabase([TestMail(id: "a", thread: "t1")])
     let limited = FakeProvider { _, _ in throw AIError.rateLimited("usage limit reached") }

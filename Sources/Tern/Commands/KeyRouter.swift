@@ -65,8 +65,14 @@ final class KeyRouter {
             return nil
         }
 
+        // The conversation page has the keyboard: it moves between messages and answers Enter and Space
+        // on a focused link, attachment or quote itself.
+        if !hasCommand, Self.readerPageKeys.contains(where: { $0.matches(event) }), Self.readerHasKeyboard(event.window) {
+            return event
+        }
+
         for (shortcut, command) in bare where shortcut.matches(event) {
-            if command.yieldsToReader && model.focus == .reader { return event }
+            if command.yieldsToReader && model.focus == .reader { continue }
             guard model.palette == nil || command.id == "back" else { return event }
             if command.isEnabled() {
                 command.run()
@@ -86,10 +92,21 @@ final class KeyRouter {
         }
         if model.searchFieldFocused {
             switch event.keyCode {
-            case 53: model.endSearch(restoreFocus: true); return true
-            case 125: model.focusResults(open: false); return true
-            case 36, 76: model.focusResults(open: !model.snapshot.isEmpty); return true
-            default: return false
+            case 53:
+                if !model.dismissSuggestions() { model.endSearch(restoreFocus: true) }
+                return true
+            case 125:
+                if !model.moveSuggestion(1) { model.focusResults(open: false) }
+                return true
+            case 126:
+                return model.moveSuggestion(-1)
+            case 48 where flags.isEmpty:
+                return model.completeSuggestion()
+            case 36, 76:
+                model.submitSearch()
+                return true
+            default:
+                return false
             }
         }
         return false
@@ -132,6 +149,18 @@ final class KeyRouter {
         model.chordHUD = nil
     }
 
+    // MARK: The reader
+
+    private static let readerPageKeys: [KeyShortcut] = [
+        .key("n"), .key("p"), .key("o"), .special(.returnKey), .special(.space),
+    ]
+
+    /// Whether the reader's web view (or something inside it) is the first responder.
+    static func readerHasKeyboard(_ window: NSWindow?) -> Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: ReaderWebEngine.shared.webView)
+    }
+
     // MARK: Text input
 
     private static func isPrintable(_ event: NSEvent) -> Bool {
@@ -142,6 +171,8 @@ final class KeyRouter {
     /// The text view receiving typing in the window, if any (field editors included).
     static func textInput(in window: NSWindow?) -> NSTextView? {
         guard let responder = window?.firstResponder as? NSTextView, responder.isEditable else { return nil }
+        // A field editor left behind by a text field that has gone (the closed palette) isn't typing.
+        if responder.isFieldEditor, let field = responder.delegate as? NSView, field.window == nil { return nil }
         return responder
     }
 }

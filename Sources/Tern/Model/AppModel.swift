@@ -34,6 +34,8 @@ enum PaletteMode: Equatable {
 protocol ListPresenting: AnyObject {
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation)
     func selectionDidChange(scrollTo key: ThreadKey?)
+    /// Makes the list the first responder.
+    func takeKeyboard()
 }
 
 enum ListAnimation {
@@ -74,10 +76,20 @@ final class AppModel {
     var isSearching = false
     /// Mirrors the search pill's focus.
     var searchFieldFocused = false
+    /// The dropdown under the search pill: people, labels, projects, operators, recent searches.
+    var suggestions: [SearchSuggestion] = []
+    /// The highlighted dropdown row (into `suggestionItems`); nil while the caret is in the text.
+    var suggestionIndex: Int?
+    /// Esc closed the dropdown; it opens again with the next keystroke.
+    var suggestionsDismissed = false
+    /// True while ✦ Ask turns the text into a query.
+    var askingAI = false
+    /// The "Search older mail on Gmail" row at the end of the results.
+    var serverSearchState = ServerSearchState.idle
 
     // MARK: Overlays
 
-    var palette: PaletteMode?
+    var palette: PaletteMode? { didSet { if oldValue != nil, palette == nil { paletteClosed() } } }
     var showsShortcuts = false
     /// Pending `g` chord, shown in a small HUD.
     var chordHUD: String?
@@ -112,6 +124,13 @@ final class AppModel {
     @ObservationIgnored var source: ListSource
     @ObservationIgnored var rawRows: [ThreadRow] = []
     @ObservationIgnored var searchRows: [ThreadRow] = []
+    @ObservationIgnored var searchHits: [ThreadKey: SearchHit] = [:]
+    @ObservationIgnored var searchHighlights: [ThreadKey: RowHighlight] = [:]
+    /// Results asked for: a page per keystroke, more as the list scrolls.
+    @ObservationIgnored var searchLimit = AppModel.searchPage
+    @ObservationIgnored var searchHasMore = false
+    @ObservationIgnored var suggestionTask: Task<Void, Never>?
+    @ObservationIgnored var lastRecordedSearch: String?
     @ObservationIgnored var limit = AppModel.pageSize
     @ObservationIgnored var hidden: [ThreadKey: HiddenState] = [:]
     @ObservationIgnored var pendingCursor: ThreadKey?
@@ -263,6 +282,7 @@ final class AppModel {
         } else {
             checked = []
             setCursor(key, open: true)
+            recordSearch()
         }
     }
 
@@ -305,12 +325,19 @@ final class AppModel {
         }
     }
 
-    /// Enter / o: open the thread for reading.
+    /// Enter / o: open the thread for reading. In the open thread, Enter expands or collapses the
+    /// focused message.
     func open() {
         guard let cursor else { return }
+        if focus == .reader, services.reader.isActive {
+            services.reader.toggleMessage()
+            return
+        }
         focus = .reader
         if listOnly { readerExpanded = true }
         markRead([cursor])
+        recordSearch()
+        services.reader.focus()
     }
 
     /// Esc: leave the reader, clear search, or clear the selection, in that order.
@@ -318,9 +345,26 @@ final class AppModel {
         if palette != nil { palette = nil; return }
         if showsShortcuts { showsShortcuts = false; return }
         if isSearching { endSearch(restoreFocus: true); return }
-        if readerExpanded { readerExpanded = false; focus = .list; return }
-        if focus == .reader { focus = .list; return }
+        if readerExpanded { readerExpanded = false; focusList(); return }
+        if focus == .reader { focusList(); return }
         clearSelection()
+    }
+
+    /// Once the palette closes, the keyboard goes back to the list or the open thread, unless the
+    /// command it ran moved it somewhere (the search pill).
+    private func paletteClosed() {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.palette == nil, !self.searchFieldFocused, self.projectEditor == nil else { return }
+                if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
+            }
+        }
+    }
+
+    /// Gives the list the keyboard again.
+    func focusList() {
+        focus = .list
+        listView?.takeKeyboard()
     }
 
     func toggleSidebar() { prefs.sidebarCollapsed.toggle() }

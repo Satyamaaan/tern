@@ -61,18 +61,18 @@ struct ReaderView: View {
             }
             if key != nil {
                 if let request = model.composing {
-                    VStack(spacing: 0) {
-                        Rectangle().fill(Color(Theme.hairline)).frame(height: 1)
-                        InlineComposerView(request: request, onClose: { model.composing = nil })
-                    }
-                    .frame(maxHeight: 420)
+                    // The card takes the reply pill's place and grows with its text.
+                    InlineComposerView(request: request, onClose: { model.composing = nil })
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 10)
+                        .padding(.bottom, 18)
                 } else {
                     ReaderReplyBar(model: model)
                 }
             }
         }
         .background(Color(Theme.raised))
-        .background { ReaderShortcuts(model: model, enabled: key != nil) }
         .onChange(of: key, initial: true) {
             model.attach(services)
             model.show(key, prefetch: prefetch)
@@ -412,26 +412,5 @@ struct ReaderQuickReply: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-    }
-}
-
-/// ⌘F, ⌘G, ⇧⌘G, ⌘P and ⇧⌘S while a conversation is open.
-struct ReaderShortcuts: View {
-    let model: ReaderModel
-    let enabled: Bool
-
-    var body: some View {
-        ZStack {
-            Button("Find") { model.openFind() }.keyboardShortcut("f")
-            Button("Find Next") { model.find() }.keyboardShortcut("g")
-            Button("Find Previous") { model.find(backwards: true) }.keyboardShortcut("g", modifiers: [.command, .shift])
-            Button("Print") { model.printThread() }.keyboardShortcut("p")
-            Button("Summarize") { model.summaryClicked() }.keyboardShortcut("s", modifiers: [.command, .shift])
-        }
-        .disabled(!enabled)
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }

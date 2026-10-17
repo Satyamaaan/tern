@@ -259,7 +259,11 @@ final class ReaderBodies: @unchecked Sendable {
         }
         if let text = message.bodyText, !text.isEmpty { return PlainTextMail.html(text) }
         var placeholder = PlainTextMail.html(message.snippet)
-        if message.bodyState == .metadata { placeholder.html = "<div class=\"tern-plain\" style=\"opacity:.6\">" + placeholder.html + "</div>" }
+        if message.bodyState == .metadata {
+            // Older mail is stored without its body; sync fetches it when the thread opens.
+            placeholder.html = "<div class=\"tern-plain\" style=\"opacity:.6\">" + placeholder.html + "</div>"
+                + "<div style=\"margin-top:10px;font-size:12px;opacity:.5\">Loading message…</div>"
+        }
         return placeholder
     }
 }

@@ -70,6 +70,25 @@ extension AppModel {
         }
     }
 
+    /// "Send and archive": archives like `e` (the row leaves in the same frame, the next one is selected)
+    /// but without a toast, since the send notice carries the undo. Returns the undo token once written.
+    func archiveSent(_ key: ThreadKey) async -> UndoToken? {
+        if leavesList(.archive), snapshot.rows[key] != nil { hide([key]) }
+        if case .inbox = kind { prefs.clearedToday += 1 }
+        let store = self.store
+        return await withCheckedContinuation { continuation in
+            writes.async {
+                let token = try? store.perform(.archive, on: [key])
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.committed([key])
+                        continuation.resume(returning: token)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Hiding triaged rows
 
     func hide(_ keys: [ThreadKey]) {
@@ -79,7 +98,10 @@ extension AppModel {
     }
 
     func committed(_ keys: [ThreadKey]) {
-        for key in keys where hidden[key] == .writing { hidden[key] = .committed }
+        // A row the list no longer reads needs no hiding; dropping the mark now means a later undo
+        // from outside the shell (a cancelled send-and-archive) shows the row again.
+        let listed = Set((isSearching ? searchRows : rawRows).map(\.id))
+        for key in keys where hidden[key] == .writing { hidden[key] = listed.contains(key) ? .committed : nil }
         // Search results are a one-off read; read them again so stars, read state and flags update.
         if isSearching { refreshSearch() }
         // If the write left a thread in this list after all (no change reached the observation),
@@ -249,14 +271,24 @@ extension AppModel {
 
     func compose() { services.compose(.new(accountId: scope.accountId)) }
 
+    /// r / a: answers inline in the reader when it shows the thread, else in a composer window.
     func reply(all: Bool) {
         guard let key = readerKey else { return }
-        services.compose(.reply(key, all: all))
+        if openInReader(key) { services.reader.reply(all: all) } else { services.compose(.reply(key, all: all)) }
     }
 
+    /// f: forwards inline in the reader when it shows the thread, else in a composer window.
     func forward() {
         guard let key = readerKey else { return }
-        services.compose(.forward(key))
+        if openInReader(key) { services.reader.forward() } else { services.compose(.forward(key)) }
+    }
+
+    /// Whether the reader is on screen with `key` open, so replies can go inline. Moves focus there.
+    private func openInReader(_ key: ThreadKey) -> Bool {
+        let readerShown = !listOnly || readerExpanded
+        guard readerShown, services.reader.model?.key == key else { return false }
+        focus = .reader
+        return true
     }
 
     func markAllRead() {
