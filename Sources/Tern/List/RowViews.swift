@@ -296,7 +296,7 @@ private struct RowPainter {
             x += 17
             Self.drawText(summary, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
         } else {
-            let snippet = thread.snippet.replacingOccurrences(of: "\n", with: " ")
+            let snippet = ThreadRowView.preview(thread.snippet, subject: thread.subject)
             Self.drawText("— " + snippet, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
         }
     }
@@ -419,5 +419,18 @@ final class ServerSearchRowView: NSTableRowView {
         let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text3]
         let size = (text as NSString).size(withAttributes: attributes)
         (text as NSString).draw(at: CGPoint(x: left + 27, y: pill.midY - size.height / 2), withAttributes: attributes)
+    }
+}
+
+extension ThreadRowView {
+    /// The snippet on one line, without the subject when the body starts by repeating it (common in
+    /// notification mail), so the row doesn't say the same thing twice.
+    static func preview(_ snippet: String, subject: String) -> String {
+        let text = snippet.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+        let title = subject.trimmingCharacters(in: .whitespaces)
+        guard title.count >= 4, text.count > title.count,
+              let range = text.range(of: title, options: [.anchored, .caseInsensitive]) else { return text }
+        let rest = text[range.upperBound...].drop { $0.isWhitespace || $0.isPunctuation && $0 != "(" && $0 != "\"" }
+        return rest.isEmpty ? text : String(rest)
     }
 }

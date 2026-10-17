@@ -32,6 +32,7 @@ final class SelfCheck {
         check("list loaded", model.listLoaded && !model.snapshot.isEmpty)
         check("first row selected", model.cursor == model.snapshot.order.first)
         timeQueries()
+        previews()
         triage()
         multiSelect()
         clicks()
@@ -51,6 +52,14 @@ final class SelfCheck {
     }
 
     // MARK: Scenarios
+
+    private func previews() {
+        check("a preview that repeats the subject drops it",
+              ThreadRowView.preview("Priya mentioned you in Mobile app We're leaning", subject: "Priya mentioned you in Mobile app") == "We're leaning")
+        check("a preview that doesn't repeat the subject is kept",
+              ThreadRowView.preview("Hi Alex, the numbers", subject: "Q3 numbers") == "Hi Alex, the numbers")
+    }
+
 
     private func triage() {
         model.show(.inbox)
