@@ -11,7 +11,7 @@ public enum HTMLText {
     }
 
     private struct Renderer {
-        var out = String.UnicodeScalarView()
+        var out: [Unicode.Scalar] = []
         var pendingBreaks = 0
         var atLineStart = true
         var lastWasSpace = true
@@ -97,7 +97,7 @@ public enum HTMLText {
             case "a":
                 if tag.isClosing {
                     guard let href = links.popLast() ?? nil, let start = linkTextStart.popLast() else { break }
-                    let label = String(String.UnicodeScalarView(out.dropFirst(start)))
+                    let label = String(String.UnicodeScalarView(out[start...]))
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     var target = href
                     if target.lowercased().hasPrefix("mailto:") { target = String(target.dropFirst(7)) }
@@ -162,7 +162,7 @@ public enum HTMLText {
             guard pendingBreaks > 0 else { return }
             if !out.isEmpty {
                 for index in 0..<pendingBreaks {
-                    out.append("\n")
+                    out.append(Unicode.Scalar(10))
                     if index < pendingBreaks - 1 {
                         out.append(contentsOf: String(repeating: ">", count: min(quoteDepth, lineDepth)).unicodeScalars)
                     }
@@ -188,7 +188,7 @@ public enum HTMLText {
         }
 
         func finish() -> String {
-            let lines = String(out).components(separatedBy: "\n").map { line -> String in
+            let lines = String(String.UnicodeScalarView(out)).components(separatedBy: "\n").map { line -> String in
                 var line = Substring(line)
                 while line.last == " " { line = line.dropLast() }
                 return String(line)
