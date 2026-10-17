@@ -34,6 +34,8 @@ enum PaletteMode: Equatable {
 protocol ListPresenting: AnyObject {
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation)
     func selectionDidChange(scrollTo key: ThreadKey?)
+    /// Makes the list the first responder.
+    func takeKeyboard()
 }
 
 enum ListAnimation {
@@ -305,12 +307,18 @@ final class AppModel {
         }
     }
 
-    /// Enter / o: open the thread for reading.
+    /// Enter / o: open the thread for reading. In the open thread, Enter expands or collapses the
+    /// focused message.
     func open() {
         guard let cursor else { return }
+        if focus == .reader, services.reader.isActive {
+            services.reader.toggleMessage()
+            return
+        }
         focus = .reader
         if listOnly { readerExpanded = true }
         markRead([cursor])
+        services.reader.focus()
     }
 
     /// Esc: leave the reader, clear search, or clear the selection, in that order.
@@ -318,9 +326,15 @@ final class AppModel {
         if palette != nil { palette = nil; return }
         if showsShortcuts { showsShortcuts = false; return }
         if isSearching { endSearch(restoreFocus: true); return }
-        if readerExpanded { readerExpanded = false; focus = .list; return }
-        if focus == .reader { focus = .list; return }
+        if readerExpanded { readerExpanded = false; focusList(); return }
+        if focus == .reader { focusList(); return }
         clearSelection()
+    }
+
+    /// Gives the list the keyboard again.
+    func focusList() {
+        focus = .list
+        listView?.takeKeyboard()
     }
 
     func toggleSidebar() { prefs.sidebarCollapsed.toggle() }

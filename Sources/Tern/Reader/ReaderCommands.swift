@@ -16,6 +16,10 @@ final class ReaderCommands {
     /// Expands or collapses the focused message.
     func toggleMessage() { model?.toggleMessage() }
     func find() { model?.openFind() }
+    func findNext() { model?.findAgain(backwards: false) }
+    func findPrevious() { model?.findAgain(backwards: true) }
+    /// Moves keyboard focus into the conversation.
+    func focus() { model?.focusPage() }
     func printThread() { model?.printThread() }
     func reply(all: Bool = false) { model?.reply(all: all) }
     func forward() { model?.forward() }

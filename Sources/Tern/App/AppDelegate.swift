@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         let launch = Timing.begin("launch")
         Theme.registerFonts()
         NSApp.appearance = Preferences.shared.appearance.appearance
+        // Start the reader's web content process now, so it loads while the list fills.
+        ReaderWebEngine.prewarm()
 
         DemoReset.applyIfRequested(options)
         let database: AppDatabase
@@ -113,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             self.showMainWindow()
             self.model.reveal(key)
         }
+        ReaderWebEngine.shared.webView.didTakeFocus = { [weak model] in model?.focus = .reader }
     }
 
     // MARK: Windows

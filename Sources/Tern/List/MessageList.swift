@@ -127,6 +127,11 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         }
     }
 
+    func takeKeyboard() {
+        guard let window = table.window, window.firstResponder !== table else { return }
+        window.makeFirstResponder(table)
+    }
+
     func selectionDidChange(scrollTo key: ThreadKey?) {
         refreshVisibleRows()
         if let key, let index = snapshot.itemIndex[key] { reveal(index) }

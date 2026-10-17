@@ -72,8 +72,7 @@ final class MainMenu: NSObject, NSMenuItemValidation {
             .keyEquivalentModifierMask = [.command, .option]
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         menu.addItem(.separator())
-        let find = menu.addItem(withTitle: "Find in Conversation…", action: #selector(NSResponder.performTextFinderAction(_:)), keyEquivalent: "f")
-        find.tag = NSTextFinder.Action.showFindInterface.rawValue
+        addCommands(.edit, to: menu)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Emoji & Symbols", action: #selector(NSApplication.orderFrontCharacterPalette(_:)), keyEquivalent: " ")
             .keyEquivalentModifierMask = [.command, .control]

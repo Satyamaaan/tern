@@ -72,7 +72,6 @@ struct ReaderView: View {
             }
         }
         .background(Color(Theme.raised))
-        .background { ReaderShortcuts(model: model, enabled: key != nil) }
         .onChange(of: key, initial: true) {
             model.attach(services)
             model.show(key, prefetch: prefetch)
@@ -412,26 +411,5 @@ struct ReaderQuickReply: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-    }
-}
-
-/// ⌘F, ⌘G, ⇧⌘G, ⌘P and ⇧⌘S while a conversation is open.
-struct ReaderShortcuts: View {
-    let model: ReaderModel
-    let enabled: Bool
-
-    var body: some View {
-        ZStack {
-            Button("Find") { model.openFind() }.keyboardShortcut("f")
-            Button("Find Next") { model.find() }.keyboardShortcut("g")
-            Button("Find Previous") { model.find(backwards: true) }.keyboardShortcut("g", modifiers: [.command, .shift])
-            Button("Print") { model.printThread() }.keyboardShortcut("p")
-            Button("Summarize") { model.summaryClicked() }.keyboardShortcut("s", modifiers: [.command, .shift])
-        }
-        .disabled(!enabled)
-        .opacity(0)
-        .frame(width: 0, height: 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }

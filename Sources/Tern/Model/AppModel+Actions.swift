@@ -249,14 +249,24 @@ extension AppModel {
 
     func compose() { services.compose(.new(accountId: scope.accountId)) }
 
+    /// r / a: answers inline in the reader when it shows the thread, else in a composer window.
     func reply(all: Bool) {
         guard let key = readerKey else { return }
-        services.compose(.reply(key, all: all))
+        if openInReader(key) { services.reader.reply(all: all) } else { services.compose(.reply(key, all: all)) }
     }
 
+    /// f: forwards inline in the reader when it shows the thread, else in a composer window.
     func forward() {
         guard let key = readerKey else { return }
-        services.compose(.forward(key))
+        if openInReader(key) { services.reader.forward() } else { services.compose(.forward(key)) }
+    }
+
+    /// Whether the reader is on screen with `key` open, so replies can go inline. Moves focus there.
+    private func openInReader(_ key: ThreadKey) -> Bool {
+        let readerShown = !listOnly || readerExpanded
+        guard readerShown, services.reader.model?.key == key else { return false }
+        focus = .reader
+        return true
     }
 
     func markAllRead() {

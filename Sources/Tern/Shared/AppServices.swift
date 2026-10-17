@@ -60,6 +60,11 @@ final class AppServices {
     /// Mutes threads (archive now, keep later replies out of the inbox). Nil until sync supports it;
     /// the reader's Mute item is disabled meanwhile.
     var mute: (([ThreadKey]) -> Void)?
+    /// Downloads the bodies of a thread's messages stored without one. Set by sync; the reader calls
+    /// it when a thread opens and re-renders when they land.
+    var fetchBodies: ((ThreadKey) async throws -> Void)?
+    /// Asks sync for the bodies of the threads around the selection, when quota allows.
+    var prefetchBodies: (([ThreadKey]) -> Void)?
 
     init(store: MailStore) {
         self.store = store

@@ -65,8 +65,14 @@ final class KeyRouter {
             return nil
         }
 
+        // The conversation page has the keyboard: it moves between messages and answers Enter and Space
+        // on a focused link, attachment or quote itself.
+        if !hasCommand, Self.readerPageKeys.contains(where: { $0.matches(event) }), Self.readerHasKeyboard(event.window) {
+            return event
+        }
+
         for (shortcut, command) in bare where shortcut.matches(event) {
-            if command.yieldsToReader && model.focus == .reader { return event }
+            if command.yieldsToReader && model.focus == .reader { continue }
             guard model.palette == nil || command.id == "back" else { return event }
             if command.isEnabled() {
                 command.run()
@@ -130,6 +136,18 @@ final class KeyRouter {
         chordTimer?.invalidate()
         chordTimer = nil
         model.chordHUD = nil
+    }
+
+    // MARK: The reader
+
+    private static let readerPageKeys: [KeyShortcut] = [
+        .key("n"), .key("p"), .key("o"), .special(.returnKey), .special(.space),
+    ]
+
+    /// Whether the reader's web view (or something inside it) is the first responder.
+    static func readerHasKeyboard(_ window: NSWindow?) -> Bool {
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: ReaderWebEngine.shared.webView)
     }
 
     // MARK: Text input

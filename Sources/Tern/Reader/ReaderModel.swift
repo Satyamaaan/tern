@@ -37,7 +37,6 @@ final class ReaderModel {
     @ObservationIgnored private var renderedSignature: String?
     @ObservationIgnored private var openStarted: CFTimeInterval?
     @ObservationIgnored private var openInterval: OSSignpostIntervalState?
-    @ObservationIgnored private var markedRead: ThreadKey?
     @ObservationIgnored private var summary: SummaryState = .idle
     @ObservationIgnored private var summaryOpen = false
     @ObservationIgnored private var quickReplyTask: Task<Void, Never>?
@@ -93,6 +92,10 @@ final class ReaderModel {
         observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
             MainActor.assumeIsolated { self?.receive(detail, for: key) }
         }
+        // Older mail is stored without bodies; the observer re-renders when they land.
+        if let fetch = services.fetchBodies {
+            Task { try? await fetch(key) }
+        }
     }
 
     private func resetThreadState() {
@@ -108,7 +111,6 @@ final class ReaderModel {
         summaryOpen = false
         selectedAttachment = nil
         findPrepared = false
-        markedRead = nil
         renderedSignature = nil
         pickingSnoozeDate = false
         if let openInterval { Self.signposter.endInterval("Open thread", openInterval) }
@@ -136,7 +138,6 @@ final class ReaderModel {
         engine.setRemoteImages(allowed: detail.messages.contains { ReaderPayload.isTrusted($0, context) })
         engine.render(payload)
         loadBodies(deferred, key: key, context: context)
-        markReadIfNeeded(detail)
         if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
     }
 
@@ -172,16 +173,11 @@ final class ReaderModel {
         }
     }
 
-    private func markReadIfNeeded(_ detail: ThreadDetail) {
-        guard markedRead != detail.thread.key, detail.thread.unreadCount > 0, let services else { return }
-        let key = detail.thread.key
-        markedRead = key
-        DispatchQueue.main.async { services.perform(.markRead, [key]) }
-    }
-
-    /// Warms the body cache for the threads the user is likely to open next.
+    /// Warms the body cache for the threads the user is likely to open next, and asks sync for
+    /// bodies it hasn't stored yet.
     func prefetch(_ keys: [ThreadKey]) {
         guard let services, !keys.isEmpty else { return }
+        services.prefetchBodies?(keys)
         let store = services.store
         let trusted = Self.trustedSenders ?? []
         let mine = Set(services.accounts.map { $0.email.lowercased() })
@@ -532,6 +528,18 @@ final class ReaderModel {
 
     func openFind() {
         findVisible = true
+    }
+
+    /// ⌘G / ⇧⌘G: the next or previous match, opening the find bar when there is nothing to find yet.
+    func findAgain(backwards: Bool) {
+        if findText.isEmpty { openFind() } else { find(backwards: backwards) }
+    }
+
+    /// Gives the page the keyboard, so n/p, Enter, Space and arrows work inside the conversation.
+    func focusPage() {
+        let webView = engine.webView
+        guard let window = webView.window, window.firstResponder !== webView else { return }
+        window.makeFirstResponder(webView)
     }
 
     func find(backwards: Bool = false) {
