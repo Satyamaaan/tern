@@ -125,6 +125,7 @@ private struct OverlayShadow: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.14), radius: 15, y: 8)
+        // Composited first, so rows inside (a highlighted palette or dropdown row) don't cast their own.
+        content.compositingGroup().shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.14), radius: 15, y: 8)
     }
 }

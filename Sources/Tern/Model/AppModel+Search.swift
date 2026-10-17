@@ -120,6 +120,7 @@ extension AppModel {
         if let cached = searchHighlights[key] { return cached }
         guard let hit = searchHits[key] else { return nil }
         let highlight = RowHighlight(subject: hit.subjectHighlights, snippet: hit.snippet, snippetRanges: hit.highlights)
+            .leadingToMatch()
         searchHighlights[key] = highlight
         return highlight
     }
@@ -296,4 +297,23 @@ struct RowHighlight: Equatable {
     var subject: [NSRange]
     var snippet: String
     var snippetRanges: [NSRange]
+
+    /// Rows have room for a few dozen characters of excerpt, so start it a few words before the first
+    /// match (at a word boundary) instead of at the excerpt's own start.
+    func leadingToMatch(lead: Int = 18) -> RowHighlight {
+        guard let first = snippetRanges.map(\.location).min(), first > lead + 4 else { return self }
+        let text = snippet as NSString
+        var start = first - lead
+        func isSpace(_ index: Int) -> Bool { Unicode.Scalar(text.character(at: index)).map(CharacterSet.whitespaces.contains) ?? false }
+        while start < first, !isSpace(start - 1) { start += 1 }
+        guard start < first else { return self }
+        let prefix = "…"
+        let shift = (prefix as NSString).length - start
+        return RowHighlight(
+            subject: subject,
+            snippet: prefix + text.substring(from: start),
+            snippetRanges: snippetRanges.compactMap { range in
+                range.location >= start ? NSRange(location: range.location + shift, length: range.length) : nil
+            })
+    }
 }

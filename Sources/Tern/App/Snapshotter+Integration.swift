@@ -66,7 +66,7 @@ extension Snapshotter {
                                arguments: [other.accountId, other.threadId])
             }
             openForShot(other, window)
-            services.syncLine = SyncLine(text: "Older mail syncing in the background · 34%", tone: .quiet)
+            services.syncLine = SyncSummary.preview
             shot("reader-loading-light")
             services.syncLine = nil
         }

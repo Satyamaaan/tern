@@ -61,11 +61,12 @@ struct ReaderView: View {
             }
             if key != nil {
                 if let request = model.composing {
-                    VStack(spacing: 0) {
-                        Rectangle().fill(Color(Theme.hairline)).frame(height: 1)
-                        InlineComposerView(request: request, onClose: { model.composing = nil })
-                    }
-                    .frame(maxHeight: 420)
+                    // The card takes the reply pill's place and grows with its text.
+                    InlineComposerView(request: request, onClose: { model.composing = nil })
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 10)
+                        .padding(.bottom, 18)
                 } else {
                     ReaderReplyBar(model: model)
                 }

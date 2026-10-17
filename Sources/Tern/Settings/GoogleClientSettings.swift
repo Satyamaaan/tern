@@ -41,7 +41,7 @@ struct GoogleClientSection: View {
         VStack(alignment: .leading, spacing: 0) {
             GoogleClientFields(clientId: $clientId, clientSecret: $clientSecret)
             Text(stored == nil
-                 ? "Drop the client_secret….json file Google offered when you created the client, or paste its ID and secret."
+                 ? "Drop the client_secret_….json file Google offered when you created the client, or paste its ID and secret."
                  : "Accounts connected with the old client will ask you to sign in again.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
@@ -155,7 +155,7 @@ enum GoogleClientFile {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.prompt = "Use This Client"
-        panel.message = "Choose the client_secret….json file you downloaded from Google Cloud."
+        panel.message = "Choose the client_secret_….json file you downloaded from Google Cloud."
         let response = await withCheckedContinuation { continuation in
             panel.begin { continuation.resume(returning: $0) }
         }
@@ -165,7 +165,7 @@ enum GoogleClientFile {
 }
 
 extension View {
-    /// Accepts a dropped client_secret….json file.
+    /// Accepts a dropped client_secret_….json file.
     func googleClientFileDrop(_ handle: @escaping @MainActor (Data) -> Void) -> some View {
         dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first(where: { $0.pathExtension.lowercased() == "json" }),

@@ -136,7 +136,7 @@ struct SyncProgress: Hashable {
 /// The sidebar's one line of sync status.
 struct SyncLine: Hashable {
     enum Tone: Hashable {
-        /// Up to date, or work in the background: a quiet dot.
+        /// Work in the background, or waiting on Gmail: a quiet dot.
         case quiet
         /// The first sync of an account, which the user is waiting on.
         case working
@@ -146,6 +146,8 @@ struct SyncLine: Hashable {
 
     var text: String
     var tone: Tone
+    /// The longer form, shown on hover.
+    var detail: String?
 }
 
 enum ShellError: LocalizedError {

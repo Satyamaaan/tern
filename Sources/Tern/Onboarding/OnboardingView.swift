@@ -123,7 +123,7 @@ struct OnboardingView: View {
                     .buttonStyle(.plain)
                     .font(.ui(12, .medium))
                     .foregroundStyle(Color(Theme.accentInk))
-                Text("or drop the client_secret….json file here")
+                Text("or drop the client_secret_….json file here")
                     .font(.ui(12))
                     .foregroundStyle(Color(Theme.text3))
                 Spacer()

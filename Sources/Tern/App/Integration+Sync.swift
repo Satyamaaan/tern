@@ -150,9 +150,10 @@ enum SyncSummary {
             return SyncLine(text: phase.hasSuffix("…") ? phase : phase + "…", tone: .working)
         }
         if let backfill = statuses.first(where: { $0.state == .backfilling }) {
-            let text = backfill.background ?? "Older mail syncing in the background"
+            // The sidebar has room for one short line; the engine's own wording goes in the tooltip.
             let percent = backfill.backfillProgress.map { " · \(Int(($0 * 100).rounded(.down)))%" } ?? ""
-            return SyncLine(text: text + percent, tone: .quiet)
+            return SyncLine(text: "Older mail syncing" + percent, tone: .quiet,
+                            detail: (backfill.background ?? "Older mail syncing in the background") + percent)
         }
         return nil
     }
@@ -163,6 +164,9 @@ enum SyncSummary {
         guard !first.isEmpty else { return nil }
         return SyncProgress(done: first.reduce(0) { $0 + $1.fetched }, total: first.reduce(0) { $0 + ($1.total ?? 0) })
     }
+
+    /// A backfill line for snapshots.
+    static let preview = SyncLine(text: "Older mail syncing · 34%", tone: .quiet, detail: "Older mail syncing in the background · 34%")
 
     /// "40 s", "2 min".
     static func wait(_ seconds: TimeInterval) -> String {
