@@ -237,18 +237,23 @@ struct SearchExecutor {
     /// Weights per column: subject, sender, recipients, snippet, body.
     private static let bm25 = "bm25(message_fts, 10.0, 4.0, 2.0, 1.0, 1.0)"
 
-    /// Matching threads, best match first, each with its best-scoring message. Scoring every match costs
-    /// ~0.4 µs, so this is exact even for words that match most of the mailbox. It first takes the 4,000
-    /// best-scoring messages (a bounded sort is cheaper than sorting all of them), and widens to every match
-    /// only when filters leave the page short.
+    /// Most full-text matches worth ranking. A word that matches more than this (40% of a 50,000-message
+    /// mailbox: `the`, `t`, `th`) tells nothing apart by score, and scoring them all would cost over 20 ms.
+    static let rankCap = 20_000
+
+    /// Matching threads, best match first, each with its best-scoring message. Scoring a match costs ~0.4 µs,
+    /// so this is exact for every selective query. It first takes the 4,000 best-scoring messages (a bounded
+    /// sort is cheaper than sorting all of them), and widens to every match only when filters leave the page
+    /// short. Words that match almost everything are returned newest first instead.
     func runRanked() throws -> [Found] {
         guard let fts = compiled.fts else { return try run(try choosePlan()) }
+        let matches = try Int.fetchOne(db, sql: "SELECT count(*) FROM (SELECT 1 FROM message_fts WHERE message_fts MATCH ? LIMIT ?)",
+                                       arguments: [fts, Self.rankCap + 1]) ?? 0
+        if matches > Self.rankCap { return try run(try choosePlan()) }
         let firstPool = 4_000
         let ordered = try ranked(fts, pool: firstPool)
-        if ordered.count >= limit { return ordered }
-        // Short page: only widen when the first round actually left matches out.
-        let matches = try countFTS(fts)
-        return matches <= firstPool ? ordered : try ranked(fts, pool: 1_000_000)
+        // A short page widens the search only if the first round actually left matches out.
+        return ordered.count >= limit || matches <= firstPool ? ordered : try ranked(fts, pool: 1_000_000)
     }
 
     private func ranked(_ fts: String, pool: Int) throws -> [Found] {

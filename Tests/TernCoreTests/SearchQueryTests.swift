@@ -183,7 +183,7 @@ private func makeFixture() throws -> Fixture {
     let f = try makeFixture()
     #expect(try f.ids("to:hotel") == ["t5"])
     #expect(try f.ids("to:maya") == ["t9"])
-    #expect(try f.ids("to:carol") == ["t3"])            // to: also finds cc'd and bcc'd people, like Gmail
+    #expect(try f.ids("to:carol") == ["t3"])            // to: also finds cc'd and bcc'd people (the index keeps one recipients column)
     #expect(try f.ids("cc:carol") == ["t3"])
     #expect(try f.ids("cc:dave") == [])
     #expect(try f.ids("bcc:dave") == ["t3"])

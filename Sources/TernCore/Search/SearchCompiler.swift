@@ -5,7 +5,8 @@ public enum SearchSort: Sendable {
     /// Most recently active thread first.
     case newest
     /// Best bm25 match first (subject counts most, then sender, recipients, snippet and body), later-stored
-    /// messages first among equals. Exact for every query; costs a little more for words that match most mail.
+    /// messages first among equals. A query whose words match over 20,000 messages (`the`, `th`) has nothing to
+    /// rank by and is returned newest first.
     case relevance
 }
 
