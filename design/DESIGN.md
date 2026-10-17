@@ -166,7 +166,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
   - **Avatar**: the sender's domain logo (`SenderLogos`, full bleed on a white disc with a faint ring), else
     one initial on `avatarFill` (or the account hue when several accounts share the list). Logos are asked for
-    as rows come into view, never in Spam or Trash; rows on screen refresh when one arrives.
+    as rows come into view; rows on screen refresh when one arrives. Spam and Trash show initials only (no
+    fetch, no cached logo), in the list and the reader.
   - **Tags**: outline chips, 20 px tall, radius 4, 1 px `hairlineStrong`, 12 px coloured icon, label Inter 11.5
     500 `text2`. Needs reply (ink reply icon) first, then the project or the category (not People/Other). Two
     at most on one line, one on two lines; dropped before they squeeze the subject.
