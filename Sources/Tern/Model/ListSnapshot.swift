@@ -5,8 +5,6 @@ import TernCore
 enum ListItem: Hashable {
     /// A sticky caps header, e.g. "TODAY".
     case header(String)
-    /// The dashed line under the needs-reply group, with that group's size.
-    case waterline(Int)
     case thread(ThreadKey)
     /// The quiet last row of search results that asks Gmail for older mail, with its current text.
     case serverSearch(String)
@@ -17,7 +15,7 @@ enum ListItem: Hashable {
     }
 }
 
-/// The list as displayed: rows in order plus group headers, with lookups for keyboard movement.
+/// The list as displayed: rows in order plus date headers, with lookups for keyboard movement.
 struct ListSnapshot {
     private(set) var items: [ListItem] = []
     private(set) var rows: [ThreadKey: ThreadRow] = [:]
@@ -25,30 +23,13 @@ struct ListSnapshot {
     private(set) var order: [ThreadKey] = []
     private(set) var position: [ThreadKey: Int] = [:]
     private(set) var itemIndex: [ThreadKey: Int] = [:]
-    /// Size of the needs-reply group at the top, if any.
-    private(set) var needsReplyCount = 0
 
     static let empty = ListSnapshot()
 
     init() {}
 
-    init(rows input: [ThreadRow], needsReplyFirst: Bool, groupsByDate: Bool, footer: ListItem? = nil,
-         now: Date = Date(), calendar: Calendar = .current) {
-        var waiting: ArraySlice<ThreadRow> = []
-        var rest = input[...]
-        if needsReplyFirst {
-            let split = input.firstIndex(where: { !$0.needsReply }) ?? input.endIndex
-            waiting = input[..<split]
-            rest = input[split...]
-        }
-
-        if !waiting.isEmpty {
-            items.append(.header("NEEDS REPLY"))
-            for row in waiting { append(row) }
-            needsReplyCount = waiting.count
-            if !rest.isEmpty { items.append(.waterline(waiting.count)) }
-        }
-
+    init(rows input: [ThreadRow], groupsByDate: Bool, footer: ListItem? = nil, now: Date = Date(), calendar: Calendar = .current) {
+        let rest = input[...]
         if groupsByDate {
             let buckets = DateBuckets(now: now, calendar: calendar)
             var emitted = Set<String>()

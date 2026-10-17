@@ -57,10 +57,10 @@ struct Snapshotter {
         model.toasts = []
 
 
-        model.toggleListOnly()
-        shot("wide-one-line-light")
-        shot("wide-one-line-dark", dark: true)
-        model.toggleListOnly()
+        model.toggleReadingPane()
+        shot("reading-pane-light")
+        shot("reading-pane-dark", dark: true)
+        model.toggleReadingPane()
 
         model.searchText = "invoice"
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
@@ -72,15 +72,7 @@ struct Snapshotter {
             model.setScope(.account(account.id))
             model.prefs.moreExpanded = true
             shot("one-account-light")
-            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            if let index = model.snapshot.items.firstIndex(where: { if case .waterline = $0 { true } else { false } }), let list {
-                let rect = list.table.rect(ofRow: index)
-                list.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY - 360)))
-                list.scrollView.reflectScrolledClipView(list.scrollView.contentView)
-                shot("waterline-light")
-                shot("waterline-dark", dark: true)
-                list.scrollView.contentView.scroll(to: .zero)
-            }
+            shot("one-account-dark", dark: true)
             model.prefs.moreExpanded = wasExpanded
             model.setScope(.all)
         }
@@ -92,9 +84,10 @@ struct Snapshotter {
         shot("chord-light")
         model.chordHUD = nil
 
-        model.prefs.sidebarCollapsed = true
-        shot("sidebar-collapsed-light")
-        model.prefs.sidebarCollapsed = false
+        model.prefs.sidebarOpen = true
+        shot("sidebar-open-light")
+        shot("sidebar-open-dark", dark: true)
+        model.prefs.sidebarOpen = false
 
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-light.png"), dark: false)
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-dark.png"), dark: true)

@@ -26,8 +26,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private let hoverBar: NSHostingView<RowHoverBar>
     private var lastWidth: CGFloat = 0
 
-    static let headerHeight: CGFloat = 30
-    static let waterlineHeight: CGFloat = 16
+    static let headerHeight: CGFloat = 34
     static let footerHeight: CGFloat = 44
 
     init(model: AppModel) {
@@ -171,7 +170,6 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard items.indices.contains(row) else { return style.height }
         switch items[row] {
         case .header: return Self.headerHeight
-        case .waterline: return Self.waterlineHeight
         case .thread: return style.height
         case .serverSearch: return Self.footerHeight
         }
@@ -191,11 +189,6 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             let view = tableView.makeView(withIdentifier: .init("header"), owner: nil) as? HeaderRowView ?? HeaderRowView()
             view.identifier = .init("header")
             view.title = title
-            return view
-        case .waterline(let count):
-            let view = tableView.makeView(withIdentifier: .init("waterline"), owner: nil) as? WaterlineRowView ?? WaterlineRowView()
-            view.identifier = .init("waterline")
-            view.count = count
             return view
         case .thread:
             let view = tableView.makeView(withIdentifier: .init("thread"), owner: nil) as? ThreadRowView ?? ThreadRowView()
@@ -223,13 +216,14 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let windowActive = table.window.map { $0.isKeyWindow || !$0.isVisible } ?? true
         result.hasFocusRing = key == model.cursor && model.focus == .list && windowActive && !model.searchFieldFocused
         result.isHovered = index == hoveredRow
-        if model.scope == .all, let account = model.account(key.accountId), model.accounts.count > 1 {
-            result.accountColor = Theme.accountColor(account.colorIndex)
+        result.avatar = avatar(for: row)
+        if row.needsReply, model.kind != .needsReply {
+            result.chips.append(RowChip(text: "Needs reply", icon: .needsReply, tint: .ink))
         }
         if let project = row.projectIds.lazy.compactMap({ self.model.project($0) }).first {
-            result.chip = (project.name, Theme.projectColor(project.colorIndex))
+            result.chips.append(RowChip(text: project.name, icon: Icon.project(project.icon), tint: .project(project.colorIndex)))
         } else if let category = row.category, category.showsChip {
-            result.chip = (category.title, Theme.categoryColor(category))
+            result.chips.append(RowChip(text: category.title, icon: Icon.category(category), tint: .category(category)))
         }
         if case .snoozed = model.kind, !model.isSearching, let until = row.snoozedUntil {
             result.timeOverride = SnoozeOption.detailText(until)
@@ -239,6 +233,27 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         }
         if model.isSearching { result.highlight = model.highlight(for: key) }
         return result
+    }
+
+    /// The sender's domain logo, else initials (in the account's hue when several accounts share the
+    /// list). Asks for logos as rows come into view, except in Spam and Trash: fetching a logo tells the
+    /// sender's domain this Mac's address, like a tracking pixel.
+    private func avatar(for row: ThreadRow) -> RowAvatar {
+        let thread = row.thread
+        let sender = RowFormat.avatarParticipant(thread)
+        let email = sender?.email ?? thread.accountId
+        let logos = SenderLogos.shared
+        if sender != nil {
+            if !Self.isQuarantined(thread, in: model.kind) { logos.want(email) }
+            if let image = logos.logo(forEmail: email) { return .logo(image) }
+        }
+        let tinted = model.scope == .all && model.accounts.count > 1 ? model.account(thread.accountId)?.colorIndex : nil
+        let name = sender?.name ?? model.account(thread.accountId)?.displayName ?? ""
+        return .letters(Avatar.initials(name: name, email: email), account: tinted)
+    }
+
+    private static func isQuarantined(_ thread: MailThread, in kind: Mailbox.Kind) -> Bool {
+        kind == .spam || kind == .trash || thread.labelIds.contains(SystemLabel.spam) || thread.labelIds.contains(SystemLabel.trash)
     }
 
     // MARK: Width, density, preferences
@@ -272,6 +287,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             _ = model.accounts
             _ = model.focus
             _ = model.searchFieldFocused
+            // A logo arrived: refresh the rows on screen; only those whose picture changed redraw.
+            _ = SenderLogos.shared.revision
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -332,10 +349,11 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             return
         }
         let rect = table.rect(ofRow: row)
-        let size = CGSize(width: 80, height: 24)
+        let column = ListLayout.column(in: rect)
+        let size = CGSize(width: ThreadRowView.hoverWidth, height: 24)
         let centerY = style == .oneLine ? rect.midY : rect.minY + 18
         hoverBar.rootView = RowHoverBar(model: model, keys: targets(for: key))
-        hoverBar.frame = CGRect(x: rect.maxX - ThreadRowView.inset - 6 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
+        hoverBar.frame = CGRect(x: column.maxX - 4 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
         // Row views are added after the bar; keep the bar on top of them.
         if table.subviews.last !== hoverBar { table.addSubview(hoverBar, positioned: .above, relativeTo: nil) }
         hoverBar.isHidden = false

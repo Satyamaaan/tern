@@ -62,11 +62,10 @@ final class AppModel {
 
     var scope: Scope = .all
     var kind: Mailbox.Kind = .inbox
-    var split: InboxSplit = .important
+    /// The inbox's category tab; nil is the whole inbox (All).
+    var split: InboxSplit?
     var focus: Focus = .list
-    /// List-only layout (⌘⇧\): the reader takes the full width while a thread is open.
-    var listOnly = false
-    /// In list-only layout, whether the open thread fills the window.
+    /// Without the reading pane, whether the open thread covers the list.
     var readerExpanded = false
 
     // MARK: Search
@@ -74,7 +73,7 @@ final class AppModel {
     var searchText = "" { didSet { if searchText != oldValue { searchTextChanged() } } }
     /// The list shows search results instead of the mailbox.
     var isSearching = false
-    /// Mirrors the search pill's focus.
+    /// Mirrors the search field's focus.
     var searchFieldFocused = false
     /// The dropdown under the search pill: people, labels, projects, operators, recent searches.
     var suggestions: [SearchSuggestion] = []
@@ -161,7 +160,7 @@ final class AppModel {
         self.store = services.store
         self.isFake = isFake
         self.databaseURL = databaseURL
-        self.source = ListSource(mailbox: .unifiedInbox, split: Preferences.shared.splitInbox ? .important : nil)
+        self.source = ListSource(mailbox: .unifiedInbox, split: nil)
     }
 
     // MARK: Derived
@@ -177,10 +176,14 @@ final class AppModel {
         }
     }
 
-    var showsSplits: Bool {
-        guard !isSearching, prefs.splitInbox, case .inbox = kind else { return false }
-        return true
-    }
+    /// The list fills the window and the open thread covers it (no reading pane, ⌘\).
+    var listOnly: Bool { !prefs.readingPane }
+
+    /// The reader is on screen: beside the list, or over it.
+    var readerVisible: Bool { prefs.readingPane || readerExpanded }
+
+    /// The search field shows above the list while it has focus or a query.
+    var searchShown: Bool { searchFieldFocused || !searchText.isEmpty }
 
     var scopedAccount: Account? { scope.accountId.flatMap { id in accounts.first { $0.id == id } } }
 
@@ -196,17 +199,6 @@ final class AppModel {
     func isSelected(_ key: ThreadKey) -> Bool { key == cursor || checked.contains(key) }
 
     func row(_ key: ThreadKey) -> ThreadRow? { snapshot.rows[key] }
-
-    /// Dots in the Flock: threads in this list that need you (unread or needs reply).
-    var flockCount: Int? {
-        if isSearching { return nil }
-        if let filter = source.inboxFilter { return counts.needingAction(in: filter) }
-        switch kind {
-        case .needsReply: return counts.needsReply
-        case .project(let id): return counts.projectUnread[id] ?? 0
-        default: return nil
-        }
-    }
 
     func unreadCount(_ split: InboxSplit) -> Int { counts.unread(in: split.filter(accountId: scope.accountId)) }
 
@@ -233,23 +225,21 @@ final class AppModel {
         reloadList()
     }
 
-    func showSplit(_ split: InboxSplit) {
+    /// Shows the inbox, or one of its category tabs.
+    func showSplit(_ split: InboxSplit?) {
         if isSearching { endSearch(restoreFocus: false) }
+        focus = .list
+        readerExpanded = false
+        let split = prefs.splitInbox ? split : nil
         if case .inbox = kind, self.split == split { return }
         self.split = split
         kind = .inbox
         reloadList()
     }
 
-    func cycleSplit(_ step: Int) {
-        guard showsSplits else { return }
-        let all = InboxSplit.allCases
-        let index = all.firstIndex(of: split) ?? 0
-        showSplit(all[(index + step + all.count) % all.count])
-    }
-
     func setSplitInbox(_ enabled: Bool) {
         prefs.splitInbox = enabled
+        if !enabled { split = nil }
         reloadList()
     }
 
@@ -283,7 +273,8 @@ final class AppModel {
             checked = []
             setCursor(key, open: true)
             recordSearch()
-            openDraft(key)
+            // Without the reading pane a click opens the thread over the list, like Enter.
+            if !openDraft(key), listOnly { open() }
         }
     }
 
@@ -369,12 +360,13 @@ final class AppModel {
         listView?.takeKeyboard()
     }
 
-    func toggleSidebar() { prefs.sidebarCollapsed.toggle() }
+    func toggleSidebar() { prefs.sidebarOpen.toggle() }
 
-    func toggleListOnly() {
-        listOnly.toggle()
+    /// ⌘\: the reading pane beside the list, or the reader opening over it.
+    func toggleReadingPane() {
+        prefs.readingPane.toggle()
         readerExpanded = false
-        focus = .list
+        if focus == .reader && !prefs.readingPane { focusList() }
     }
 
     // MARK: Mark read on open

@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import TernCore
 
-/// The split-inbox tabs. "Important" is people, needs reply, calendar, security and anything the
+/// The inbox's category tabs. "Important" is people, needs reply, calendar, security and anything the
 /// classifier hasn't seen yet, so new mail is never hidden behind a tab.
 enum InboxSplit: String, CaseIterable, Identifiable, Sendable {
     case important, people, notifications, newsletters, other
@@ -34,19 +34,13 @@ enum InboxSplit: String, CaseIterable, Identifiable, Sendable {
 /// What the list column reads. One value per screen state; the list observation restarts when it changes.
 struct ListSource: Hashable, Sendable {
     var mailbox: Mailbox
-    /// The split tab, when the mailbox is the inbox and split inbox is on.
+    /// The category tab, when the mailbox is the inbox and split inbox is on; nil is the whole inbox.
     var split: InboxSplit?
 
     /// Inbox slice for inbox-backed lists.
     var inboxFilter: InboxFilter? {
         guard case .inbox = mailbox.kind else { return nil }
         return split?.filter(accountId: mailbox.accountId) ?? InboxFilter(accountId: mailbox.accountId)
-    }
-
-    /// Inbox and the Important tab show threads waiting on you first, above the waterline.
-    var needsReplyFirst: Bool {
-        guard case .inbox = mailbox.kind else { return false }
-        return split == nil || split == .important
     }
 
     /// Lists sorted by something other than date get no date groups.
@@ -59,14 +53,7 @@ struct ListSource: Hashable, Sendable {
         guard let filter = inboxFilter else {
             return try MailStore.fetchThreadRows(db, in: mailbox, limit: limit, before: nil)
         }
-        guard needsReplyFirst else { return try MailStore.fetchInboxRows(db, filter, limit: limit) }
-        var waiting = filter
-        waiting.needsReply = .only
-        var rest = filter
-        rest.needsReply = .exclude
-        let first = try MailStore.fetchInboxRows(db, waiting, limit: limit)
-        guard first.count < limit else { return first }
-        return first + (try MailStore.fetchInboxRows(db, rest, limit: limit - first.count))
+        return try MailStore.fetchInboxRows(db, filter, limit: limit)
     }
 }
 
@@ -89,7 +76,7 @@ extension Mailbox.Kind {
         }
     }
 
-    /// One serif line shown when the list is empty.
+    /// The one line shown when the list is empty.
     var emptyLine: String {
         switch self {
         case .inbox: "Nothing needs you."

@@ -259,16 +259,24 @@ final class SelfCheck {
         model.show(.inbox)
         model.showSplit(.important)
         wait(0.1)
-        model.cycleSplit(1)
+        model.cycleTab(1)
         wait(0.1)
         check("tab moves to People", model.split == .people)
         check("People holds only people", model.snapshot.order.allSatisfy { model.row($0)?.category == .people })
-        model.cycleSplit(-2)
-        check("⇧tab wraps to Other", model.split == .other)
-        model.showSplit(.important)
+        model.cycleTab(-2)
         wait(0.1)
-        let firstGroup = model.snapshot.items.first
-        check("Important starts with NEEDS REPLY", firstGroup == .header("NEEDS REPLY"))
+        check("⇧tab twice goes back to Needs reply", model.activeTab == .needsReply)
+        check("Needs reply lists only threads waiting on you",
+              !model.snapshot.isEmpty && model.snapshot.order.allSatisfy { model.row($0)?.needsReply == true })
+        model.cycleTab(-2)
+        check("⇧tab wraps past All to the last tab", model.activeTab == model.tabs.last)
+        model.select(.all)
+        wait(0.1)
+        if case .header = model.snapshot.items.first {
+            check("All starts with a date group", true)
+        } else {
+            check("All starts with a date group", false)
+        }
     }
 
     private func scope() {
@@ -354,7 +362,7 @@ final class SelfCheck {
         _ = try? store.scopeCounts(accountId: nil)
         print(String(format: "  scope counts: %.1f ms", Timing.end(interval)))
         interval = Timing.begin("snapshot")
-        _ = ListSnapshot(rows: model.rawRows, needsReplyFirst: true, groupsByDate: true)
+        _ = ListSnapshot(rows: model.rawRows, groupsByDate: true)
         print(String(format: "  list snapshot build: %.2f ms", Timing.end(interval)))
     }
 

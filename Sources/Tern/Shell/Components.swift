@@ -17,7 +17,7 @@ struct Hairline: View {
 struct IconButton: View {
     let icon: Icon
     var size: CGFloat = Theme.Control.regular
-    var iconSize: CGFloat = 15
+    var iconSize: CGFloat = 16
     var help: String = ""
     let action: () -> Void
 
@@ -206,24 +206,17 @@ struct CapsLabel: View {
     }
 }
 
-/// The project's SF Symbol (or emoji), tinted with its colour on a 16% tint square.
+/// The project's icon (or emoji) in its colour: a tag icon, so it carries the project's hue.
 struct ProjectGlyph: View {
     let project: Project
-    var size: CGFloat = 15
+    var size: CGFloat = 16
 
     var body: some View {
-        let color = Color(Theme.projectColor(project.colorIndex))
-        ZStack {
-            RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.16))
-            if let icon = project.icon, icon.unicodeScalars.first?.properties.isEmojiPresentation == true {
-                Text(icon).font(.system(size: size * 0.62))
-            } else {
-                Image(systemName: project.icon ?? "folder")
-                    .font(.system(size: size * 0.55, weight: .semibold))
-                    .foregroundStyle(color)
-            }
+        if let icon = project.icon, icon.unicodeScalars.first?.properties.isEmojiPresentation == true {
+            Text(icon).font(.system(size: size * 0.8)).frame(width: size, height: size)
+        } else {
+            IconView(icon: Icon.project(project.icon), size: size, color: Color(Theme.projectColor(project.colorIndex)))
         }
-        .frame(width: size, height: size)
     }
 }
 

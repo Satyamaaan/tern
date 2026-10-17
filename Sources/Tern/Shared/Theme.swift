@@ -36,6 +36,10 @@ enum Theme {
     /// Letter avatars: initials on a soft neutral disc.
     static let avatarFill = dynamic(light: 0xE8E8E4, dark: 0x2E2E2E)
     static let avatarText = dynamic(light: 0x55554F, dark: 0xB4B4AE)
+    /// The faint edge around logo avatars.
+    static let avatarRing = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white.withAlphaComponent(0.14) : .black.withAlphaComponent(0.1)
+    }
 
     /// The small colour on tab and tag icons, the only hue in the chrome. Labels stay `text2`; "needs
     /// reply" stays `ink`, because what needs you reads through ink, not colour.

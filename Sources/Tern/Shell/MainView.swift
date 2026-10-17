@@ -2,9 +2,11 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The main window: sidebar 232 · list (resizable) · reader, with the palette and sheets on top.
+/// The main window, list first: the title bar's tabs over the list, the sidebar behind a toggle, and the
+/// open thread over the list (or beside it with the reading pane, ⌘\). Palette and sheets on top.
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let palette: PaletteController
 
     static let sidebarWidth: CGFloat = 232
@@ -12,29 +14,19 @@ struct MainView: View {
     static let readerMinWidth: CGFloat = 420
 
     var body: some View {
-        GeometryReader { geometry in
-            let sidebar = model.prefs.sidebarCollapsed ? 0 : Self.sidebarWidth + 1
-            let available = geometry.size.width - sidebar
-            let listWidth = clampedListWidth(available: available)
-            HStack(spacing: 0) {
-                if !model.prefs.sidebarCollapsed {
-                    SidebarView()
-                        .frame(width: Self.sidebarWidth)
-                        .transition(.move(edge: .leading))
-                    Hairline(vertical: true)
-                }
-                // The list keeps one place in the view tree in every layout, so the table (and its
-                // scroll position) survives ⌘⇧\ and ⌘\.
-                let listHidden = model.listOnly && model.readerExpanded
-                ListColumn(leadingInset: model.prefs.sidebarCollapsed ? 64 : 0)
-                    .frame(width: model.listOnly ? (listHidden ? 0 : max(available, 0)) : listWidth)
-                    .clipped()
-                    .allowsHitTesting(!listHidden)
-                if !model.listOnly {
-                    ColumnDivider(width: listWidth, available: available)
-                }
-                if !model.listOnly || model.readerExpanded {
-                    ReaderColumn()
+        VStack(spacing: 0) {
+            TitleBar()
+            GeometryReader { geometry in
+                let sidebar = model.prefs.sidebarOpen ? Self.sidebarWidth + 1 : 0
+                let available = max(geometry.size.width - sidebar, 0)
+                HStack(spacing: 0) {
+                    if model.prefs.sidebarOpen {
+                        SidebarView()
+                            .frame(width: Self.sidebarWidth)
+                            .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+                        Hairline(vertical: true)
+                    }
+                    content(available: available)
                 }
             }
         }
@@ -43,15 +35,53 @@ struct MainView: View {
         .ignoresSafeArea()
         .overlay(alignment: .top) { overlays }
         .overlay(alignment: .bottom) { chordHUD }
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: model.prefs.sidebarCollapsed)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: model.listOnly)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: model.readerExpanded)
+        .animation(paneAnimation, value: model.prefs.sidebarOpen)
+        .animation(paneAnimation, value: model.prefs.readingPane)
+        .animation(paneAnimation, value: model.readerExpanded)
         .sheet(item: projectEditorBinding) { draft in
             ProjectEditor(draft: draft).environment(model)
         }
         .sheet(isPresented: snoozePickerShown) {
             SnoozeDateSheet().environment(model).environment(model.services)
         }
+    }
+
+    /// The list and the reader. Both keep one place in the view tree in every layout, so the table (and
+    /// its scroll position) and the reader's page survive ⌘\ and opening a thread: without the pane the
+    /// reader lies over the list, transparent until a thread opens.
+    private func content(available: CGFloat) -> some View {
+        let pane = model.prefs.readingPane
+        let listWidth = pane ? clampedListWidth(available: available) : available
+        let readerShown = model.readerVisible
+        return ZStack(alignment: .topLeading) {
+            ListColumn()
+                .frame(width: listWidth)
+                .allowsHitTesting(pane || !model.readerExpanded)
+                .accessibilityHidden(!pane && model.readerExpanded)
+            if pane {
+                ColumnDivider(width: listWidth, available: available)
+                    .offset(x: listWidth)
+            }
+            ReaderColumn(surface: pane ? Theme.raised : Theme.bg)
+                .frame(width: pane ? max(available - listWidth - 1, 0) : available)
+                .offset(x: pane ? listWidth + 1 : (readerShown || reduceMotion ? 0 : 12))
+                .opacity(readerShown ? 1 : 0)
+                .allowsHitTesting(readerShown)
+                .accessibilityHidden(!readerShown)
+        }
+        .frame(width: available, alignment: .topLeading)
+        .clipped()
+        .overlay(alignment: .bottom) {
+            ToastStack()
+                .padding(.bottom, model.readerExpanded || pane ? 24 : 24 + BottomBar.height + 12)
+                .frame(width: pane ? listWidth : available)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Pane changes spring; with Reduce Motion they crossfade.
+    private var paneAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.08) : .spring(response: 0.32, dampingFraction: 0.86)
     }
 
     private func clampedListWidth(available: CGFloat) -> CGFloat {
@@ -139,9 +169,11 @@ private struct ColumnDivider: View {
     }
 }
 
-/// The reader column: the reader lane's view, or a quiet summary when several threads are selected.
+/// The reader column: the open thread, or a quiet summary when several threads are selected.
 struct ReaderColumn: View {
     @Environment(AppModel.self) private var model
+    /// `raised` beside the list, `bg` over it.
+    var surface: NSColor = Theme.raised
 
     var body: some View {
         Group {
@@ -151,8 +183,8 @@ struct ReaderColumn: View {
                 ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition)
             }
         }
-        .frame(minWidth: MainView.readerMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(Theme.raised))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(surface))
         .simultaneousGesture(TapGesture().onEnded { model.focus = .reader })
     }
 }

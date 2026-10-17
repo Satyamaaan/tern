@@ -48,8 +48,14 @@ final class Preferences {
     var notificationsEnabled: Bool { didSet { save("notifications", notificationsEnabled) } }
     var notifyOnlyImportant: Bool { didSet { save("notifyOnlyImportant", notifyOnlyImportant) } }
     var splitInbox: Bool { didSet { save("splitInbox", splitInbox) } }
-    var sidebarCollapsed: Bool { didSet { save("sidebarCollapsed", sidebarCollapsed) } }
+    /// The mailbox sidebar, hidden behind the bottom bar's toggle by default.
+    var sidebarOpen: Bool { didSet { save("sidebarOpen", sidebarOpen) } }
+    /// ⌘\: list and reader side by side instead of the reader opening over the list.
+    var readingPane: Bool { didSet { save("readingPane", readingPane) } }
+    /// Width of the list next to the reading pane.
     var listWidth: Double { didSet { save("listWidth", listWidth) } }
+    /// Tabs the user pinned after the inbox tabs, as `ListTab.pinKey` strings.
+    var pinnedTabs: [String] { didSet { save("pinnedTabs", pinnedTabs) } }
     var moreExpanded: Bool { didSet { save("moreExpanded", moreExpanded) } }
     /// Palette command ids, most recent first.
     var recentCommands: [String] { didSet { save("recentCommands", recentCommands) } }
@@ -61,8 +67,10 @@ final class Preferences {
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         notifyOnlyImportant = defaults.object(forKey: "notifyOnlyImportant") as? Bool ?? true
         splitInbox = defaults.object(forKey: "splitInbox") as? Bool ?? true
-        sidebarCollapsed = defaults.bool(forKey: "sidebarCollapsed")
+        sidebarOpen = defaults.bool(forKey: "sidebarOpen")
+        readingPane = defaults.bool(forKey: "readingPane")
         listWidth = defaults.object(forKey: "listWidth") as? Double ?? 452
+        pinnedTabs = defaults.stringArray(forKey: "pinnedTabs") ?? []
         moreExpanded = defaults.bool(forKey: "moreExpanded")
         recentCommands = defaults.stringArray(forKey: "recentCommands") ?? []
     }
