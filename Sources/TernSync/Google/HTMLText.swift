@@ -96,11 +96,17 @@ public enum HTMLText {
                 if !tag.isClosing, !atLineStart, pendingBreaks == 0 { raw("  ") }
             case "a":
                 if tag.isClosing {
-                    guard let href = links.popLast() ?? nil, let start = linkTextStart.popLast() else { break }
-                    let label = String(String.UnicodeScalarView(out[start...]))
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let link = links.popLast(), let start = linkTextStart.popLast(), let href = link else { break }
                     var target = href
                     if target.lowercased().hasPrefix("mailto:") { target = String(target.dropFirst(7)) }
+                    // Only a label about as long as the URL can equal it; don't copy long ones.
+                    let labelLength = out.count - min(start, out.count)
+                    guard labelLength <= href.count + 8 else {
+                        raw(" (\(target))")
+                        break
+                    }
+                    let label = String(String.UnicodeScalarView(out[min(start, out.count)...]))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
                     if !label.isEmpty, label != target, label != href {
                         raw(" (\(target))")
                     } else if label.isEmpty {

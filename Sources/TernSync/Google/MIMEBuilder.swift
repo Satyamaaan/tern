@@ -66,7 +66,7 @@ public struct MIMEBuilder {
             for (attachment, contentId) in inline {
                 images.append(try filePart(attachment, disposition: "inline", contentId: contentId))
             }
-            htmlPart = multipart("related", [htmlPart] + images, extra: "; type=\"text/html\"")
+            htmlPart = multipart("related", [htmlPart] + images, extra: ";\r\n type=\"text/html\"")
         }
         var body = multipart("alternative", [textPart(plain, subtype: "plain"), htmlPart])
         if !regular.isEmpty {
@@ -123,8 +123,8 @@ public struct MIMEBuilder {
         } else {
             // Encoded words in `name` are not standard (RFC 2047 excludes parameters) but are what
             // older clients read; the RFC 2231 filename below is the real one.
-            let words = MIMEEncoding.encodedWords(MIMEEncoding.sanitize(filename)).joined(separator: " ")
-            if words.count < 900 { part += ";\r\n name=\"\(words)\"" }
+            let words = MIMEEncoding.encodedWords(MIMEEncoding.sanitize(filename))
+            if words.count <= 12 { part += ";\r\n name=\"" + words.joined(separator: "\r\n ") + "\"" }
         }
         part += "\r\n"
         part += "Content-Disposition: \(disposition)" + MIMEEncoding.parameter("filename", filename) + "\r\n"
@@ -136,7 +136,7 @@ public struct MIMEBuilder {
 
     private func multipart(_ subtype: String, _ parts: [String], extra: String = "") -> String {
         let boundary = "tern-\(subtype)-\(makeToken())"
-        var text = "Content-Type: multipart/\(subtype); boundary=\"\(boundary)\"\(extra)\r\n\r\n"
+        var text = "Content-Type: multipart/\(subtype);\r\n boundary=\"\(boundary)\"\(extra)\r\n\r\n"
         for part in parts {
             text += "--\(boundary)\r\n" + part
             if !part.hasSuffix("\r\n") { text += "\r\n" }

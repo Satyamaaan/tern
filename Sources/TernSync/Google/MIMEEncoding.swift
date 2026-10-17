@@ -20,15 +20,15 @@ enum MIMEEncoding {
         text.utf8.allSatisfy { $0 >= 0x20 && $0 < 0x7F }
     }
 
-    /// RFC 2047 "B" encoded words, never splitting a character. Each is at most 68 characters
-    /// (RFC 2047 allows 75) so "Subject: " plus one word fits a 78-character line.
+    /// RFC 2047 "B" encoded words, never splitting a code point's UTF-8 bytes. Each is at most 68
+    /// characters (RFC 2047 allows 75) so "Subject: " plus one word fits a 78-character line.
     static func encodedWords(_ text: String) -> [String] {
         let prefix = "=?UTF-8?B?"
         let maxBytes = 42  // 56 base64 characters + 12 for the wrapper
         var words: [String] = []
         var chunk = Data()
-        for character in text {
-            let bytes = Data(String(character).utf8)
+        for scalar in text.unicodeScalars {
+            let bytes = Data(String(scalar).utf8)
             if !chunk.isEmpty && chunk.count + bytes.count > maxBytes {
                 words.append(prefix + chunk.base64EncodedString() + "?=")
                 chunk = Data()
@@ -79,9 +79,10 @@ enum MIMEEncoding {
         return phrase(name) + ["<\(email)>"]
     }
 
-    /// A display name as an atom sequence, a quoted string, or encoded words.
+    /// A display name as an atom sequence, a quoted string, or encoded words (also for very long
+    /// names, which a quoted string could not fold).
     static func phrase(_ name: String) -> [String] {
-        guard isPlainASCII(name), !name.contains("=?") else { return encodedWords(name) }
+        guard isPlainASCII(name), !name.contains("=?"), name.count <= 200 else { return encodedWords(name) }
         let atext = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&'*+-/=?^_`{|}~ ")
         if name.unicodeScalars.allSatisfy({ atext.contains($0) }) { return [name] }
         let escaped = name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
@@ -100,20 +101,23 @@ enum MIMEEncoding {
         return fold("\(name):", tokens, separator: " ")
     }
 
-    /// A message id in angle brackets.
+    /// A message id in angle brackets, or nil when it isn't one. Ids come from mail other people
+    /// wrote, so anything with whitespace, control characters or extra brackets is dropped.
     static func messageId(_ id: String) -> String? {
-        let trimmed = sanitize(id).trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.hasPrefix("<") && trimmed.hasSuffix(">") { return trimmed }
-        return "<\(trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "<>")))>"
+        var core = Substring(id.trimmingCharacters(in: .whitespacesAndNewlines))
+        if core.hasPrefix("<") && core.hasSuffix(">") && core.count >= 2 { core = core.dropFirst().dropLast() }
+        guard !core.isEmpty, core.count <= 900, core.unicodeScalars.allSatisfy({ scalar in
+            scalar.value > 0x20 && scalar.value < 0x7F && scalar != "<" && scalar != ">"
+        }) else { return nil }
+        return "<\(core)>"
     }
 
-    /// Message ids found in a References / In-Reply-To value.
+    /// Valid message ids in a References / In-Reply-To value.
     static func messageIds(in value: String) -> [String] {
         var ids: [String] = []
         var rest = Substring(value)
         while let open = rest.firstIndex(of: "<"), let close = rest[open...].firstIndex(of: ">") {
-            ids.append(String(rest[open...close]))
+            if let id = messageId(String(rest[open...close])) { ids.append(id) }
             rest = rest[rest.index(after: close)...]
         }
         if ids.isEmpty {

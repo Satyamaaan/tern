@@ -83,21 +83,22 @@ private func build(_ draft: Draft, from: Participant = me, inReplyTo: String? = 
     var counter = 0
     builder.makeToken = {
         counter += 1
-        return "tok\(counter)"
+        // As long as the real 32-hex-digit tokens, so line-length checks see real boundaries.
+        return String(format: "tok%029d", counter)
     }
     let data = try builder.build(draft: draft, from: from, inReplyTo: inReplyTo, references: references)
     let text = String(decoding: data, as: UTF8.self)
     return (text, try Entity(data))
 }
 
-/// RFC 5322 line rules: CRLF only, nothing over 998 characters.
-private func checkLines(_ text: String, headerWidth: Int = 78) {
+/// RFC 5322 line rules: CRLF only, nothing over 998 characters. Tern's own output also keeps every
+/// line, headers and bodies, within 78 for the short MIME types these tests use.
+private func checkLines(_ text: String) {
     #expect(!text.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
     #expect(!text.replacingOccurrences(of: "\r\n", with: "").contains("\r"))
-    let lines = text.components(separatedBy: "\r\n")
-    #expect(lines.allSatisfy { $0.utf8.count <= 998 })
-    let headerLines = lines.prefix { !$0.isEmpty }
-    for line in headerLines { #expect(line.count <= headerWidth, "long header line: \(line)") }
+    for line in text.components(separatedBy: "\r\n") {
+        #expect(line.count <= 78, "long line: \(line)")
+    }
 }
 
 private func temporaryFile(_ name: String, _ data: Data) throws -> String {
@@ -126,7 +127,7 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
         #expect(message.header("Bcc") == "secret@example.com")
         #expect(message.header("Subject") == "Quarterly numbers")
         #expect(message.header("Date") == "Sat, 17 Oct 2026 08:00:00 +0000")
-        #expect(message.header("Message-ID") == "<tok1@example.com>")
+        #expect(message.header("Message-ID") == "<tok00000000000000000000000000001@example.com>")
         #expect(message.header("MIME-Version") == "1.0")
         #expect(message.header("In-Reply-To") == nil)
 
@@ -175,9 +176,16 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
         let (_, again) = try build(draft, inReplyTo: "<r2@x.com>", references: "<r1@x.com> <r2@x.com>")
         #expect(again.header("References") == "<r1@x.com> <r2@x.com>")
 
+        // References come from mail other people wrote; nothing in them may become a header.
+        let (text, hostile) = try build(draft, inReplyTo: "<ok@x.com>\r\nBcc: spy@evil.com",
+                                        references: "<a@b\r\nBcc: spy@evil.com\r\nX: <q@x> <fine@x.com> <bad id@x>")
+        #expect(!text.components(separatedBy: "\r\n").contains { $0.hasPrefix("Bcc:") || $0.hasPrefix("X:") })
+        #expect(hostile.header("In-Reply-To") == nil)
+        #expect(hostile.header("References") == "<fine@x.com>")
+
         let longChain = (0..<40).map { "<message-\($0)-with-a-fairly-long-id@mail.example.com>" }.joined(separator: " ")
-        let (text, long) = try build(draft, inReplyTo: "<last@x.com>", references: longChain)
-        checkLines(text)
+        let (longText, long) = try build(draft, inReplyTo: "<last@x.com>", references: longChain)
+        checkLines(longText)
         #expect(long.header("References")?.hasSuffix("<last@x.com>") == true)
     }
 
@@ -240,6 +248,13 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
         #expect(!html.contains("file://"))
     }
 
+    @Test func longNamesStillFold() throws {
+        let draft = Draft(accountId: "a", toList: [Participant(name: String(repeating: "Very Long Name ", count: 80), email: "x@example.com")],
+                          subject: "e" + String(repeating: "\u{301}", count: 600))
+        let (text, _) = try build(draft)
+        checkLines(text)
+    }
+
     @Test func headerInjectionIsNeutralised() throws {
         let draft = Draft(accountId: "a", toList: [Participant(name: "Ann\r\nBcc: spy@evil.com", email: "ann@example.com")],
                           subject: "Hi\r\nBcc: spy@evil.com")
@@ -283,6 +298,7 @@ private func temporaryFile(_ name: String, _ data: Data) throws -> String {
             ("<pre>  indented\n    code</pre><div>after</div>", "  indented\n    code\n\nafter"),
             ("<div>one</div><div>two</div><!-- <p>hidden</p> -->", "one\ntwo"),
             ("<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>", "a  b\nc  d"),
+            (#"<a name="top">anchor</a> and <a href="https://a.com">A</a>"#, "anchor and A (https://a.com)"),
         ]
         for (html, expected) in cases {
             #expect(HTMLText.plainText(fromHTML: html) == expected, "\(html)")
