@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// `--snapshot <dir>`: renders the main window offscreen at 1320×840 (light, dark, and light with the
-/// ⌘K palette open) into PNGs, prints speed measurements, and quits. Nothing is shown on screen.
+/// `--snapshot <dir>`: renders the main window at 1320×840 (light, dark, the ⌘K palette, the reader with
+/// a thread, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
+/// and quits. WebKit only paints into a window on screen, so after the launch and j/k measurements the
+/// window is ordered in at 1 % opacity and click-through, without activating the app: nothing shows.
 @MainActor
 struct Snapshotter {
     let model: AppModel
@@ -24,6 +26,8 @@ struct Snapshotter {
         if ProcessInfo.processInfo.environment["TERN_SNAPSHOT_WIDTH"].flatMap(Double.init) == nil {
             measureKeyboard(window)
         }
+        showForWebKit(window)
+        measureOpen(window)
 
         render(window, appearance: .aqua, to: directory.appendingPathComponent("main-light.png"))
         render(window, appearance: .darkAqua, to: directory.appendingPathComponent("main-dark.png"))
@@ -31,6 +35,7 @@ struct Snapshotter {
         render(window, appearance: .aqua, to: directory.appendingPathComponent("palette-light.png"))
         render(window, appearance: .darkAqua, to: directory.appendingPathComponent("palette-dark.png"))
         model.palette = nil
+        integrationShots(window, directory)
         if ProcessInfo.processInfo.environment["TERN_SNAPSHOT_EXTRAS"] == "1" { extras(window, directory) }
         print("Snapshots written to \(directory.path)")
         exit(0)
@@ -105,7 +110,7 @@ struct Snapshotter {
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-dark.png"), dark: true)
     }
 
-    private func standalone<V: View>(_ view: V, size: NSSize, to url: URL, dark: Bool) {
+    func standalone<V: View>(_ view: V, size: NSSize, to url: URL, dark: Bool) {
         let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height).background(Color(Theme.bg)))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = hosting
@@ -133,7 +138,7 @@ struct Snapshotter {
         return window
     }
 
-    private func render(_ window: MainWindow, appearance: NSAppearance.Name, to url: URL) {
+    func render(_ window: MainWindow, appearance: NSAppearance.Name, to url: URL) {
         let appearance = NSAppearance(named: appearance)
         NSApp.appearance = appearance
         window.appearance = appearance
@@ -141,12 +146,12 @@ struct Snapshotter {
         guard let frameView = window.contentView?.superview else { return }
         let bounds = frameView.bounds
         guard let bitmap = frameView.bitmapImageRepForCachingDisplay(in: bounds) else { return }
-        frameView.cacheDisplay(in: bounds, to: bitmap)
+        withPageStandIn(window) { frameView.cacheDisplay(in: bounds, to: bitmap) }
         try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
     }
 
     /// Lets SwiftUI and the table finish layout and the async observations deliver.
-    private func settle(_ window: MainWindow) {
+    func settle(_ window: MainWindow) {
         for _ in 0..<6 {
             window.contentView?.layoutSubtreeIfNeeded()
             window.placeTrafficLights()

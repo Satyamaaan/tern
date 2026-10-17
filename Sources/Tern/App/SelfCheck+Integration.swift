@@ -104,20 +104,15 @@ extension SelfCheck {
         settle(0.4)
         check("r answers inline in the reader", services.reader.model?.composing == .reply(key, all: false))
         check("r opens no composer window", NSApp.windows.filter { $0 is ComposerWindow }.count == windows)
+        check("the inline reply appears with the caret in its body", KeyRouter.textInput(in: window) != nil)
         services.reader.model?.composing = nil
         settle(0.4)
 
         services.reader.model?.quickReply("Sounds good, thanks")
-        settle(0.3)
-        check("a ✦ quick reply opens the inline reply", services.reader.model?.composing == .reply(key, all: false))
+        settle(0.5)
+        check("a ✦ quick reply opens the inline reply with its text", services.reader.model?.composing == .reply(key, all: false)
+              && services.replyPrefill[key] == nil && (KeyRouter.textInput(in: window)?.string.contains("Sounds good, thanks") ?? false))
         services.reader.model?.composing = nil
-        settle(0.3)
-        // The inline card builds its composer on appear, which an offscreen window may not do; build it here.
-        let composer = services.replyPrefill[key] == nil ? nil : ComposerModel(request: .reply(key, all: false), services: services, mode: .inline)
-        check("the reply composer takes the quick reply's text and clears it",
-              services.replyPrefill[key] == nil && composer?.editor.plainText.contains("Sounds good, thanks") == true)
-        composer?.saveOrDrop()
-        composer?.tearDown()
         settle(1.0)
         let draft = try? services.drafts.editingDraft(inThread: key)
         check("the quick reply's text is in the saved reply draft", draft?.bodyHtml.contains("Sounds good, thanks") == true)

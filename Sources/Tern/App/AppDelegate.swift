@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         router.mainWindow = window
         router.install()
         window.makeKeyAndOrderFront(nil)
+        // A window shown for the first time gives its first text field (the search pill) the keyboard;
+        // the list should have it, or j and k would type.
+        model.focusList()
         window.displayIfNeeded()
         NSApp.activate()
 
@@ -143,8 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     }
 
     func showMainWindow() {
-        if window == nil { router.mainWindow = makeMainWindow() }
+        let created = window == nil
+        if created { router.mainWindow = makeMainWindow() }
         window?.makeKeyAndOrderFront(nil)
+        if created { model.focusList() }
         NSApp.activate()
     }
 
