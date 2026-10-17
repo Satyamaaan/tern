@@ -203,6 +203,7 @@ public actor AccountSync {
             } catch GmailAPIError.historyExpired {
                 try await fullResync()
             }
+            try await pruneFailedOps()
         }
 
         let more = try await backgroundStep()

@@ -206,6 +206,8 @@ public struct DraftStore: Sendable {
             return fresh
         }
         guard stored.state == .editing || stored.state == .failed else { return nil }
+        // Taken back to edit or send again: an earlier failed send no longer needs a notice.
+        try deleteOps(db, draftId: stored.id, kinds: [.sendDraft], states: [.failed])
         if stored.accountId != draft.accountId {
             // The Gmail draft lives in the old account: remove it there and start again in the new one.
             if let gmailDraftId = stored.gmailDraftId {
@@ -426,11 +428,13 @@ public struct DraftStore: Sendable {
             .fetchAll(db)
     }
 
-    /// Removes ops the engine hasn't started.
-    static func deleteOps(_ db: Database, draftId: String, kinds: [PendingOp.Kind]) throws {
+    /// Removes ops the engine hasn't started, and ones that failed for good (nothing will send them
+    /// again; dropping them clears their "didn't reach Gmail" notice).
+    static func deleteOps(_ db: Database, draftId: String, kinds: [PendingOp.Kind],
+                          states: [PendingOp.State] = [.pending, .failed]) throws {
         _ = try PendingOp
             .filter(kinds.map(\.rawValue).contains(Column("kind")))
-            .filter(Column("state") == PendingOp.State.pending.rawValue)
+            .filter(states.map(\.rawValue).contains(Column("state")))
             .filter(sql: "json_extract(payload, '$.draftId') = ?", arguments: [draftId])
             .deleteAll(db)
     }

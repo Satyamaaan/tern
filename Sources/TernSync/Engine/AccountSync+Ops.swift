@@ -433,6 +433,10 @@ extension AccountSync {
                 try cleanup.insert(db)
             }
             _ = try PendingOp.deleteOne(db, key: opId)
+            // Gmail has this draft now: earlier saves that failed are superseded.
+            try db.execute(sql: """
+                DELETE FROM pending_op WHERE state = 'failed' AND kind = 'saveDraft' AND json_extract(payload, '$.draftId') = ?
+                """, arguments: [draftId])
         }
     }
 
@@ -548,6 +552,17 @@ extension AccountSync {
             draft.lastError = error
             try draft.update(db)
         }
+    }
+
+    /// After each history poll: drops failed ops whose messages, label or draft are gone, or that
+    /// were done again since (`MailStore.pruneFailedOps`), so the failed count only counts what matters.
+    func pruneFailedOps() async throws {
+        let accountId = self.accountId
+        let any = try await read { db in
+            try PendingOp.filter(Column("accountId") == accountId && Column("state") == PendingOp.State.failed.rawValue).fetchCount(db) > 0
+        }
+        guard any else { return }
+        try await write { db in try MailStore.pruneFailedOps(db, accountId: accountId) }
     }
 
     // MARK: Helpers
