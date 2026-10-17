@@ -115,7 +115,7 @@ struct AttachmentChip: View {
                 .frame(maxWidth: 220, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
             Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
-                .font(.mono(12))
+                .font(.numeric(12))
                 .foregroundStyle(Color(Theme.text3))
             Button(action: remove) {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
@@ -347,10 +347,10 @@ struct MenuRow: View {
             HStack(spacing: 8) {
                 Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                 Spacer(minLength: 12)
-                if let detail { Text(detail).font(.mono(12)).foregroundStyle(Color(Theme.text3)) }
+                if let detail { Text(detail).font(.numeric(12)).foregroundStyle(Color(Theme.text3)) }
                 if let key {
                     Text(key)
-                        .font(.mono(11))
+                        .font(.numeric(11))
                         .foregroundStyle(Color(Theme.text3))
                         .frame(width: 18, height: 18)
                         .background(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(Color(Theme.hairlineStrong)))
@@ -378,7 +378,7 @@ struct AIInstructionBar: View {
             if model.aiBusy {
                 Text("Writing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
             } else {
-                Text("↵").font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                Text("↵").font(.numeric(12)).foregroundStyle(Color(Theme.text3))
             }
         }
         .padding(.horizontal, 12)

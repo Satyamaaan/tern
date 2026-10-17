@@ -333,7 +333,7 @@ struct PaletteView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if sections.isEmpty {
                         Text("No matches")
-                            .font(.serif(17, italic: true))
+                            .font(.display(15))
                             .foregroundStyle(Color(Theme.text3))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 28)
@@ -377,7 +377,7 @@ private struct PaletteRow: View {
             }
             Spacer(minLength: 8)
             if let shortcut = item.shortcut {
-                Text(shortcut).font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                Text(shortcut).font(.numeric(12)).foregroundStyle(Color(Theme.text3))
             }
         }
         .padding(.horizontal, 12)

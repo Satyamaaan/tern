@@ -103,7 +103,7 @@ struct FlockView: View {
             }
             if count > 12 {
                 Text("+\(count - 12)")
-                    .font(.mono(12))
+                    .font(.numeric(12))
                     .foregroundStyle(Color(Theme.text3))
                     .lineLimit(1)
                     .padding(.leading, 3)
@@ -158,7 +158,7 @@ struct SearchField: View {
                 .focused($focused)
             if !model.searchText.isEmpty {
                 Button { model.endSearch(restoreFocus: true) } label: {
-                    Text("esc").font(.mono(11)).foregroundStyle(Color(Theme.text3))
+                    Text("esc").font(.numeric(11)).foregroundStyle(Color(Theme.text3))
                         .padding(.horizontal, 5).frame(height: 20)
                 }
                 .buttonStyle(.plain)
@@ -279,7 +279,7 @@ struct SplitTabs: View {
                             .foregroundStyle(Color(active ? Theme.text1 : Theme.text2))
                         let count = model.unreadCount(split)
                         if count > 0 {
-                            Text("\(count)").font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                            Text("\(count)").font(.numeric(12)).foregroundStyle(Color(Theme.text3))
                         }
                     }
                     .fixedSize()

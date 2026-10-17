@@ -164,7 +164,7 @@ private struct MultiSelectionView: View {
     var body: some View {
         VStack(spacing: 10) {
             Text("\(count) conversations selected")
-                .font(.serif(22, italic: true))
+                .font(.display(18))
                 .foregroundStyle(Color(Theme.text1))
             HStack(spacing: 14) {
                 hint("e", "archive")

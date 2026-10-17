@@ -44,6 +44,14 @@ open build/Tern.app --args --fake     # run against it (build with ./build.sh --
 `CLAUDE.md` describes the architecture and the rules the code follows. The visual spec is
 `design/DESIGN.md`.
 
+## Credits
+
+- [Inter](https://github.com/rsms/inter) by Rasmus Andersson and the Inter Project Authors, under the SIL Open Font
+  License 1.1 ([Resources/Fonts/OFL-Inter.txt](Resources/Fonts/OFL-Inter.txt)).
+- [Hugeicons](https://github.com/hugeicons/hugeicons) free "Stroke Rounded" icons, under the MIT License
+  ([Resources/Licenses/Hugeicons-MIT.txt](Resources/Licenses/Hugeicons-MIT.txt)). `scripts/hugeicons.py` turns the
+  icons Tern uses into `Sources/Tern/Shared/Hugeicons.swift`.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

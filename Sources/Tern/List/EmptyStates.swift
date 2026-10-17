@@ -26,7 +26,7 @@ private struct SerifLine: View {
 
     var body: some View {
         Text(text)
-            .font(.serif(22, italic: true))
+            .font(.display(18))
             .foregroundStyle(Color(Theme.text2))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
@@ -48,7 +48,7 @@ struct InboxZeroView: View {
                 .frame(width: 132, height: 66)
             VStack(spacing: 6) {
                 Text("Nothing needs you.")
-                    .font(.serif(22, italic: true))
+                    .font(.display(18))
                     .foregroundStyle(Color(Theme.text1))
                 Text(cleared > 0 ? "\(cleared) cleared today" : "All caught up")
                     .font(.ui(12))

@@ -31,7 +31,7 @@ struct OnboardingView: View {
             .padding(.top, 36)
 
             Text("Mail at the speed you think.")
-                .font(.serif(34, italic: true))
+                .font(.display(30))
                 .foregroundStyle(Color(Theme.text1))
                 .padding(.top, 28)
                 .padding(.bottom, 24)

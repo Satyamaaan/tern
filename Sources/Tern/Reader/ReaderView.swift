@@ -45,7 +45,7 @@ struct ReaderView: View {
                     .opacity(key == nil ? 0 : 1)
                 if key == nil {
                     Text("No conversation selected")
-                        .font(.serif(22, italic: true))
+                        .font(.display(18))
                         .foregroundStyle(Color(Theme.text3))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -123,7 +123,7 @@ struct ReaderTopBar: View {
                 ReaderIconButton(symbol: "chevron.left", help: "Previous conversation  K") { position.previous?() }
                     .disabled(position.previous == nil)
                 Text("\(position.index) of \(position.total)")
-                    .font(.mono(12))
+                    .font(.numeric(12))
                     .foregroundStyle(Color(Theme.text3))
                     .padding(.horizontal, 4)
                 ReaderIconButton(symbol: "chevron.right", help: "Next conversation  J") { position.next?() }

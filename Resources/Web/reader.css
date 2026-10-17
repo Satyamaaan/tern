@@ -1,12 +1,9 @@
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-SemiBold.ttf"); font-weight: 600; }
-@font-face { font-family: "Geist Mono"; src: url("tern-app://fonts/GeistMono-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: "Geist Mono"; src: url("tern-app://fonts/GeistMono-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Newsreader; src: url("tern-app://fonts/Newsreader16pt-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Newsreader; src: url("tern-app://fonts/Newsreader16pt-Italic.ttf"); font-style: italic; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Regular.ttf"); font-weight: 400; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Medium.ttf"); font-weight: 500; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-SemiBold.ttf"); font-weight: 600; }
+@font-face { font-family: "Inter Display"; src: url("tern-app://fonts/InterDisplay-SemiBold.ttf"); font-weight: 600; }
 
-:root { color-scheme: light; --ui: Geist, -apple-system, "Helvetica Neue", sans-serif; --mono: "Geist Mono", ui-monospace, Menlo, monospace; }
+:root { color-scheme: light; --ui: Inter, -apple-system, "Helvetica Neue", sans-serif; --display: "Inter Display", Inter, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html { background: transparent; -webkit-text-size-adjust: none; }
@@ -17,14 +14,14 @@ body {
 ::selection { background: color-mix(in srgb, var(--ink) 16%, transparent); }
 #warm { position: absolute; left: -9999px; top: 0; visibility: hidden; }
 #warm .w1 { font: 400 13px var(--ui); } #warm .w2 { font: 500 13px var(--ui); } #warm .w3 { font: 600 13px var(--ui); }
-#warm .w4 { font: 400 12px var(--mono); } #warm .w5 { font: 500 24px Newsreader; } #warm .w6 { font: italic 22px Newsreader; }
+#warm .w4 { font: 400 12px var(--ui); font-variant-numeric: tabular-nums; } #warm .w5 { font: 600 22px var(--display); }
 
 #thread { max-width: 760px; margin: 0 auto; padding: 6px 32px 40px; }
-.mono { font-family: var(--mono); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.mono { font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 
 /* Header */
 .subject {
-  font: 500 24px/30px Newsreader, Georgia, serif; letter-spacing: -0.2px; margin: 0 0 10px;
+  font: 600 23px/30px var(--display); letter-spacing: -0.3px; margin: 0 0 10px;
   color: var(--text1); overflow-wrap: anywhere;
 }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
@@ -74,7 +71,7 @@ body {
 }
 .more .count {
   height: 20px; min-width: 28px; padding: 0 7px; border-radius: 4px; background: var(--hover); display: grid;
-  place-items: center; font: 500 11px/16px var(--mono);
+  place-items: center; font: 500 11px/16px var(--ui); font-variant-numeric: tabular-nums;
 }
 .more:hover .count { background: var(--selected); color: var(--text2); }
 

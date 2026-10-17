@@ -152,7 +152,7 @@ private struct RowPainter {
         let nameWidth = min(Self.width(name, attributes) + 2, max(0, rect.width - countWidth - dotWidth - prefix))
         var x = rect.minX
         if draft != nil {
-            Icon.pencil.draw(in: CGRect(x: x, y: rect.midY - 6, width: 12, height: 12), color: Theme.text2, lineWidth: 1.5)
+            Icon.drafts.draw(in: CGRect(x: x, y: rect.midY - 6, width: 12, height: 12), color: Theme.text2)
             x += prefix
         }
         Self.drawText(name, attributes, in: CGRect(x: x, y: rect.minY, width: nameWidth, height: rect.height))
@@ -188,7 +188,7 @@ private struct RowPainter {
         }
         if thread.hasAttachments {
             x -= 7 + 12
-            Icon.paperclip.draw(in: CGRect(x: x, y: line.midY - 6, width: 12, height: 12), color: quiet, lineWidth: 1.6)
+            Icon.paperclip.draw(in: CGRect(x: x, y: line.midY - 6, width: 12, height: 12), color: quiet)
         }
         if includeChip, let chip = model.chip {
             let width = Self.width(chip.text, Self.chipAttributes) + 12
@@ -254,7 +254,7 @@ private struct RowPainter {
     // MARK: Text
 
     static let countAttributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text3]
-    static let timeAttributes: [NSAttributedString.Key: Any] = [.font: Theme.mono(12), .foregroundColor: Theme.text3]
+    static let timeAttributes: [NSAttributedString.Key: Any] = [.font: Theme.numeric(12), .foregroundColor: Theme.text3]
     static let chipAttributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(11, .medium)]
 
     static func width(_ text: String, _ attributes: [NSAttributedString.Key: Any]) -> CGFloat {
@@ -341,7 +341,7 @@ final class WaterlineRowView: NSTableRowView {
 
     override func draw(_ dirtyRect: NSRect) {
         let text = "\(count)"
-        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.mono(12), .foregroundColor: Theme.text3]
+        let attributes: [NSAttributedString.Key: Any] = [.font: Theme.numeric(12), .foregroundColor: Theme.text3]
         let size = (text as NSString).size(withAttributes: attributes)
         let right = bounds.maxX - ThreadRowView.inset - 12
         (text as NSString).draw(at: CGPoint(x: right - size.width, y: bounds.midY - size.height / 2), withAttributes: attributes)
@@ -372,7 +372,7 @@ final class ServerSearchRowView: NSTableRowView {
             NSBezierPath(roundedRect: pill, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row).fill()
         }
         let left = pill.minX + 2 + ThreadRowView.gutter
-        Icon.search.draw(in: CGRect(x: left, y: pill.midY - 6, width: 12, height: 12), color: Theme.text3, lineWidth: 1.6)
+        Icon.search.draw(in: CGRect(x: left, y: pill.midY - 6, width: 12, height: 12), color: Theme.text3)
         let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text3]
         let size = (text as NSString).size(withAttributes: attributes)
         (text as NSString).draw(at: CGPoint(x: left + 20, y: pill.midY - size.height / 2), withAttributes: attributes)

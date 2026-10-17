@@ -33,7 +33,7 @@ struct IconButton: View {
 
 // MARK: - Buttons
 
-/// Every text button in the app. 6 px corners, Geist Medium, 28 pt (24 pt small), no shadow.
+/// Every text button in the app. 6 px corners, Inter Medium, 28 pt (24 pt small), no shadow.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
 /// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
@@ -145,14 +145,14 @@ extension View {
     }
 }
 
-/// A shortcut key in Geist Mono, e.g. the `/` in the search field or `⌘K` in the palette.
+/// A shortcut key in Inter with tabular figures, e.g. the `/` in the search field or `⌘K` in the palette.
 struct Keycap: View {
     let text: String
     var inverted = false
 
     var body: some View {
         Text(text)
-            .font(.mono(11))
+            .font(.numeric(11))
             .foregroundStyle(inverted ? Color(Theme.bg) : Color(Theme.text3))
             .padding(.horizontal, 5)
             .frame(minWidth: 20, minHeight: 20)
@@ -194,7 +194,7 @@ struct Dot: View {
     }
 }
 
-/// Section caps: Geist 11/14 500, +0.6 tracking, `text3`.
+/// Section caps: Inter 11/14 500, +0.6 tracking, `text3`.
 struct CapsLabel: View {
     let text: String
 

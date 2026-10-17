@@ -253,7 +253,7 @@ private struct AccountsSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             if model.accounts.isEmpty {
                 Text("No accounts yet.")
-                    .font(.serif(18, italic: true))
+                    .font(.display(16))
                     .foregroundStyle(Color(Theme.text2))
                     .padding(.vertical, 12)
                 Hairline()
@@ -319,7 +319,7 @@ private struct AISettings: View {
             SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
                 TextField("Default", text: $state.aiModel)
                     .textFieldStyle(.plain)
-                    .font(.mono(12))
+                    .font(.numeric(12))
                     .multilineTextAlignment(.trailing)
                     .frame(width: 180)
                     .disabled(state.provider == .off)
@@ -371,7 +371,7 @@ private struct ShortcutsSettings: View {
                 HStack {
                     Text(row.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                     Spacer()
-                    Text(row.shortcut).font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                    Text(row.shortcut).font(.numeric(12)).foregroundStyle(Color(Theme.text3))
                 }
                 .frame(height: 30)
                 Hairline()

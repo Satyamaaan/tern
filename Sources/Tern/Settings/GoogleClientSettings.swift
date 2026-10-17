@@ -112,10 +112,10 @@ struct GoogleClientFields: View {
     var body: some View {
         VStack(spacing: 0) {
             row("Client ID") {
-                TextField("1234567890-abc.apps.googleusercontent.com", text: $clientId).textFieldStyle(.plain).font(.mono(12))
+                TextField("1234567890-abc.apps.googleusercontent.com", text: $clientId).textFieldStyle(.plain).font(.numeric(12))
             }
             row("Client secret") {
-                SecureField("GOCSPX-…", text: $clientSecret).textFieldStyle(.plain).font(.mono(12))
+                SecureField("GOCSPX-…", text: $clientSecret).textFieldStyle(.plain).font(.numeric(12))
             }
         }
     }

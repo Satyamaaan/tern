@@ -24,6 +24,9 @@ fi
 if [[ -d Resources/Web ]]; then
   cp -R Resources/Web $APP/Contents/Resources/Web
 fi
+if [[ -d Resources/Licenses ]]; then
+  cp -R Resources/Licenses $APP/Contents/Resources/Licenses
+fi
 
 if [[ -f scripts/icon.swift && ( ! -f build/AppIcon.icns || scripts/icon.swift -nt build/AppIcon.icns ) ]]; then
   ICONSET=build/AppIcon.iconset

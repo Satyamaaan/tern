@@ -31,7 +31,7 @@ struct ShortcutSheet: View {
                                         HStack {
                                             Text(row.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                                             Spacer(minLength: 12)
-                                            Text(row.shortcut).font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                                            Text(row.shortcut).font(.numeric(12)).foregroundStyle(Color(Theme.text3))
                                         }
                                         .frame(height: 24)
                                     }

@@ -49,7 +49,7 @@ struct SidebarView: View {
         row(.sent, "Sent", .sent)
         row(.allMail, "All mail", .allMail)
         SidebarRow(title: "More", selected: false, titleColor: Theme.text2) {
-            IconView(icon: model.prefs.moreExpanded ? .chevronDown : .more, size: 15)
+            IconView(icon: model.prefs.moreExpanded ? .chevronDown : .ellipsis, size: 15)
         } action: {
             withAnimation(.easeOut(duration: 0.15)) { model.prefs.moreExpanded.toggle() }
         }
@@ -123,7 +123,7 @@ struct SidebarRow<Leading: View>: View {
                 trailing
             } else if let count {
                 Text(count.formatted())
-                    .font(.mono(12, countWeight))
+                    .font(.numeric(12, countWeight))
                     .foregroundStyle(Color(countColor))
             }
         }

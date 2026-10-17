@@ -2,9 +2,9 @@ import AppKit
 import TernCore
 
 extension NSAttributedString.Key {
-    /// Marks bold text; the font follows it (Geist SemiBold).
+    /// Marks bold text; the font follows it (Inter SemiBold).
     static let ternBold = NSAttributedString.Key("tern.bold")
-    /// Marks italic text. Geist ships without an italic, so it is drawn with a slight obliqueness.
+    /// Marks italic text. Tern bundles only Inter's upright cuts, so it is drawn with a slight obliqueness.
     static let ternItalic = NSAttributedString.Key("tern.italic")
     /// `RichText.BlockKind` raw value of the paragraph a character belongs to.
     static let ternBlock = NSAttributedString.Key("tern.block")

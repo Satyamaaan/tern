@@ -86,24 +86,20 @@ enum Theme {
 
     enum Weight { case regular, medium, semibold }
 
+    /// Inter, the one typeface: every label, row and the reader.
     static func ui(_ size: CGFloat, _ weight: Weight = .regular) -> NSFont {
-        let name = switch weight {
-        case .regular: "Geist-Regular"
-        case .medium: "Geist-Medium"
-        case .semibold: "Geist-SemiBold"
-        }
-        return NSFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: weight == .regular ? .regular : weight == .medium ? .medium : .semibold)
+        FontCache.font(.text, size, weight)
     }
 
-    static func mono(_ size: CGFloat = 12, _ weight: Weight = .regular) -> NSFont {
-        NSFont(name: weight == .regular ? "GeistMono-Regular" : "GeistMono-Medium", size: size)
-            ?? .monospacedDigitSystemFont(ofSize: size, weight: .regular)
+    /// Inter with tabular figures, so times, counts and keycaps line up.
+    static func numeric(_ size: CGFloat = 12, _ weight: Weight = .regular) -> NSFont {
+        FontCache.font(.numeric, size, weight)
     }
 
-    /// The serif voice: open-thread subject and empty states only.
-    static func serif(_ size: CGFloat, italic: Bool = false) -> NSFont {
-        NSFont(name: italic ? "Newsreader16pt-Italic" : "Newsreader16pt-Medium", size: size)
-            ?? NSFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
+    /// Inter Display SemiBold, the optical size cut for large text: the open thread's subject, empty states
+    /// and headlines.
+    static func display(_ size: CGFloat) -> NSFont {
+        FontCache.font(.display, size, .semibold)
     }
 
     // MARK: Helpers
@@ -129,8 +125,51 @@ extension Color {
 
 extension Font {
     static func ui(_ size: CGFloat, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.ui(size, weight)) }
-    static func mono(_ size: CGFloat = 12, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.mono(size, weight)) }
-    static func serif(_ size: CGFloat, italic: Bool = false) -> Font { Font(Theme.serif(size, italic: italic)) }
+    static func numeric(_ size: CGFloat = 12, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.numeric(size, weight)) }
+    static func display(_ size: CGFloat) -> Font { Font(Theme.display(size)) }
+}
+
+/// Fonts are made once per style, size and weight: rows ask for them on every draw.
+private enum FontCache {
+    enum Style { case text, numeric, display }
+
+    private struct Key: Hashable {
+        let style: Style
+        let size: CGFloat
+        let weight: Theme.Weight
+    }
+
+    nonisolated(unsafe) private static var fonts: [Key: NSFont] = [:]
+    private static let lock = NSLock()
+
+    static func font(_ style: Style, _ size: CGFloat, _ weight: Theme.Weight) -> NSFont {
+        let key = Key(style: style, size: size, weight: weight)
+        lock.lock()
+        defer { lock.unlock() }
+        if let font = fonts[key] { return font }
+        let font = make(style, size, weight)
+        fonts[key] = font
+        return font
+    }
+
+    private static func make(_ style: Style, _ size: CGFloat, _ weight: Theme.Weight) -> NSFont {
+        let name = switch (style, weight) {
+        case (.display, _): "InterDisplay-SemiBold"
+        case (_, .regular): "Inter-Regular"
+        case (_, .medium): "Inter-Medium"
+        case (_, .semibold): "Inter-SemiBold"
+        }
+        let systemWeight: NSFont.Weight = weight == .regular ? .regular : weight == .medium ? .medium : .semibold
+        let base = NSFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: style == .display ? .semibold : systemWeight)
+        guard style == .numeric else { return base }
+        let tabular = base.fontDescriptor.addingAttributes([
+            .featureSettings: [[
+                NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
+            ]],
+        ])
+        return NSFont(descriptor: tabular, size: size) ?? base
+    }
 }
 
 // MARK: - Shell additions
