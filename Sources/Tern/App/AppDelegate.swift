@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private var settingsState: SettingsState?
     private var onboardingWindow: NSWindow?
     private var snoozeTimer: Timer?
+    private var integration: Integration?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Timing.appStarted = Timing.sinceProcessStart()
@@ -38,6 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         registry = CommandRegistry(model: model, shell: self)
         model.registry = registry
         wire(services)
+        if options.snapshotDirectory == nil, !CommandLine.arguments.contains("--check") {
+            let integration = Integration(services: services, model: model)
+            integration.wire()
+            self.integration = integration
+        }
 
         mainMenu = MainMenu(registry: registry)
         NSApp.mainMenu = mainMenu.build()
@@ -84,6 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        integration?.stop()
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showMainWindow() }
@@ -160,8 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             do {
                 _ = try await services.connectAccount()
             } catch {
+                if error is CancellationError { return }
                 let alert = NSAlert()
-                alert.messageText = "Adding accounts isn't available yet"
+                alert.messageText = "Couldn't add the account"
                 alert.informativeText = error.localizedDescription
                 alert.runModal()
             }

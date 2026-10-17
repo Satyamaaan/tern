@@ -107,7 +107,7 @@ extension AppModel {
 
     // MARK: Undo
 
-    func showToast(_ title: String, undo: UndoEntry?) {
+    func showToast(_ title: String, undo: UndoEntry?, duration: TimeInterval = 4) {
         if let undo {
             undoStack.append(undo)
             if undoStack.count > 30 { undoStack.removeFirst() }
@@ -115,8 +115,11 @@ extension AppModel {
         let toast = Toast(title: title, undo: undo)
         toasts.append(toast)
         if toasts.count > 3 { toasts.removeFirst(toasts.count - 3) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-            MainActor.assumeIsolated { self?.toasts.removeAll { $0.id == toast.id } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.toasts.removeAll { $0.id == toast.id }
+                if let undo { self?.undoStack.removeAll { $0.id == undo.id && $0.expires } }
+            }
         }
     }
 
@@ -129,6 +132,10 @@ extension AppModel {
     func undo(_ entry: UndoEntry) {
         undoStack.removeAll { $0.id == entry.id }
         toasts.removeAll { $0.undo?.id == entry.id }
+        if case .custom(let run) = entry.change {
+            run()
+            return
+        }
         pendingCursor = entry.threads.first
         let store = self.store
         let change = entry.change
@@ -138,6 +145,7 @@ extension AppModel {
                 case .mail(_, let result): if let token = result.value { try store.undo(token) }
                 case .needsReply(let result): if let previous = result.value { try store.restoreNeedsReply(previous) }
                 case .project(let id, let keys, let assigned): try store.setProject(id, on: keys, assigned: !assigned)
+                case .custom: break
                 }
             } catch {
                 NSLog("Tern: undo failed: \(error)")

@@ -372,11 +372,15 @@ struct UndoEntry: Identifiable {
         case mail(MailAction, WriteResult<UndoToken>)
         case needsReply(WriteResult<NeedsReplyUndo>)
         case project(String, [ThreadKey], assigned: Bool)
+        /// Undo handled by its owner on the main actor, e.g. cancelling a send.
+        case custom(@MainActor () -> Void)
     }
 
     let id = UUID()
     var change: Change
     var threads: [ThreadKey]
+    /// Dropped from the undo stack when its toast goes away (a send can't be undone after it left).
+    var expires = false
 }
 
 /// A value produced by a write on `AppModel.writes`. Only read it from that queue, where every
