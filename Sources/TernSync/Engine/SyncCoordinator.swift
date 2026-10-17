@@ -161,11 +161,11 @@ public final class SyncCoordinator {
 
     /// Removes an account from this Mac: stops its sync and waits until it has stopped, so nothing
     /// writes the account back, then deletes its data (`MailStore.removeAccount`), its downloaded
-    /// attachments and its drafts' files.
+    /// attachments and its drafts' files. Downloads still in flight throw their data away (`retire`).
     public func removeAccount(id: String) async throws {
         let task = tasks.removeValue(forKey: id)
         task?.cancel()
-        syncs.removeValue(forKey: id)
+        await syncs.removeValue(forKey: id)?.retire()
         statuses.removeValue(forKey: id)
         lastOpCounts.removeValue(forKey: id)
         await task?.value

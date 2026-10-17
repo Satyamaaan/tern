@@ -27,6 +27,8 @@ extension AccountSync {
         }
 
         let data = try await attachmentData(current)
+        // Removed meanwhile: its cache folder is being deleted, so nothing may be written there.
+        guard !retired else { throw SyncError.unknownAccount(accountId) }
         let url = cacheURL(for: current)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
@@ -73,6 +75,7 @@ extension AccountSync {
                 } else {
                     throw SyncError.unknownAccount(ref.accountId)
                 }
+                guard !retired else { throw SyncError.unknownAccount(accountId) }
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: url, options: .atomic)
                 AttachmentQuarantine.mark(url)

@@ -36,6 +36,8 @@ public actor AccountSync {
 
     var isActive = true
     var paused = false
+    /// The account is being removed (`retire`).
+    private(set) var retired = false
     var prepared = false
     var pollRequested = true
     var nextPollAt = Date.distantPast
@@ -111,6 +113,12 @@ public actor AccountSync {
         } else {
             nextPollAt = min(nextPollAt, clock.now().addingTimeInterval(configuration.inactivePollInterval))
         }
+    }
+
+    /// The account is being removed: a download still in flight throws away what it fetched instead
+    /// of writing it into the account's cache or a draft's folder after they're deleted.
+    public func retire() {
+        retired = true
     }
 
     /// Polls history now.
