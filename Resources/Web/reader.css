@@ -102,8 +102,10 @@ body {
 .imgnote .load { color: var(--accentInk); }
 .imgnote .load:hover { text-decoration: underline; }
 
+/* Mail draws only inside its own box: offsets, negative margins and transforms are clipped. */
 .mbody {
-  display: block; margin: 14px 0 0 38px; max-width: 640px; position: relative; contain: layout; isolation: isolate;
+  display: block; margin: 14px 0 0 38px; max-width: 640px; position: relative; overflow: clip;
+  contain: layout paint; isolation: isolate;
   color: var(--text1); font: 14px/1.5714 var(--ui); min-height: 22px;
 }
 .mbody[data-mode="rich"] { margin-left: 0; max-width: none; }

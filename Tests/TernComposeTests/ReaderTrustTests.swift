@@ -20,3 +20,12 @@ import Testing
     let file = ReaderRemoteImages.readerURL(for: "file:///etc/passwd")
     #expect(ReaderRemoteImages.remoteURL(try #require(URL(string: file))) == nil, "only http(s) is ever fetched")
 }
+
+@MainActor
+@Test func readerPageFetchesNothingRemoteAndClipsMail() throws {
+    let page = ReaderResources.page()
+    let csp = try #require(page.range(of: "img-src[^;]*;", options: .regularExpression).map { String(page[$0]) })
+    #expect(!csp.contains("http"), "the page itself never loads http(s); trusted images come through tern-remote:")
+    let mbody = try #require(page.range(of: #"\.mbody \{[^}]*\}"#, options: .regularExpression).map { String(page[$0]) })
+    #expect(mbody.contains("overflow: clip") && mbody.contains("contain: layout paint"), "mail can't draw over the reader's own header")
+}

@@ -90,7 +90,7 @@ private func clean(_ html: String, images: Bool = false) -> SanitizedMail {
     #expect(!mail.css.contains("binding"))
     #expect(!mail.css.contains("prefers-color-scheme"))
     #expect(mail.css.contains(".tern-body { color: light-dark(#222222, "))
-    #expect(mail.css.contains(":host, :host { font-size: 16px }"))
+    #expect(mail.css.contains(".tern-root, .tern-root { font-size: 16px }"))
     #expect(mail.css.contains("@media screen and (max-width: 600px) {.col { width: 100% !important }"))
     #expect(mail.css.contains("background: none #fff"))
     #expect(mail.blockedRemoteCount == 1)
@@ -126,6 +126,21 @@ private func clean(_ html: String, images: Bool = false) -> SanitizedMail {
     #expect(trusted.html.contains("src=\"tern-remote://i/sig/b.png\" referrerpolicy=\"no-referrer\" loading=\"lazy\""))
     #expect(trusted.html.contains("url(&quot;tern-remote://i/sig/c.png&quot;)"))
     #expect(!trusted.html.contains("cdn.example") && !trusted.css.contains("cdn.example"), "remote images load only through the reader's own URLs")
+}
+
+@Test func mailCSSCannotReachTheHostOrTheReader() {
+    let mail = clean("""
+        <style>:host { margin-top: -400px !important } :host(.x) p { color: red } :HOST-context(body) { top: 0 }
+        .x::part(head) { display: none } ::slotted(*) { opacity: 0 } html body p { margin: 0 } :root { --gap: 4px }
+        .ad { position: absolute; top: -120px; transform: translateY(-50px) }</style><p class="ad">x</p>
+        """)
+    #expect(!mail.css.lowercased().contains(":host"))
+    #expect(!mail.css.contains("::part"))
+    #expect(!mail.css.contains("::slotted"))
+    #expect(mail.css.contains(".tern-root .tern-body p { margin: 0 }"))
+    #expect(mail.css.contains(".tern-root { --gap: 4px }"))
+    // Offsets survive sanitizing; the reader clips `.mbody` (overflow: clip; contain: paint) so they stay inside.
+    #expect(mail.css.contains("position: absolute"))
 }
 
 @Test func classifiesSimpleAndRichMail() {

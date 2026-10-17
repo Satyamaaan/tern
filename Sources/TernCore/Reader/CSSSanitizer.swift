@@ -9,8 +9,8 @@ struct CSSFindings {
 }
 
 /// Cleans inline `style` attributes and `<style>` sheets from mail. Drops anything that can run code,
-/// load remote content without permission, or escape the message's box; rewrites `html`/`body`
-/// selectors to the message wrapper; and turns plain colors into `light-dark()` pairs so simple mails
+/// load remote content without permission, or reach outside the message; rewrites `html`/`body`
+/// selectors to the message wrappers; and turns plain colors into `light-dark()` pairs so simple mails
 /// read well in dark mode.
 struct CSSSanitizer {
     var urlPolicy: (String) -> URLDecision
@@ -266,15 +266,18 @@ struct CSSSanitizer {
         }
     }
 
-    /// Points document-level selectors at the shadow root: `html` and `:root` become `:host`,
-    /// `body` becomes the message wrapper.
+    /// Points document-level selectors at the message's own wrappers: `html` and `:root` become
+    /// `.tern-root`, `body` becomes `.tern-body`. Selectors that reach the shadow host or the reader
+    /// around it (`:host`, `::part`, `::slotted`) are dropped, so mail can't move or cover Tern's UI.
     static func rewriteSelector(_ selector: String) -> String {
         let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("<"), !trimmed.contains("\\") else { return "" }
+        let lower = trimmed.lowercased()
+        guard !lower.contains(":host"), !lower.contains("::part"), !lower.contains("::slotted") else { return "" }
         let range = NSRange(trimmed.startIndex..., in: trimmed)
         var output = documentSelector.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "$1\u{1}$2")
-        output = output.replacingOccurrences(of: "\u{1}html", with: ":host", options: .caseInsensitive)
-            .replacingOccurrences(of: "\u{1}:root", with: ":host", options: .caseInsensitive)
+        output = output.replacingOccurrences(of: "\u{1}html", with: ".tern-root", options: .caseInsensitive)
+            .replacingOccurrences(of: "\u{1}:root", with: ".tern-root", options: .caseInsensitive)
             .replacingOccurrences(of: "\u{1}body", with: ".tern-body", options: .caseInsensitive)
         return output
     }

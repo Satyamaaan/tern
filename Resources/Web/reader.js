@@ -202,11 +202,15 @@
       style.textContent = body.css;
       shadow.append(style);
     }
+    // `.tern-root` stands in for the mail's <html>, `.tern-body` for its <body>; mail CSS can't reach the host.
+    const outer = document.createElement('div');
+    outer.className = 'tern-root';
     const wrapper = document.createElement('div');
     wrapper.className = 'tern-body';
     if (body.bodyStyle) wrapper.setAttribute('style', body.bodyStyle);
     wrapper.innerHTML = body.html;
-    shadow.append(wrapper);
+    outer.append(wrapper);
+    shadow.append(outer);
     shadow.addEventListener('load', () => queueFit(), true);
     shadow.querySelectorAll('.tern-quote-toggle').forEach((toggle, index) => {
       if (state.openQuotes.has(`${id}#${index}`)) setQuote(toggle, true);
