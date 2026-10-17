@@ -93,6 +93,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Lets sync put in-flight work back in its queue before the app goes (at most 2 s).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let integration, integration.sync != nil else { return .terminateNow }
+        Task {
+            await integration.shutdown()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         integration?.stop()
     }

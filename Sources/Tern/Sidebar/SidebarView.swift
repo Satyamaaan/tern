@@ -273,6 +273,9 @@ struct SyncStatusLine: View {
         } else if services.isOffline {
             Dot(color: Theme.text3, size: 6)
             Text("Offline — changes will sync").foregroundStyle(Color(Theme.text3))
+        } else if let line = services.syncLine {
+            Dot(color: line.tone == .attention ? Theme.accent : line.tone == .quiet ? Theme.syncOK : Theme.text3, size: 6)
+            Text(line.text).foregroundStyle(Color(Theme.text3)).lineLimit(1).truncationMode(.tail)
         } else if let progress = services.syncProgress {
             Dot(color: Theme.text3, size: 6)
             Text("Syncing \(progress.done.formatted()) of \(progress.total.formatted())").foregroundStyle(Color(Theme.text3))

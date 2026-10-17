@@ -51,6 +51,11 @@ final class AppServices {
     var importGoogleClient: (Data) async throws -> Void = { _ in throw ShellError.notAvailable }
     /// Live sync progress, set by the sync engine. Nil shows the state stored on the accounts.
     var syncProgress: SyncProgress?
+    /// What the sidebar's sync line says, from the sync engine's live status. Nil falls back to
+    /// `syncProgress` and the state stored on the accounts.
+    var syncLine: SyncLine?
+    /// Removes an account: stops its sync, deletes its mail from this Mac and signs it out of Google.
+    var removeAccount: (Account) async throws -> Void
     /// True while the network is unreachable.
     var isOffline = false
     /// Set while an editor outside AppKit text views (e.g. a web-based rich text body) has focus, so
@@ -81,6 +86,9 @@ final class AppServices {
     init(store: MailStore) {
         self.store = store
         self.search = SearchService(store.database)
+        removeAccount = { account in
+            try await Task.detached { try store.removeAccount(account.id) }.value
+        }
     }
 
     func account(_ id: String) -> Account? { accounts.first { $0.id == id } }
@@ -123,6 +131,21 @@ struct SendUndoNotice {
 struct SyncProgress: Hashable {
     var done: Int
     var total: Int
+}
+
+/// The sidebar's one line of sync status.
+struct SyncLine: Hashable {
+    enum Tone: Hashable {
+        /// Up to date, or work in the background: a quiet dot.
+        case quiet
+        /// The first sync of an account, which the user is waiting on.
+        case working
+        /// Something the user should know about (changes Gmail refused).
+        case attention
+    }
+
+    var text: String
+    var tone: Tone
 }
 
 enum ShellError: LocalizedError {
