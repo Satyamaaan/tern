@@ -162,7 +162,7 @@ extension MailStore {
 
     /// Rule triage (`RuleClassifier`) and project rules (`ProjectRules`) for threads sync just
     /// changed, in the caller's transaction, so a thread never shows unsorted. Threads that no
-    /// longer exist lose their triage, project and snooze rows.
+    /// longer exist lose their triage, project and snooze rows; a reply ends a snooze (`endSnoozesAnswered`).
     public static func applyRules(_ db: Database, keys: Set<ThreadKey>, now: Date = Date()) throws {
         guard !keys.isEmpty else { return }
         let exists = try db.cachedStatement(sql: "SELECT EXISTS(SELECT 1 FROM thread WHERE accountId = ? AND id = ?)")
@@ -176,6 +176,7 @@ extension MailStore {
                 }
             }
         }
+        try endSnoozesAnswered(db, keys: present)
         try RuleClassifier.classify(db, keys: present, now: now)
         try ProjectRules.apply(db, keys: present)
     }

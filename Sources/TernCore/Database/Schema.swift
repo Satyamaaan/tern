@@ -9,6 +9,7 @@ enum Schema {
         // Lanes append their migrations below this line, one line each.
         migrator.registerMigration("search-1", migrate: SearchSchema.migrate)
         migrator.registerMigration("integrate-1", migrate: ProjectExclusion.migrate)
+        migrator.registerMigration("fixapp-1", migrate: SnoozeReplies.migrate)
     }
 
     private static func v1Core(_ db: Database) throws {
