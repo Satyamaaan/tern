@@ -69,6 +69,7 @@ extension AppModel {
         source = ListSource(mailbox: mailbox, split: showsSplits ? split : nil)
         limit = Self.pageSize
         hidden = [:]
+        pendingCursor = nil
         checked = []
         cursor = nil
         listLoaded = false
@@ -131,7 +132,13 @@ extension AppModel {
         } else if cursor == nil, animation == .reset {
             newCursor = snapshot.order.first
         }
-        if newCursor != cursor { cursor = newCursor }
+        let moved = newCursor != cursor
+        if moved { cursor = newCursor }
+        // After triage the next thread is on screen: treat it like moving onto it (opened at once when
+        // reading in the reader).
+        if moved, animation == .collapse, newCursor != nil {
+            scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true)
+        }
         if cursorAnchor.map({ snapshot.rows[$0] == nil }) ?? true { cursorAnchor = cursor }
 
         listView?.listDidChange(snapshot, animation: animation)
@@ -140,7 +147,8 @@ extension AppModel {
 
     /// The row that takes a removed row's place: the next one still listed, else the previous one.
     private static func successor(of key: ThreadKey, in old: ListSnapshot, keeping new: ListSnapshot) -> ThreadKey? {
-        guard let index = old.position[key] else { return new.order.first }
+        // A thread opened from outside the list (notification, palette) stays open.
+        guard let index = old.position[key] else { return key }
         if let next = old.order[index...].first(where: { new.rows[$0] != nil }) { return next }
         return old.order[..<index].last(where: { new.rows[$0] != nil })
     }

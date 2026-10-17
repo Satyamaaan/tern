@@ -24,6 +24,8 @@ struct RowHoverBar: View {
             .help("Snooze (h)")
             HoverButton(icon: .ellipsis, help: "More") {
                 guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
+                // The menu's commands act on the selection, so make the hovered row the selection first.
+                if keys.count == 1, let key = keys.first, !model.isSelected(key) { model.select(key) }
                 let menu = ThreadMenu.make(registry: registry, model: model)
                 menu.popUp(positioning: nil, at: view.convert(event.locationInWindow, from: nil), in: view)
             }
@@ -68,7 +70,7 @@ enum ThreadMenu {
                 menu.addItem(snoozeItem(model: model))
                 continue
             }
-            let key = command.keys.first
+            let key = command.menuKey
             let item = NSMenuItem(title: command.displayTitle, action: #selector(MenuTarget.run(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.target = target
             item.representedObject = command.id

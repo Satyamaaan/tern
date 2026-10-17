@@ -84,7 +84,7 @@ final class MainMenu: NSObject, NSMenuItemValidation {
         for command in registry.commands where command.menu == name && !command.paletteOnly {
             if let section, section != command.section { menu.addItem(.separator()) }
             section = command.section
-            let key = command.keys.first
+            let key = command.menuKey
             let item = NSMenuItem(title: command.title, action: #selector(runCommand(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.target = self
             item.representedObject = command.id

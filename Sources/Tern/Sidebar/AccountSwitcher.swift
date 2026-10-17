@@ -56,7 +56,7 @@ struct AccountSwitcher: View {
         target.registry = registry
         func add(_ id: String, title: String, image: NSImage? = nil, on: Bool = false) {
             guard let command = registry[id] else { return }
-            let key = command.keys.first
+            let key = command.menuKey
             let item = NSMenuItem(title: title, action: #selector(MenuTarget.run(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.keyEquivalentModifierMask = key?.modifiers ?? []
             item.target = target

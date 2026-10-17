@@ -105,6 +105,12 @@ final class PaletteController {
         query = ""
     }
 
+    /// Every opening starts from an empty query with the first row highlighted.
+    func reset() {
+        query = ""
+        selection = 0
+    }
+
     // MARK: Items
 
     @ObservationIgnored private var aliases: [String: [String]] = [:]
@@ -290,9 +296,14 @@ struct PaletteView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
         .overlayShadow()
-        .onAppear { focused = true }
+        .onAppear {
+            controller.reset()
+            focused = true
+        }
         .onChange(of: model.palette) { _, mode in
-            if mode != nil { focused = true }
+            guard mode != nil else { return }
+            controller.reset()
+            focused = true
         }
     }
 

@@ -60,6 +60,23 @@ extension AppModel {
         }
     }
 
+    /// Reads the current query again after a write, keeping the cursor where it is.
+    func refreshSearch() {
+        let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isSearching, !text.isEmpty else { return }
+        let generation = searchGeneration
+        let search = services.search
+        let accountId = scope.accountId
+        Task { [weak self] in
+            let rows = await Task.detached(priority: .userInitiated) {
+                (try? search.search(text, accountId: accountId, limit: Self.searchLimit)) ?? []
+            }.value
+            guard let self, generation == self.searchGeneration, self.isSearching else { return }
+            self.searchRows = rows
+            self.rebuildSnapshot(.none)
+        }
+    }
+
     private func leaveResults() {
         guard isSearching else { return }
         isSearching = false

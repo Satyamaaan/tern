@@ -38,6 +38,7 @@ final class SelfCheck {
         paging()
         dropOnProject()
         needsReply()
+        reviewFixes()
         search()
         splits()
         scope()
@@ -131,6 +132,88 @@ final class SelfCheck {
         model.undoLast()
         poll(0.6) {}
         check("undo takes it out again", model.row(key)?.projectIds.contains(project.id) == false)
+    }
+
+    /// Regressions found in review.
+    private func reviewFixes() {
+        // The next thread after triage is marked read when reading in the reader.
+        model.showSplit(.people)
+        wait(0.2)
+        if let index = model.snapshot.order.indices.dropLast().first(where: { (model.row(model.snapshot.order[$0 + 1])?.thread.unreadCount ?? 0) > 0 }) {
+            let key = model.snapshot.order[index], next = model.snapshot.order[index + 1]
+            model.select(key)
+            model.focus = .reader
+            model.perform(.archive, on: [key])
+            poll(0.6) {}
+            check("triage from the reader marks the next thread read", model.cursor == next && model.row(next)?.thread.unreadCount == 0)
+            model.undoLast()
+            poll(0.6) {}
+            model.perform(.markUnread, on: [next], toast: nil)
+            poll(0.4) {}
+            model.focus = .list
+        }
+
+        // Undoing "add to project" leaves threads that were already in it.
+        if let project = model.projects.first {
+            model.show(.allMail)
+            wait(0.2)
+            let order = model.snapshot.order
+            let inside = order.first { model.row($0)?.projectIds.contains(project.id) == true }
+            let outside = order.first { model.row($0)?.projectIds.contains(project.id) == false }
+            if let inside, let outside {
+                model.toggleProject(project.id, on: [inside, outside])
+                poll(0.5) {}
+                model.undoLast()
+                poll(0.5) {}
+                check("project undo keeps threads that were already in it",
+                      model.row(inside)?.projectIds.contains(project.id) == true && model.row(outside)?.projectIds.contains(project.id) == false)
+            }
+        }
+
+        // A thread opened from outside the list survives the next observation.
+        model.show(.inbox)
+        model.showSplit(.people)
+        wait(0.2)
+        if let outsider = try? model.store.threadRows(in: Mailbox(.sent), limit: 50).first(where: { model.snapshot.rows[$0.id] == nil })?.id,
+           let other = model.snapshot.order.first {
+            model.reveal(outsider)
+            model.perform(.star, on: [other], toast: nil)
+            poll(0.5) {}
+            check("a revealed thread stays open after the list updates", model.cursor == outsider)
+            model.perform(.unstar, on: [other], toast: nil)
+            poll(0.3) {}
+            model.focus = .list
+            model.reloadList()
+            wait(0.2)
+        }
+
+        // Search results refresh after a write.
+        model.searchText = "invoice"
+        poll(0.5) {}
+        if let first = model.snapshot.order.first, let row = model.row(first) {
+            let starred = row.thread.isStarred
+            model.setCursor(first, open: false)
+            model.toggleStar()
+            poll(0.6) {}
+            check("search results show a star change", model.row(first)?.thread.isStarred == !starred)
+            model.toggleStar()
+            poll(0.6) {}
+        }
+        model.endSearch(restoreFocus: true)
+
+        // ⌘A while typing in the search pill belongs to the text field.
+        model.beginSearch()
+        wait(0.1)
+        if KeyRouter.textInput(in: window) != nil {
+            let event = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+            check("⌘A in the search pill is left to the text", router.handle(event) != nil && model.checked.isEmpty)
+        }
+        model.endSearch(restoreFocus: true)
+        window.makeFirstResponder(nil)
+
+        check("⌘N is the menu key for New Message", registry["compose"]?.menuKey == .command("n"))
     }
 
     private func needsReply() {

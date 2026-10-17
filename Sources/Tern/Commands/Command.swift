@@ -49,4 +49,7 @@ struct Command: Identifiable {
 
     /// The shortcut text shown on keycaps: the chord or the primary key.
     var shortcutText: String? { chord ?? keys.first?.display }
+
+    /// The key equivalent menus use: the first ⌘ shortcut (menus only fire those), else the first key.
+    var menuKey: KeyShortcut? { keys.first { !$0.isBare } ?? keys.first }
 }

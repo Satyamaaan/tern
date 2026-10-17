@@ -54,7 +54,7 @@ final class CommandRegistry {
                     aliases: ["delete"], isEnabled: hasTargets) { m.perform(.trash, on: m.targets) },
             Command(id: "spam", title: "Report Spam", group: .actions, keys: [.key("!")], menu: .message,
                     aliases: ["junk"], isEnabled: hasTargets) { m.perform(.markSpam, on: m.targets) },
-            Command(id: "moveToInbox", title: "Move to Inbox", group: .actions, menu: .message,
+            Command(id: "moveToInbox", title: "Move to Inbox", group: .actions, keys: [.key("I")], menu: .message,
                     aliases: ["unarchive", "restore"],
                     isEnabled: { hasTargets() && !(m.kind == .inbox) }) { m.perform(.moveToInbox, on: m.targets) },
             Command(id: "star", title: "Star", group: .actions, keys: [.key("s")], menu: .message, section: 1,
@@ -86,7 +86,7 @@ final class CommandRegistry {
         list += [
             Command(id: "compose", title: "New Message", group: .actions, keys: [.key("c"), .command("n")], menu: .file,
                     aliases: ["compose", "write", "email"]) { m.compose() },
-            Command(id: "addAccount", title: "Add Account…", group: .accounts, menu: .file, section: 1,
+            Command(id: "addAccount", title: "Add Account…", group: .accounts, keys: [.command("n", shift: true)], menu: .file, section: 1,
                     aliases: ["connect gmail"]) { [weak self] in self?.shell?.addAccount() },
         ]
 
@@ -100,9 +100,9 @@ final class CommandRegistry {
                     hiddenInPalette: true) { m.moveCursor(-1, extend: true) },
             Command(id: "selectAll", title: "Select All Conversations", group: .actions, keys: [.command("a")],
                     isEnabled: { !m.snapshot.isEmpty }) { m.selectAll() },
-            Command(id: "markAllRead", title: "Mark All as Read", group: .actions, menu: .mailbox, section: 1,
+            Command(id: "markAllRead", title: "Mark All as Read", group: .actions, keys: [.command("u", shift: true)], menu: .mailbox, section: 1,
                     isEnabled: { !m.snapshot.isEmpty }) { m.markAllRead() },
-            Command(id: "newProject", title: "New Project…", group: .projects, menu: .mailbox, section: 2,
+            Command(id: "newProject", title: "New Project…", group: .projects, keys: [.command("p", shift: true)], menu: .mailbox, section: 2,
                     aliases: ["create project"]) { m.newProject() },
             Command(id: "splitInbox", title: "Split Inbox", group: .settings, menu: .mailbox, section: 2,
                     currentTitle: { m.prefs.splitInbox ? "Turn Off Split Inbox" : "Turn On Split Inbox" }) { m.setSplitInbox(!m.prefs.splitInbox) },
@@ -136,8 +136,8 @@ final class CommandRegistry {
         }
         list += [
             Command(id: "go.done", title: "Done", group: .goTo, chord: "g e", hiddenInPalette: true) { m.show(.allMail) },
-            Command(id: "go.spam", title: "Spam", group: .goTo, menu: .go) { m.show(.spam) },
-            Command(id: "go.trash", title: "Trash", group: .goTo, menu: .go) { m.show(.trash) },
+            Command(id: "go.spam", title: "Spam", group: .goTo, chord: "g !", menu: .go) { m.show(.spam) },
+            Command(id: "go.trash", title: "Trash", group: .goTo, chord: "g #", menu: .go) { m.show(.trash) },
             Command(id: "go.label", title: "Label…", group: .goTo, chord: "g l", menu: .go, section: 1,
                     isEnabled: { m.scope.accountId != nil }) { m.palette = .goToLabel },
             Command(id: "go.project", title: "Project…", group: .goTo, chord: "g p", menu: .go, section: 1) { m.palette = .goToProject },

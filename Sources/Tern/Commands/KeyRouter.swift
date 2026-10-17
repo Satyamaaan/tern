@@ -45,10 +45,11 @@ final class KeyRouter {
         let flags = event.modifierFlags.intersection(KeyShortcut.relevantModifiers)
         let hasCommand = flags.contains(.command) || flags.contains(.control)
 
-        // Typing anywhere in the app: plain keys belong to the text, never to menu shortcuts.
-        if let text = Self.textInput(in: event.window), !hasCommand {
+        // Typing anywhere in the app: plain keys belong to the text, never to menu shortcuts, and ⌘ keys
+        // keep their text meaning (⌘A selects the query, ⌘Z undoes typing).
+        if let text = Self.textInput(in: event.window) {
             if event.window === mainWindow, handleWhileTyping(event, in: text) { return nil }
-            guard Self.isPrintable(event) else { return event }
+            guard !hasCommand, Self.isPrintable(event) else { return event }
             text.keyDown(with: event)
             return nil
         }
@@ -67,8 +68,12 @@ final class KeyRouter {
         for (shortcut, command) in bare where shortcut.matches(event) {
             if command.yieldsToReader && model.focus == .reader { return event }
             guard model.palette == nil || command.id == "back" else { return event }
-            if command.isEnabled() { command.run() }
-            return nil
+            if command.isEnabled() {
+                command.run()
+                return nil
+            }
+            // A disabled Tab or ⌘ shortcut keeps its normal meaning; a disabled letter is just ignored.
+            return shortcut.key == .tab || !shortcut.isBare ? event : nil
         }
         return event
     }

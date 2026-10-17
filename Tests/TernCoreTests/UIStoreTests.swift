@@ -63,13 +63,15 @@ private func seededStore() throws -> MailStore {
     let store = try seededStore()
     let fresh = ThreadKey(accountId: me.id, threadId: "fresh")
     let people = ThreadKey(accountId: me.id, threadId: "people")
-    let previous = try store.setNeedsReply(true, on: [fresh, people])
-    #expect(previous == [fresh: false, people: false])
+    let undo = try store.setNeedsReply(true, on: [fresh, people])
+    #expect(undo.previous == [people: false])
+    #expect(undo.created == [fresh])
+    let manual = try store.database.reader.read { db in try ThreadAI.fetchOne(db, key: ["accountId": me.id, "threadId": "fresh"]) }
+    #expect(manual?.source == "manual")
     #expect(try store.scopeCounts(accountId: nil).needsReply == 3)
 
-    try store.restoreNeedsReply(previous)
+    try store.restoreNeedsReply(undo)
     #expect(try store.scopeCounts(accountId: nil).needsReply == 1)
     let ai = try store.database.reader.read { db in try ThreadAI.fetchOne(db, key: ["accountId": me.id, "threadId": "fresh"]) }
-    #expect(ai?.source == "manual")
-    #expect(ai?.needsReply == false)
+    #expect(ai == nil)
 }

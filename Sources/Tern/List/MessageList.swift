@@ -78,10 +78,11 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     // MARK: ListPresenting
 
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation) {
+        // Clear hover while the old snapshot still matches the rows on screen.
+        setHovered(nil)
         let old = items
         let new = snapshot.items
         self.snapshot = snapshot
-        setHovered(nil)
 
         if animation == .reset || old.isEmpty {
             items = new
@@ -328,6 +329,7 @@ final class MessageTableView: NSTableView {
     weak var controller: MessageListController?
     private var mouseDownPoint: NSPoint?
     private var mouseDownRow = -1
+    private var pendingClick: ThreadKey?
     private(set) var isDragging = false
 
     override var acceptsFirstResponder: Bool { true }
@@ -357,6 +359,7 @@ final class MessageTableView: NSTableView {
         let row = self.row(at: point)
         mouseDownPoint = point
         mouseDownRow = row
+        pendingClick = nil
         MainActor.assumeIsolated {
             guard let controller, let key = controller.key(atRow: row) else { return }
             let flags = event.modifierFlags
@@ -364,7 +367,14 @@ final class MessageTableView: NSTableView {
                 controller.model.open()
                 return
             }
-            controller.model.click(key, command: flags.contains(.command), shift: flags.contains(.shift))
+            if flags.contains(.command) || flags.contains(.shift) {
+                controller.model.click(key, command: flags.contains(.command), shift: flags.contains(.shift))
+                return
+            }
+            // A plain click opens the row on mouse-up, so a drag can still carry the whole selection
+            // and dragging a row doesn't open it.
+            if !controller.model.checked.contains(key) { controller.model.select(key) }
+            pendingClick = key
         }
     }
 
@@ -389,6 +399,9 @@ final class MessageTableView: NSTableView {
 
     override func mouseUp(with event: NSEvent) {
         mouseDownPoint = nil
+        guard let key = pendingClick, !isDragging else { return }
+        pendingClick = nil
+        MainActor.assumeIsolated { controller?.model.click(key, command: false, shift: false) }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -419,6 +432,7 @@ extension MessageTableView {
     override func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         isDragging = false
         mouseDownPoint = nil
+        pendingClick = nil
         MainActor.assumeIsolated {
             if operation == [] { controller?.model.draggedKeys = [] }
             controller?.updateHoverFromMouse()

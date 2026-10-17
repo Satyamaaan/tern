@@ -79,6 +79,14 @@ public struct ScopeCounts: Hashable, Sendable {
     }
 }
 
+/// What undoing a needs-reply change restores: earlier flags, and manual entries to remove.
+public struct NeedsReplyUndo: Hashable, Sendable {
+    public var previous: [ThreadKey: Bool] = [:]
+    public var created: [ThreadKey] = []
+
+    public init() {}
+}
+
 extension MailStore {
     /// Inbox rows in one slice, newest first.
     public static func fetchInboxRows(_ db: Database, _ filter: InboxFilter, limit: Int, before: Date? = nil) throws -> [ThreadRow] {
@@ -168,23 +176,22 @@ extension MailStore {
     }
 
     /// Flags or clears "needs reply" by hand. Threads the classifier hasn't seen get a manual entry.
-    /// Returns the previous flag per thread, for undo.
+    /// Returns what undo needs to put things back.
     @discardableResult
-    public func setNeedsReply(_ needsReply: Bool, on threads: [ThreadKey]) throws -> [ThreadKey: Bool] {
+    public func setNeedsReply(_ needsReply: Bool, on threads: [ThreadKey]) throws -> NeedsReplyUndo {
         try database.writer.write { db in try Self.setNeedsReply(db, needsReply, on: threads) }
     }
 
     @discardableResult
-    public static func setNeedsReply(_ db: Database, _ needsReply: Bool, on threads: [ThreadKey]) throws -> [ThreadKey: Bool] {
-        var previous: [ThreadKey: Bool] = [:]
+    public static func setNeedsReply(_ db: Database, _ needsReply: Bool, on threads: [ThreadKey]) throws -> NeedsReplyUndo {
+        var undo = NeedsReplyUndo()
         for key in threads {
             if var ai = try ThreadAI.fetchOne(db, key: ["accountId": key.accountId, "threadId": key.threadId]) {
-                previous[key] = ai.needsReply
+                undo.previous[key] = ai.needsReply
                 guard ai.needsReply != needsReply else { continue }
                 ai.needsReply = needsReply
                 try ai.update(db)
             } else {
-                previous[key] = false
                 guard needsReply,
                       let thread = try MailThread.fetchOne(db, key: ["accountId": key.accountId, "id": key.threadId])
                 else { continue }
@@ -192,16 +199,20 @@ extension MailStore {
                     accountId: key.accountId, threadId: key.threadId, category: .people, needsReply: true,
                     source: "manual", messageCount: thread.messageCount
                 ).insert(db)
+                undo.created.append(key)
             }
         }
-        return previous
+        return undo
     }
 
-    /// Restores flags returned by `setNeedsReply`.
-    public func restoreNeedsReply(_ previous: [ThreadKey: Bool]) throws {
+    /// Puts back what `setNeedsReply` changed, removing the manual entries it created.
+    public func restoreNeedsReply(_ undo: NeedsReplyUndo) throws {
         try database.writer.write { db in
-            for (flag, keys) in Dictionary(grouping: previous.keys, by: { previous[$0]! }) {
+            for (flag, keys) in Dictionary(grouping: undo.previous.keys, by: { undo.previous[$0]! }) {
                 try Self.setNeedsReply(db, flag, on: keys)
+            }
+            for key in undo.created {
+                _ = try ThreadAI.deleteOne(db, key: ["accountId": key.accountId, "threadId": key.threadId])
             }
         }
     }

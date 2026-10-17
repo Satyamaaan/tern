@@ -270,7 +270,7 @@ final class AppModel {
     func select(_ key: ThreadKey) {
         focus = .list
         checked = []
-        setCursor(key, open: false)
+        setCursor(key, open: false, dwell: false)
     }
 
     /// x: adds or removes the cursor thread from the selection.
@@ -291,12 +291,18 @@ final class AppModel {
         listView?.selectionDidChange(scrollTo: nil)
     }
 
-    func setCursor(_ key: ThreadKey?, open: Bool, keepAnchor: Bool = false) {
+    /// Moves the cursor. `open` marks the thread read now; otherwise it is marked read after a moment
+    /// on screen, unless `dwell` is false (right-click, drag), which never marks it read.
+    func setCursor(_ key: ThreadKey?, open: Bool, keepAnchor: Bool = false, dwell: Bool = true) {
         if !keepAnchor { cursorAnchor = key }
         let changed = key != cursor
         if changed { cursor = key }
         listView?.selectionDidChange(scrollTo: key)
-        scheduleMarkRead(open: open, changed: changed)
+        if open || dwell {
+            scheduleMarkRead(open: open, changed: changed)
+        } else {
+            markReadTimer?.invalidate()
+        }
     }
 
     /// Enter / o: open the thread for reading.
@@ -329,7 +335,7 @@ final class AppModel {
 
     /// Opening a thread (click, Enter) marks it read at once; moving onto it with j/k marks it read
     /// after it has been on screen for a moment, so skimming past doesn't.
-    private func scheduleMarkRead(open: Bool, changed: Bool) {
+    func scheduleMarkRead(open: Bool, changed: Bool) {
         markReadTimer?.invalidate()
         guard let key = cursor, checked.count <= 1 else { return }
         if open { markRead([key]); return }
@@ -343,7 +349,8 @@ final class AppModel {
     }
 
     private func markRead(_ keys: [ThreadKey]) {
-        let unread = keys.filter { (row($0)?.thread.unreadCount ?? 0) > 0 }
+        // Threads opened from outside the list (notifications) have no row; the write is a no-op if read.
+        let unread = keys.filter { row($0).map { $0.thread.unreadCount > 0 } ?? true }
         guard !unread.isEmpty else { return }
         perform(.markRead, on: unread, toast: nil)
     }
@@ -363,7 +370,7 @@ struct Toast: Identifiable, Equatable {
 struct UndoEntry: Identifiable {
     enum Change {
         case mail(MailAction, WriteResult<UndoToken>)
-        case needsReply(WriteResult<[ThreadKey: Bool]>)
+        case needsReply(WriteResult<NeedsReplyUndo>)
         case project(String, [ThreadKey], assigned: Bool)
     }
 

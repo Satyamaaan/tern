@@ -80,6 +80,8 @@ extension AppModel {
 
     func committed(_ keys: [ThreadKey]) {
         for key in keys where hidden[key] == .writing { hidden[key] = .committed }
+        // Search results are a one-off read; read them again so stars, read state and flags update.
+        if isSearching { refreshSearch() }
         // If the write left a thread in this list after all (no change reached the observation),
         // show it again once the observation has had time to catch up.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
@@ -144,6 +146,7 @@ extension AppModel {
                 MainActor.assumeIsolated {
                     for key in entry.threads { self.hidden[key] = nil }
                     self.rebuildSnapshot(.none)
+                    if self.isSearching { self.refreshSearch() }
                 }
             }
         }
@@ -177,9 +180,9 @@ extension AppModel {
         let keys = targets
         guard !keys.isEmpty else { return }
         let flag = !keys.allSatisfy { row($0)?.needsReply ?? false }
-        if !flag, case .needsReply = kind { hide(keys) }
+        if !flag, !isSearching, case .needsReply = kind { hide(keys) }
         let store = self.store
-        let result = WriteResult<[ThreadKey: Bool]>()
+        let result = WriteResult<NeedsReplyUndo>()
         showToast(flag ? "Marked needs reply" : "Cleared needs reply", undo: UndoEntry(change: .needsReply(result), threads: keys))
         writes.async {
             result.value = try? store.setNeedsReply(flag, on: keys)
@@ -190,11 +193,14 @@ extension AppModel {
     }
 
     /// Adds threads to a project, or removes them when all of them are in it already.
-    func toggleProject(_ projectId: String, on keys: [ThreadKey]) {
+    func toggleProject(_ projectId: String, on targets: [ThreadKey]) {
+        func isIn(_ key: ThreadKey) -> Bool { row(key)?.projectIds.contains(projectId) ?? false }
+        let assigned = !targets.allSatisfy(isIn)
+        // Only the threads that change, so undo leaves the others where they were.
+        let keys = targets.filter { isIn($0) != assigned }
         guard !keys.isEmpty else { return }
-        let assigned = !keys.allSatisfy { row($0)?.projectIds.contains(projectId) ?? false }
         let name = project(projectId)?.name ?? "project"
-        if !assigned, case .project(let id) = kind, id == projectId { hide(keys) }
+        if !assigned, !isSearching, case .project(let id) = kind, id == projectId { hide(keys) }
         let store = self.store
         showToast(assigned ? "Added to \(name)" : "Removed from \(name)",
                   undo: UndoEntry(change: .project(projectId, keys, assigned: assigned), threads: keys))

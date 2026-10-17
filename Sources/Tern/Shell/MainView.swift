@@ -64,7 +64,7 @@ struct MainView: View {
         ZStack(alignment: .top) {
             if model.palette != nil || model.showsShortcuts {
                 Color.black.opacity(0.001)
-                    .onTapGesture { model.palette = nil; model.showsShortcuts = false }
+                    .onTapGesture { palette.close(); model.showsShortcuts = false }
             }
             if model.palette != nil {
                 PaletteView(controller: palette)
