@@ -149,7 +149,8 @@ extension AccountSync {
     }
 
     /// Fetches whole threads (`format` full or metadata) and stores their messages. Falls back to
-    /// messages.get for the known ids when the client has no threads.get.
+    /// messages.get for the known ids when the client has no threads.get. `guardHistory` is as for
+    /// `fetchAndStore`: messages a newer write overtook are stored by `storeFresh`'s rules.
     func fetchThreads(_ threads: [(threadId: String, knownIds: [String])], format: GmailMessageFormat = .full,
                       guardHistory: Bool = false) async throws {
         guard !threads.isEmpty else { return }
@@ -157,37 +158,29 @@ extension AccountSync {
             try await fetchAndStore(threads.flatMap(\.knownIds), format: format, guardHistory: guardHistory)
             return
         }
-        let accountId = self.accountId
-        let email = account.email
+        let counter = serverWrites
         for chunk in threads.syncChunks(batchSize(cost: configuration.quota.threadCost(format))) {
-            var fetched: [GmailThread] = []
+            let seen = counter.value
+            let fetched: [GmailThread]
             do {
-                for attempt in 0..<3 {
-                    let generation = historyGeneration
-                    fetched = try await withRetry { [api] in try await api.threads(ids: chunk.map(\.threadId), format: format) }
-                    if !guardHistory || generation == historyGeneration || attempt == 2 { break }
-                }
+                fetched = try await withRetry { [api] in try await api.threads(ids: chunk.map(\.threadId), format: format) }
             } catch GmailAPIError.server(501, GmailThread.unsupported) {
                 threadsUnsupported = true
                 try await fetchAndStore(threads.flatMap(\.knownIds), format: format, guardHistory: guardHistory)
                 return
             }
-            var parsed: [ParsedMessage] = []
-            for thread in fetched {
-                for message in thread.messages ?? [] {
-                    if format == .full, let complete = try await withExternalBodies(message) {
-                        parsed.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
-                    } else {
-                        if format == .full { failedBodies.insert(message.id) }
-                        parsed.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
-                                                               format: format == .full ? .metadata : format))
-                    }
+            let batch = try await parsed(fetched.flatMap { $0.messages ?? [] }, format: format)
+            let overtaken = try await writeServer { db -> [String] in
+                guard guardHistory, counter.value != seen + 1 else {
+                    try MailStore.upsertServerMessages(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
+                    return []
                 }
-                completeThreads.insert(thread.id)
+                return try MailStore.upsertServerBodies(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
             }
-            let batch = parsed
-            try await write { db in
-                try MailStore.upsertServerMessages(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
+            if overtaken.isEmpty {
+                completeThreads.formUnion(fetched.map(\.id))
+            } else {
+                try await fetchAndStore(overtaken, format: format, guardHistory: true)
             }
         }
     }
@@ -284,10 +277,11 @@ extension AccountSync {
         }
         for chunk in Array(labelsById).syncChunks(configuration.writeBatchSize) {
             let update = Dictionary(uniqueKeysWithValues: chunk)
-            try await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+            try await writeServer { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
         }
 
-        // Stored Trash and Spam: read their labels while that's cheap, else just move them there.
+        // Stored Trash and Spam: read their labels while that's cheap. Otherwise move them there now
+        // and leave their exact labels to `labelCheckStep`, queued in the same writes.
         let knownHidden = Array(hidden.filter(local.contains))
         var gone = local.subtracting(serverIds)
         if knownHidden.count <= configuration.resyncHiddenRefreshLimit {
@@ -297,12 +291,12 @@ extension AccountSync {
                 let returned = Set(fetched.map(\.id))
                 gone.formUnion(chunk.filter { !returned.contains($0) })
                 let update = Dictionary(fetched.map { ($0.id, $0.labelIds ?? []) }, uniquingKeysWith: { $1 })
-                try await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+                try await writeServer { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
             }
         } else {
             let trashSet = Set(trash)
             for chunk in knownHidden.syncChunks(configuration.writeBatchSize) {
-                try await write { db in
+                try await writeServer { db in
                     var update: [String: [String]] = [:]
                     for row in try Row.fetchAll(db, sql: """
                         SELECT id, labelIds FROM message WHERE accountId = ? AND id IN (\(databaseQuestionMarks(count: chunk.count)))
@@ -310,13 +304,15 @@ extension AccountSync {
                         let id: String = row["id"]
                         let json: String = row["labelIds"]
                         var labels = Set((try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? [])
-                        labels.remove(SystemLabel.inbox)
+                        labels.subtract([SystemLabel.inbox, SystemLabel.trash, SystemLabel.spam])
                         labels.insert(trashSet.contains(id) ? SystemLabel.trash : SystemLabel.spam)
                         update[id] = Array(labels)
                     }
                     try MailStore.applyServerLabels(db, accountId: accountId, update)
+                    try AccountSync.queueLabelChecks(db, accountId: accountId, ids: chunk)
                 }
             }
+            labelChecksPending = true
         }
 
         let newInbox = inboxIds.filter { !local.contains($0) }
@@ -327,7 +323,7 @@ extension AccountSync {
         let goneIds = Array(gone)
         let historyId = profile.historyId
         let now = clock.now()
-        try await write { db in
+        try await writeServer { db in
             try MailStore.deleteServerMessages(db, accountId: accountId, ids: goneIds)
             _ = try AccountSync.updateAccountRow(db, accountId) {
                 $0.historyId = historyId
@@ -387,7 +383,8 @@ extension AccountSync {
             return
         }
         if unsure {
-            let generation = historyGeneration
+            let counter = serverWrites
+            let seen = counter.value
             var fetched: [GmailThread]
             do {
                 fetched = try await withRetry { [api] in try await api.threads(ids: [threadId], format: .metadata) }
@@ -395,20 +392,24 @@ extension AccountSync {
                 threadsUnsupported = true
                 fetched = []
             }
-            // History moved while we read: its changes win; the full fetch below brings the rest.
-            if generation != historyGeneration { fetched = [] }
             let localIds = Set(local.map(\.id))
             let email = account.email
             let messages = fetched.first?.messages ?? []
             let unknown = messages.filter { !localIds.contains($0.id) }
             let parsed = unknown.map { GmailMessageParser.parse($0, accountId: accountId, accountEmail: email, format: .metadata) }
             let labels = Dictionary(messages.filter { localIds.contains($0.id) }.map { ($0.id, $0.labelIds ?? []) }, uniquingKeysWith: { $1 })
-            try await write { db in
+            // Gmail's state was written since we read: what's stored may be newer, so this read is
+            // dropped; the full fetch below brings the rest.
+            let applied = try await writeServer { db -> Bool in
+                guard counter.value == seen + 1 else { return false }
                 try MailStore.upsertServerMessages(db, parsed.map(\.message), attachments: [])
                 try MailStore.applyServerLabels(db, accountId: accountId, labels)
+                return true
             }
-            if !fetched.isEmpty { completeThreads.insert(threadId) }
-            missing += unknown.map(\.id)
+            if applied, !fetched.isEmpty {
+                completeThreads.insert(threadId)
+                missing += unknown.map(\.id)
+            }
             if missing.count >= configuration.threadFetchMinimum {
                 try await fetchThreads([(threadId, missing)], format: .full, guardHistory: true)
                 return
@@ -472,17 +473,15 @@ extension AccountSync {
     /// unconfirmed local changes on top. `finally` runs inside the last write (even when `ids` is
     /// empty) with the ids Gmail no longer has. Returns those ids.
     ///
-    /// `guardHistory` is for callers outside the sync loop (server search): each batch is written
-    /// right after its fetch, and refetched first when history was applied in between, so a delete
-    /// or label change that history skipped (the message wasn't stored yet) isn't overwritten.
+    /// `guardHistory` is for callers outside the sync loop (opening a thread, server search), whose
+    /// fetches can overlap a history poll: each batch is written right after its fetch by
+    /// `storeFresh`, which never lets what it fetched overwrite something written meanwhile.
     @discardableResult
     func fetchAndStore(_ ids: [String], format: GmailMessageFormat, countsProgress: Bool = false, guardHistory: Bool = false,
                        finally: (@Sendable (Database, [String]) throws -> Void)? = nil) async throws -> [String] {
-        let accountId = self.accountId
-        let email = account.email
         let chunks = ids.syncChunks(batchSize(cost: configuration.quota.messageCost(format)))
         guard !chunks.isEmpty else {
-            if let finally { try await write { db in try finally(db, []) } }
+            if let finally { try await writeServer { db in try finally(db, []) } }
             return []
         }
         var missing: [String] = []
@@ -490,37 +489,77 @@ extension AccountSync {
         for (index, chunk) in chunks.enumerated() {
             // Bulk and background fetches are the run loop's: queued actions go out in between.
             if index > 0, QuotaPriority.current != .interactive { try await serviceActions() }
-            var fetched: [GmailMessage] = []
-            for attempt in 0..<3 {
-                let generation = historyGeneration
-                fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: format) }
-                if !guardHistory || generation == historyGeneration || attempt == 2 { break }
+            if guardHistory {
+                missing += try await storeFresh(chunk, format: format, countsProgress: countsProgress)
+                continue
             }
+            let fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: format) }
             let returned = Set(fetched.map(\.id))
             missing += chunk.filter { !returned.contains($0) }
-            for message in fetched {
-                if format == .full, let complete = try await withExternalBodies(message) {
-                    buffer.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
-                } else {
-                    // A body part couldn't be fetched: store headers now, a later open tries again.
-                    if format == .full { failedBodies.insert(message.id) }
-                    buffer.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
-                                                           format: format == .full ? .metadata : format))
-                }
-            }
+            buffer += try await parsed(fetched, format: format)
 
             let isLast = index == chunks.count - 1
-            guard isLast || guardHistory || buffer.count >= configuration.writeBatchSize else { continue }
+            guard isLast || buffer.count >= configuration.writeBatchSize else { continue }
             let batch = buffer
             let gone = missing
             buffer = []
-            try await write { db in
+            try await writeServer { db in
                 try MailStore.upsertServerMessages(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
                 if isLast, let finally { try finally(db, gone) }
             }
             if countsProgress { publish { $0.fetched += batch.count } }
         }
+        if guardHistory, let finally {
+            let gone = missing
+            try await writeServer { db in try finally(db, gone) }
+        }
         return missing
+    }
+
+    /// Fetches and stores one batch, checking in the write transaction itself whether Gmail's state
+    /// was written since the fetch began (a history poll, a resync, another fetch). Only then is
+    /// what it fetched stored as is. Otherwise stored messages get just their bodies, keeping the
+    /// labels they have now, and messages not stored are fetched again (history may have deleted
+    /// them), up to three times, then left for a later fetch. Returns the ids Gmail no longer has.
+    private func storeFresh(_ ids: [String], format: GmailMessageFormat, countsProgress: Bool) async throws -> [String] {
+        let counter = serverWrites
+        var pending = ids
+        var missing: [String] = []
+        for _ in 0..<3 where !pending.isEmpty {
+            let seen = counter.value
+            let request = pending
+            let fetched = try await withRetry { [api] in try await api.messages(ids: request, format: format) }
+            let returned = Set(fetched.map(\.id))
+            missing += request.filter { !returned.contains($0) }
+            let batch = try await parsed(fetched, format: format)
+            pending = try await writeServer { db in
+                guard counter.value != seen + 1 else {
+                    try MailStore.upsertServerMessages(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
+                    return []
+                }
+                return try MailStore.upsertServerBodies(db, batch.map(\.message), attachments: batch.flatMap(\.attachments))
+            }
+            if countsProgress { publish { $0.fetched += batch.count - pending.count } }
+        }
+        return missing
+    }
+
+    /// Parses fetched messages. A full message whose large text body Gmail left out has it fetched
+    /// first; when that fails its headers are stored now and a later open tries again.
+    private func parsed(_ messages: [GmailMessage], format: GmailMessageFormat) async throws -> [ParsedMessage] {
+        let accountId = self.accountId
+        let email = account.email
+        var result: [ParsedMessage] = []
+        for message in messages {
+            if format == .full, let complete = try await withExternalBodies(message) {
+                result.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
+            } else {
+                if format == .full { failedBodies.insert(message.id) }
+                result.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
+                                                       format: format == .full ? .metadata : format))
+            }
+        }
+        return result
     }
 
     /// Gmail returns large text bodies by attachment id instead of inline data. Fetches them into

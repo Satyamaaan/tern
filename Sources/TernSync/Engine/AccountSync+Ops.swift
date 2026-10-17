@@ -69,7 +69,9 @@ extension AccountSync {
         nextOpAt = min(nextOpAt ?? date, date)
     }
 
-    private func execute(_ op: PendingOp, now: Date) async throws -> OpOutcome {
+    /// Sends one op read from the queue. Every kind claims its row first, so an op undo or discard
+    /// removed after the queue was read is never sent.
+    func execute(_ op: PendingOp, now: Date) async throws -> OpOutcome {
         do {
             switch op.kind {
             case .modifyLabels: try await sendLabelChanges(op)
@@ -87,12 +89,12 @@ extension AccountSync {
 
     /// One batchModify per distinct (add, remove) pair, at most `maxBatchModifyIds` ids each.
     private func sendLabelChanges(_ op: PendingOp) async throws {
-        guard let opId = op.id else { return }
-        guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else {
-            try await deleteOp(opId)
+        guard let opId = op.id, let claimed = try claimOp(opId) else { return }
+        guard var payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(claimed.payload.utf8)) else {
+            try deleteOpNow(opId)
             return
         }
-        try await setOpState(opId, .inflight)
+        if AccountSync.mentionsPendingMute(payload) { payload = try await resolvePendingMuteLabel(payload) }
         // Messages Gmail has deleted since (history removed them here) would fail the whole call.
         let accountId = self.accountId
         let ids = payload.changes.map(\.messageId)
@@ -142,8 +144,9 @@ extension AccountSync {
     // `DraftStore` writes drafts and their ops; the engine sends what it wrote. While a send runs the
     // draft is `sending` and its op `inflight`, so the composer can't change or undo it. Once the
     // Gmail draft to send exists its id goes into the op payload (`sendingDraftId`): from then on
-    // retries only call drafts.send for it (`notFound` meaning an earlier attempt already sent it)
-    // and the send can't be undone, so a lost response or a crash never sends twice.
+    // retries look in Sent first and only call drafts.send for it, and the send can't be undone, so a
+    // lost response or a crash never sends twice. When drafts.send answers `notFound` and Sent
+    // doesn't show the message, the send is unconfirmed (`unconfirmedSend`): it is never tried again.
 
     private enum DraftClaim: Sendable {
         case gone
@@ -272,6 +275,7 @@ extension AccountSync {
             // Undone in the meantime?
             guard var fresh = try PendingOp.fetchOne(db, key: opId), fresh.state == .pending else { return .gone }
             fresh.state = .inflight
+            fresh.dispatched = true
             try fresh.update(db)
             draft.state = .sending
             draft.lastError = nil
@@ -291,11 +295,15 @@ extension AccountSync {
         let isRetry = payload.sendingDraftId != nil || op.attempts > 0 || op.lastError != nil
         if isRetry, let sent = try await findSent(messageId: AccountSync.messageId(for: draft, account: account)) {
             ref = sent
+        } else if let checks = payload.confirmChecks {
+            return try unconfirmedSend(op, payload, checks: checks + 1, now: now)
         } else if let staged = payload.sendingDraftId {
             do {
                 ref = try await api.sendDraft(id: staged)
             } catch GmailAPIError.notFound {
-                ref = nil
+                // Gmail deletes a draft when it sends it, so an earlier attempt most likely went out
+                // and Sent's search hasn't caught up; but the draft may have been deleted elsewhere.
+                return try unconfirmedSend(op, payload, checks: 0, now: now)
             }
         } else {
             let raw = try await encoded(draft, account)
@@ -349,6 +357,43 @@ extension AccountSync {
         return .done
     }
 
+    /// A staged send whose Gmail draft is gone while Sent doesn't show the message, after `checks`
+    /// further looks at Sent. Sent is checked again after each `sendConfirmationDelays` (the draft
+    /// stays `queued`, so it can't be edited, undone or discarded meanwhile); drafts.send is never
+    /// called again. If it never shows up, the op is dropped and the draft, with its files, is kept
+    /// as `failed` with `DraftStore.unconfirmedSendError`: only the user can send it again.
+    private func unconfirmedSend(_ op: PendingOp, _ payload: DraftOpPayload, checks: Int, now: Date) throws -> OpOutcome {
+        guard let opId = op.id else { return .done }
+        let draftId = payload.draftId
+        let delays = configuration.sendConfirmationDelays
+        guard checks < delays.count else {
+            try writeNow { db in
+                _ = try PendingOp.deleteOne(db, key: opId)
+                guard var draft = try Draft.fetchOne(db, key: draftId), draft.state != .sent else { return }
+                draft.state = .failed
+                draft.lastError = DraftStore.unconfirmedSendError
+                try draft.update(db)
+            }
+            return .done
+        }
+        var waiting = payload
+        waiting.confirmChecks = checks
+        let json = String(decoding: try JSONEncoder().encode(waiting), as: UTF8.self)
+        let retryAt = now.addingTimeInterval(delays[checks])
+        try writeNow { db in
+            guard var row = try PendingOp.fetchOne(db, key: opId) else { return }
+            row.payload = json
+            row.state = .pending
+            row.notBefore = retryAt
+            try row.update(db)
+            guard var draft = try Draft.fetchOne(db, key: draftId), draft.state != .sent else { return }
+            draft.state = .queued
+            draft.lastError = nil
+            try draft.update(db)
+        }
+        return .deferred(retryAt)
+    }
+
     /// Creates or updates the Gmail copy of a draft being written and records its ids on the row.
     /// When the draft was discarded or moved to another account meanwhile, the copy just saved
     /// isn't wanted: its deletion is queued.
@@ -367,6 +412,7 @@ extension AccountSync {
                 return .gone
             }
             fresh.state = .inflight
+            fresh.dispatched = true
             try fresh.update(db)
             return .ready(draft, account)
         }
@@ -405,7 +451,7 @@ extension AccountSync {
                 try Draft.fetchOne(db, key: payload.draftId).flatMap { $0.accountId == accountId ? $0.gmailDraftId : nil }
             }
         }
-        try await setOpState(opId, .inflight)
+        guard try claimOp(opId) != nil else { return }
         if let gmailDraftId {
             do {
                 try await api.deleteDraft(id: gmailDraftId)
@@ -482,7 +528,7 @@ extension AccountSync {
                 var labels: [String: [String]] = [:]
                 for message in fetched { labels[message.id] = message.labelIds ?? [] }
                 let update = labels
-                _ = try? await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+                _ = try? await writeServer { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
             }
         case .sendDraft:
             try? await restoreDraftState(op, state: .failed, error: error)
@@ -515,8 +561,17 @@ extension AccountSync {
         op.kind == .sendDraft && (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.sendingDraftId != nil
     }
 
-    private func setOpState(_ id: Int64, _ state: PendingOp.State) async throws {
-        try await updateOp(id) { $0.state = state }
+    /// Claims a queued op for sending in one write: pending → inflight, and `dispatched`, since a
+    /// request for it may reach Gmail from now on. Nil when undo removed it or it isn't pending any
+    /// more; it must not be sent then.
+    private func claimOp(_ id: Int64) throws -> PendingOp? {
+        try writeNow { db in
+            try db.execute(sql: """
+                UPDATE pending_op SET state = 'inflight', dispatched = 1 WHERE id = ? AND state = 'pending'
+                """, arguments: [id])
+            guard db.changesCount > 0 else { return nil }
+            return try PendingOp.fetchOne(db, key: id)
+        }
     }
 
     private func deleteOp(_ id: Int64) async throws {

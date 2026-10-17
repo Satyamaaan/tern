@@ -239,11 +239,60 @@ extension Harness {
     h.clock.advance(60)
     try await h.sync.drainOps()
 
-    // Search missed it, so drafts.send was tried again; the draft was gone, so it was already sent.
+    // Search missed it, so drafts.send was tried again; the draft was gone, which usually means it
+    // went out, but that isn't taken on trust: the draft stays, locked, until Sent shows the message.
     #expect(await h.fake.callCount(.sendDraft) == 2)
+    #expect(try draftRow(h, draft.id)?.state == .queued)
+    #expect(!(try await h.drafts.cancelSend(draft.id)))
+    #expect(!(try await h.drafts.discard(draft.id)))
+
+    await h.fake.resumeSearchIndex()
+    h.clock.advance(15)
+    try await h.sync.drainOps()
+    #expect(await h.fake.callCount(.sendDraft) == 2, "never sent again")
     #expect(await h.fake.allMessageIds.count == 3)
     #expect(try draftRow(h, draft.id) == nil)
     #expect(try h.ops().isEmpty)
+    let detail = try #require(try h.store.threadDetail(h.thread(seeded[0].threadId)))
+    #expect(detail.messages.last?.labelIds == [SystemLabel.sent])
+}
+
+@Test func aSendWhoseGmailDraftWasDeletedElsewhereIsKeptAndNotResent() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 2)
+    try await h.syncFully()
+    var draft = reply(to: seeded[0])
+    let file = try await h.drafts.addData(Data("notes".utf8), filename: "notes.txt", to: draft.id)
+    draft.attachments = [file]
+    // Staged, then drafts.send fails before Gmail takes it; meanwhile the draft is deleted on the phone.
+    await h.fake.failNext(1, with: .network("offline"), on: .sendDraft)
+    try await h.queueSend(draft, notBefore: nil)
+    try await h.sync.drainOps()
+    let op = try #require(try h.ops().first)
+    let staged = try #require(try JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)).sendingDraftId)
+    try await h.fake.deleteDraft(id: staged)
+
+    for _ in 0..<6 {
+        h.clock.advance(200)
+        try await h.sync.drainOps()
+    }
+    #expect(await h.fake.callCount(.sendDraft) == 2, "drafts.send is not called again after it said the draft is gone")
+    let sentChecks = await h.fake.listCalls.filter { $0.query?.hasPrefix("rfc822msgid:") == true }.count
+    #expect(sentChecks == 1 + h.configuration.sendConfirmationDelays.count, "Sent was looked at again a few times")
+    #expect(await h.fake.allMessageIds.count == 2, "nothing went out")
+    let row = try #require(try draftRow(h, draft.id), "the draft is kept")
+    #expect(row.state == .failed)
+    #expect(row.lastError == DraftStore.unconfirmedSendError)
+    #expect(row.attachments.map(\.path) == [file.path])
+    #expect(FileManager.default.fileExists(atPath: file.path), "and so are its files")
+    #expect(try h.ops().isEmpty, "the send op is dropped")
+
+    // Sending it again is the user's call; it then goes out once.
+    try await h.drafts.send(row, undoSeconds: 0, now: h.clock.now())
+    try await h.sync.drainOps()
+    #expect(await h.fake.callCount(.sendDraft) == 3)
+    #expect(await h.fake.allMessageIds.count == 3)
+    #expect(try draftRow(h, draft.id) == nil)
 }
 
 @Test func theStableMessageIdReplacesTheEncodersOwn() {

@@ -105,7 +105,11 @@ final class ComposerModel: Identifiable {
         editor.setAccessory(ComposerAccessory(model: self))
 
         if content.draft.state == .failed {
-            notice = content.draft.lastError.map { "Couldn't send: \($0)" } ?? "Couldn't send. Try again."
+            if let error = content.draft.lastError, error == DraftStore.unconfirmedSendError {
+                notice = error
+            } else {
+                notice = content.draft.lastError.map { "Couldn't send: \($0)" } ?? "Couldn't send. Try again."
+            }
         }
         if content.draft.state == .queued {
             // Opening a scheduled message to edit it takes it out of the queue.

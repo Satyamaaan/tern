@@ -110,6 +110,7 @@ public actor FakeGmail: GmailAPI {
     private var attachmentData: [String: Data] = [:]
     private var failures: [Failure] = []
     private var lostResponses: [Operation: Int] = [:]
+    private var hooks: [Operation: @Sendable () async -> Void] = [:]
     private var rejectsUnknownIds = false
     /// Ids the search index knows while it's stalled; nil when search is current.
     private var indexedIds: Set<String>?
@@ -176,6 +177,12 @@ public actor FakeGmail: GmailAPI {
     /// like a timeout after Gmail accepted the request.
     public func loseNextResponse(_ count: Int = 1, on operation: Operation) {
         lostResponses[operation, default: 0] += count
+    }
+
+    /// Runs `hook` once, the next time `operation` is called, before the call takes effect: e.g.
+    /// another client's change and a history poll landing while a fetch waits on its answer.
+    public func onNext(_ operation: Operation, _ hook: @escaping @Sendable () async -> Void) {
+        hooks[operation] = hook
     }
 
     /// batchModify rejects the whole call with `.notFound` when any id doesn't exist.
@@ -454,6 +461,7 @@ public actor FakeGmail: GmailAPI {
 
     private func begin(_ operation: Operation, units: Int) async throws {
         callCounts[operation, default: 0] += 1
+        if let hook = hooks.removeValue(forKey: operation) { await hook() }
         if latency > 0 { try await sleep(latency) }
         if let quota, let quotaClock {
             let now = quotaClock.now()

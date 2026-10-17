@@ -44,8 +44,8 @@ public actor AccountSync {
     /// When the earliest deferred op becomes due.
     var nextOpAt: Date?
     var consecutiveFailures = 0
-    /// Bumped whenever history changes are applied, so a fetch that overlapped one can tell.
-    var historyGeneration = 0
+    /// Bumped inside every write of Gmail's state (`writeServer`), so a fetch that overlapped one can tell.
+    nonisolated let serverWrites = ServerWriteCounter()
     /// When bulk or background work can next afford a step.
     var nextBackgroundAt: Date?
     var nextTrickleAt = Date.distantPast
@@ -57,6 +57,8 @@ public actor AccountSync {
     var completeThreads = Set<String>()
     /// Threads next to the selection, waiting for their bodies.
     var adjacentQueue: [String] = []
+    /// False once `label_check` has nothing left for this account; true until it's been looked at.
+    var labelChecksPending = true
     /// Messages whose body couldn't be fetched this run; the trickle skips them.
     var failedBodies = Set<String>()
     /// Set by `kick`; long bulk work checks it to send queued actions without waiting.
@@ -209,7 +211,8 @@ public actor AccountSync {
     }
 
     /// The next slice of non-interactive work, by priority: bodies of threads next to the
-    /// selection, the initial inbox and recent mail, the older-mail backfill, the body trickle.
+    /// selection, the initial inbox and recent mail, labels a resync could only approximate, the
+    /// older-mail backfill, the body trickle.
     /// Runs only when the budget can afford it now; otherwise records when it can.
     func backgroundStep() async throws -> Bool {
         nextBackgroundAt = nil
@@ -229,6 +232,13 @@ public actor AccountSync {
         }
         if account.syncState == .new {
             return try await whenAffordable(configuration.bulkStepUnits, .bulk) { try await initialStep() }
+        }
+        if labelChecksPending, try await hasLabelChecks() {
+            return try await whenAffordable(batchSize(cost: quota.getMessage) * quota.getMessage, .background) {
+                try await labelCheckStep()
+                // After the last one the backfill can go on at once.
+                return true
+            }
         }
         if !account.backfillDone {
             return try await whenAffordable(configuration.backfillBatchSize * quota.getMessage + quota.list, .background) {
@@ -412,6 +422,16 @@ public actor AccountSync {
 
     func write<T: Sendable>(_ updates: @escaping @Sendable (Database) throws -> T) async throws -> T {
         try await store.database.writer.write(updates)
+    }
+
+    /// A write of Gmail's state (messages, labels, deletions it reported): bumps `serverWrites` in
+    /// the same transaction.
+    func writeServer<T: Sendable>(_ updates: @escaping @Sendable (Database) throws -> T) async throws -> T {
+        let counter = serverWrites
+        return try await write { db in
+            counter.bump()
+            return try updates(db)
+        }
     }
 
     /// A short synchronous write for op bookkeeping that must land even while the task is being

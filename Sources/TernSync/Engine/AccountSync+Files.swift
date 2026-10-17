@@ -12,21 +12,25 @@ public enum SyncError: Error, Sendable, Equatable {
 // Attachments and server search.
 extension AccountSync {
     /// Returns a local file for the attachment, downloading it on first use into
-    /// `<cache>/<account>/<message>/<filename>` and saving the path on the record.
-    /// Used for inline `cid:` images and Quick Look.
+    /// `<cache>/<account>/<message>/<part>/<filename>` and saving the path on the record. The file
+    /// is quarantined (`AttachmentQuarantine`), including one cached before Tern did that.
+    /// Used for opening, inline `cid:` images and Quick Look.
     public func downloadAttachment(_ attachment: MailAttachment) async throws -> URL {
         let accountId = self.accountId
         let current = try await read { db in
             try MailAttachment.fetchOne(db, key: ["accountId": accountId, "messageId": attachment.messageId, "partId": attachment.partId])
         } ?? attachment
         if let path = current.localPath, FileManager.default.fileExists(atPath: path) {
-            return URL(fileURLWithPath: path)
+            let url = URL(fileURLWithPath: path)
+            AttachmentQuarantine.mark(url)
+            return url
         }
 
         let data = try await attachmentData(current)
-        let url = try await cacheURL(for: current)
+        let url = cacheURL(for: current)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+        AttachmentQuarantine.mark(url)
         let path = url.path
         try await write { db in try MailStore.setAttachmentPath(db, current, path: path) }
         return url
@@ -71,6 +75,7 @@ extension AccountSync {
                 }
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: url, options: .atomic)
+                AttachmentQuarantine.mark(url)
             }
             draft.attachments[index].path = url.path
         }
@@ -105,25 +110,13 @@ extension AccountSync {
         return nil
     }
 
-    /// The cache path. Two attachments of one message with the same name get the part id appended.
-    private func cacheURL(for attachment: MailAttachment) async throws -> URL {
-        let accountId = self.accountId
-        let clashes = try await read { db in
-            try MailAttachment
-                .filter(Column("accountId") == accountId && Column("messageId") == attachment.messageId
-                    && Column("filename") == attachment.filename && Column("partId") != attachment.partId)
-                .fetchCount(db)
-        }
-        var name = AccountSync.safeFilename(attachment.filename, fallback: "attachment-\(attachment.partId)")
-        if clashes > 0 {
-            let base = (name as NSString).deletingPathExtension
-            let ext = (name as NSString).pathExtension
-            name = ext.isEmpty ? "\(base) (\(attachment.partId))" : "\(base) (\(attachment.partId)).\(ext)"
-        }
-        return configuration.attachmentCacheDirectory
-            .appendingPathComponent(AccountSync.safeFilename(accountId, fallback: "account"), isDirectory: true)
+    /// The cache path: one folder per MIME part, so names that differ only in characters the file
+    /// system can't keep apart (`a:b.pdf` and `a-b.pdf`, `Report.pdf` and `report.pdf`) never share a file.
+    private func cacheURL(for attachment: MailAttachment) -> URL {
+        configuration.attachmentFolder(for: accountId)
             .appendingPathComponent(AccountSync.safeFilename(attachment.messageId, fallback: "message"), isDirectory: true)
-            .appendingPathComponent(name)
+            .appendingPathComponent(AccountSync.safeFilename(attachment.partId, fallback: "part"), isDirectory: true)
+            .appendingPathComponent(AccountSync.safeFilename(attachment.filename, fallback: "attachment-\(attachment.partId)"))
     }
 
     static func safeFilename(_ name: String, fallback: String) -> String {

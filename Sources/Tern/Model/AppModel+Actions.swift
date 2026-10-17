@@ -214,13 +214,15 @@ extension AppModel {
         let result = WriteResult<UndoToken>()
         let entry = UndoEntry(change: .mail(.archive, result), threads: keys)
         showToast(title, undo: entry)
-        Task {
+        // On the serial write queue, so a z right after finds the undo token there.
+        writes.async {
             do {
-                result.value = try await muteThreads(keys)
-                committed(leaving)
+                result.value = try muteThreads(keys)
             } catch {
-                writeFailed(error, unhide: leaving, entry: entry)
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.writeFailed(error, unhide: leaving, entry: entry) } }
+                return
             }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.committed(leaving) } }
         }
     }
 

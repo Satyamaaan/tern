@@ -7,6 +7,9 @@ public enum DraftError: Error, Equatable {
     case notEditable
     /// There is no connected account to send from.
     case noAccount
+    /// The Gmail draft is stored without its body (older mail syncs as headers first). Fetch the
+    /// thread's bodies and import it again; saving it as is would replace the draft with its snippet.
+    case bodyNotFetched(ThreadKey)
 }
 
 /// What `send` and `scheduleSend` queued.
@@ -30,6 +33,9 @@ public struct DraftStore: Sendable {
     /// A Gmail draft is updated at most this often while typing.
     public static let saveInterval: TimeInterval = 10
     public static let defaultUndoSeconds = 5
+    /// `Draft.lastError` of a send that may or may not have gone out: Gmail no longer has the draft
+    /// and Sent doesn't show the message. The sync engine keeps the draft and won't send it again.
+    public static let unconfirmedSendError = "Couldn't confirm this was sent. Check Sent in Gmail before sending again."
 
     /// `setting` keys.
     public enum SettingKey {
@@ -103,17 +109,10 @@ public struct DraftStore: Sendable {
             guard let detail = try MailStore.fetchThreadDetail(db, key),
                   let original = detail.messages.last(where: { !$0.isDraft }) else { return nil }
             let html = original.bodyHtml ?? ""
-            let attachments = (detail.attachments[original.id] ?? []).compactMap { file -> DraftAttachment? in
-                let contentId = file.isInline ? file.contentId : nil
-                // Inline images travel only when the body still points at them.
-                if file.isInline, !(contentId.map { html.contains("cid:\($0)") } ?? false) { return nil }
-                return DraftAttachment(
-                    path: file.localPath ?? "", filename: file.filename, mimeType: file.mimeType, size: file.size,
-                    remote: RemoteAttachmentRef(
-                        accountId: file.accountId, messageId: file.messageId, partId: file.partId,
-                        attachmentId: file.attachmentId),
-                    contentId: contentId)
-            }
+            // Inline images travel only when the body still points at them.
+            let attachments = (detail.attachments[original.id] ?? [])
+                .filter { file in !file.isInline || (file.contentId.map { html.contains("cid:\($0)") } ?? false) }
+                .map(carried)
             let draft = Draft(
                 accountId: key.accountId, threadId: key.threadId, replyToMessageId: original.id, kind: .forward,
                 subject: DraftTemplate.forwardSubject(original.subject.isEmpty ? detail.thread.subject : original.subject),
@@ -144,6 +143,8 @@ public struct DraftStore: Sendable {
 
     /// Opens a Gmail draft that only exists as a `DRAFT` message (e.g. written in the browser): the
     /// local draft linked to it, or new content carrying its `gmailMessageId` (saved on first edit).
+    /// Its files come along as attachments still in Gmail, fetched when it's saved or sent, and inline
+    /// images keep their `cid:`. Throws `DraftError.bodyNotFetched` while only its headers are stored.
     public func importDraftMessage(_ key: MessageKey) throws -> DraftContent? {
         try database.reader.read { db in
             if let linked = try Draft.filter(Column("accountId") == key.accountId && Column("gmailMessageId") == key.messageId).fetchOne(db) {
@@ -152,17 +153,32 @@ public struct DraftStore: Sendable {
             guard let message = try MailMessage.fetchOne(db, key: ["accountId": key.accountId, "id": key.messageId]) else {
                 return nil
             }
+            guard message.bodyState == .full else { throw DraftError.bodyNotFetched(message.threadKey) }
             let replied = message.inReplyTo.flatMap { inReplyTo in
                 try? MailMessage.filter(Column("accountId") == key.accountId && Column("rfcMessageId") == inReplyTo).fetchOne(db)
             }
-            let html = message.bodyHtml ?? "<div>\(RichText.htmlEscaped(message.bodyText ?? message.snippet))</div>"
+            let html = message.bodyHtml ?? RichText(plainText: message.bodyText ?? "").html
+            let files = try MailAttachment
+                .filter(Column("accountId") == key.accountId && Column("messageId") == message.id)
+                .order(Column("partId"))
+                .fetchAll(db)
             let draft = Draft(
                 accountId: key.accountId, gmailMessageId: message.id, threadId: message.threadId,
                 replyToMessageId: replied?.id, kind: replied == nil ? .new : .reply,
                 toList: message.toList, ccList: message.ccList, bccList: message.bccList, subject: message.subject,
-                bodyHtml: html, updatedAt: message.date, createdAt: message.date)
+                bodyHtml: html, attachments: files.map(Self.carried), updatedAt: message.date, createdAt: message.date)
             return DraftContent(stored: draft)
         }
+    }
+
+    /// A stored Gmail attachment carried into a draft: fetched from Gmail when the draft is encoded
+    /// unless it's cached already; inline images keep their Content-ID.
+    static func carried(_ file: MailAttachment) -> DraftAttachment {
+        DraftAttachment(
+            path: file.localPath ?? "", filename: file.filename, mimeType: file.mimeType, size: file.size,
+            remote: RemoteAttachmentRef(
+                accountId: file.accountId, messageId: file.messageId, partId: file.partId, attachmentId: file.attachmentId),
+            contentId: file.isInline ? file.contentId : nil)
     }
 
     // MARK: Saving

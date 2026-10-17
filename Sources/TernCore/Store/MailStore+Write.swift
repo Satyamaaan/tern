@@ -16,15 +16,39 @@ extension MailStore {
         }
     }
 
-    /// Deletes the account and everything that belongs to it.
-    public func removeAccount(_ id: String) throws {
-        try database.writer.write { db in
-            for table in ["thread_ai", "thread_project", "snooze"] {
-                try db.execute(sql: "DELETE FROM \(table) WHERE accountId = ?", arguments: [id])
-            }
-            try db.execute(sql: "DELETE FROM thread WHERE accountId = ?", arguments: [id])
-            _ = try Account.deleteOne(db, key: id)
+    /// Deletes the account and everything that belongs to it: its mail, drafts, queued ops, settings
+    /// kept for it, and contacts only its mail taught. Stop its sync first so nothing writes any of it
+    /// back. Returns the files it leaves on disk, for `RemovedAccountFiles.delete`.
+    @discardableResult
+    public func removeAccount(_ id: String) throws -> RemovedAccountFiles {
+        try database.writer.write { db in try Self.removeAccount(db, id) }
+    }
+
+    public static func removeAccount(_ db: Database, _ id: String) throws -> RemovedAccountFiles {
+        let files = RemovedAccountFiles(
+            attachmentPaths: try String.fetchAll(db, sql: """
+                SELECT localPath FROM attachment WHERE accountId = ? AND localPath IS NOT NULL
+                """, arguments: [id]),
+            draftIds: try String.fetchAll(db, sql: "SELECT id FROM draft WHERE accountId = ?", arguments: [id]))
+        for table in ["thread_ai", "thread_project", "snooze"] {
+            try db.execute(sql: "DELETE FROM \(table) WHERE accountId = ?", arguments: [id])
         }
+        // Explicitly, so the search index's delete trigger sees every message.
+        try db.execute(sql: "DELETE FROM message WHERE accountId = ?", arguments: [id])
+        try db.execute(sql: "DELETE FROM thread WHERE accountId = ?", arguments: [id])
+        let keys = accountSettingKeys(id)
+        try db.execute(sql: "DELETE FROM setting WHERE key IN (\(databaseQuestionMarks(count: keys.count)))",
+                       arguments: StatementArguments(keys))
+        try db.execute(sql: "DELETE FROM setting WHERE key = ? AND value = ?", arguments: [DraftStore.SettingKey.defaultAccount, id])
+        _ = try Account.deleteOne(db, key: id)
+        try rebuildContacts(db)
+        return files
+    }
+
+    /// The `setting` keys kept for one account: its signature, sender name and Muted label.
+    public static func accountSettingKeys(_ accountId: String) -> [String] {
+        [DraftStore.SettingKey.signature(accountId), DraftStore.SettingKey.customSignature(accountId),
+         DraftStore.SettingKey.senderName(accountId), muteLabelKey(accountId)]
     }
 
     /// Replaces an account's label list with what Gmail reports.
@@ -269,4 +293,25 @@ extension MailStore {
               \(updates)
             """
     }()
+}
+
+/// Files a removed account left on disk: downloaded attachments and its drafts' folders.
+public struct RemovedAccountFiles: Sendable, Hashable {
+    public var attachmentPaths: [String]
+    /// Drafts whose folders (`DraftStore.folder(for:in:)`) go.
+    public var draftIds: [String]
+
+    public init(attachmentPaths: [String] = [], draftIds: [String] = []) {
+        self.attachmentPaths = attachmentPaths
+        self.draftIds = draftIds
+    }
+
+    /// Deletes the attachment files, the drafts' folders under `draftFilesDirectory`, and `folders`
+    /// (e.g. the account's attachment cache). Files already gone are skipped.
+    public func delete(draftFilesDirectory: URL, folders: [URL] = []) {
+        let fileManager = FileManager.default
+        for path in attachmentPaths { try? fileManager.removeItem(atPath: path) }
+        for id in draftIds { try? fileManager.removeItem(at: DraftStore.folder(for: id, in: draftFilesDirectory)) }
+        for folder in folders { try? fileManager.removeItem(at: folder) }
+    }
 }

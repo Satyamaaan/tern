@@ -277,6 +277,53 @@ private func fakeAttachment(_ fake: FakeGmail, messageId: String, filename: Stri
     #expect(messages.count == 3 && messages.last?.bodyText?.contains("Finished on the Mac") == true)
 }
 
+@Test func aBrowserDraftWithFilesKeepsThemWhenSavedAndSent() async throws {
+    let h = try Harness(realEncoder: true)
+    let (first, second) = try await h.seedConversation()
+    let pdf = Data((0..<2000).map { UInt8($0 % 249) })
+    let png = Data([0x89, 0x50, 0x4E, 0x47] + (0..<120).map { UInt8($0) })
+    let html = #"<div>Draft from the phone</div><br><div class="gmail_quote"><p>Chart</p><img src="cid:chart-1"></div>"#
+    let browser = Data(([
+        "From: \(testEmail)", "To: ann@example.com", "Subject: Re: Plans", "Message-ID: <browser-2@mail.gmail.com>",
+        "In-Reply-To: <\(second.id)@fake.tern>", "MIME-Version: 1.0", #"Content-Type: multipart/mixed; boundary="mix""#, "",
+        "--mix", #"Content-Type: multipart/related; boundary="rel""#, "",
+        "--rel", "Content-Type: text/html; charset=UTF-8", "", html,
+        "--rel", #"Content-Type: image/png; name="chart.png""#, #"Content-Disposition: inline; filename="chart.png""#,
+        "Content-ID: <chart-1>", "Content-Transfer-Encoding: base64", "", png.base64EncodedString(),
+        "--rel--",
+        "--mix", #"Content-Type: application/pdf; name="report.pdf""#, #"Content-Disposition: attachment; filename="report.pdf""#,
+        "Content-Transfer-Encoding: base64", "", pdf.base64EncodedString(),
+        "--mix--", "",
+    ] as [String]).joined(separator: "\r\n").utf8)
+    let gmailDraft = try await h.fake.createDraft(raw: browser, threadId: first.threadId)
+    try await h.sync.pollHistory()
+    let messageId = try #require(gmailDraft.message?.id)
+
+    var content = try #require(try h.drafts.importDraftMessage(MessageKey(accountId: testEmail, messageId: messageId)))
+    #expect(content.draft.attachments.map(\.filename).sorted() == ["chart.png", "report.pdf"])
+    #expect(content.draft.attachments.first { $0.filename == "chart.png" }?.contentId == "chart-1")
+    content.body = RichText(html: "<p>Finished on the Mac</p>")
+    try await h.queueSave(content.assembledDraft(updatedAt: h.clock.now()))
+    try await h.sync.drainOps()
+    #expect(await h.fake.callCount(.updateDraft) == 1, "the browser's draft is updated, not replaced")
+    let saved = try #require(await h.fake.draftIds.first)
+    let savedMessage = try #require(await h.fake.drafts(query: nil, pageToken: nil, maxResults: 5).drafts?.first { $0.id == saved }?.message?.id)
+    #expect(try await fakeAttachment(h.fake, messageId: savedMessage, filename: "report.pdf") == pdf, "the file survives the save")
+    #expect(try await fakeAttachment(h.fake, messageId: savedMessage, filename: "chart.png") == png)
+
+    // The original DRAFT message is gone from Gmail now; the second save and the send still have the files.
+    try await h.sync.pollHistory()
+    let row = try #require(try h.draftRow(content.draft.id))
+    try await h.drafts.send(row, undoSeconds: 0, now: h.clock.now())
+    try await h.sync.drainOps()
+    #expect(await h.fake.draftIds.isEmpty)
+    let sentId = try #require(try h.messages().values.first { $0.isFromMe && !$0.isDraft }?.id)
+    #expect(try await fakeAttachment(h.fake, messageId: sentId, filename: "report.pdf") == pdf)
+    #expect(try await fakeAttachment(h.fake, messageId: sentId, filename: "chart.png") == png)
+    let raw = String(decoding: try #require(await h.fake.draftRaw.last), as: UTF8.self)
+    #expect(raw.contains("Content-ID: <chart-1>") && raw.contains("multipart/related"), "the quoted image stays inline")
+}
+
 @Test func aDraftDiscardedWhileItsGmailCopyIsSavedLeavesNoCopy() async throws {
     let discardDuringCall = Locked<DraftStore?>(nil)
     let draftId = Locked("")

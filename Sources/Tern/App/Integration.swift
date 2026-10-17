@@ -136,10 +136,18 @@ final class Integration {
         }
 
         services.removeAccount = { [weak self] account in
-            self?.sync?.removeAccount(id: account.id)
-            let store = self?.services.store
-            try await Task.detached { try store?.removeAccount(account.id) }.value
-            await self?.googleAccounts?.signOut(account.email)
+            guard let self else { return }
+            if let sync = self.sync {
+                try await sync.removeAccount(id: account.id)
+            } else {
+                let store = self.services.store
+                let drafts = self.services.draftFilesDirectory ?? DraftStore.defaultFilesDirectory
+                let cache = SyncConfiguration().attachmentFolder(for: account.id)
+                try await Task.detached {
+                    try store.removeAccount(account.id).delete(draftFilesDirectory: drafts, folders: [cache])
+                }.value
+            }
+            await self.googleAccounts?.signOut(account.email)
         }
     }
 
@@ -265,12 +273,6 @@ final class Integration {
         notifications?.stop()
         stopObservingActivity()
         pathMonitor?.cancel()
-        guard let sync else { return }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await sync.shutdown() }
-            group.addTask { try? await Task.sleep(for: .seconds(timeout)) }
-            await group.next()
-            group.cancelAll()
-        }
+        await sync?.shutdown(timeout: timeout)
     }
 }

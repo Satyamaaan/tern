@@ -130,6 +130,26 @@ public final class SyncCoordinator {
         for task in running { await task.value }
     }
 
+    /// Stops and waits for the account tasks to finish, for at most `timeout` seconds of real time.
+    /// Returns at the deadline even when a task is stuck in a request that ignores cancellation,
+    /// without waiting for it any further.
+    public func shutdown(timeout: TimeInterval) async {
+        let running = Array(tasks.values) + serviceTasks
+        stop()
+        let once = ResumeOnce<Void>()
+        _ = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            once.set(continuation)
+            Task.detached {
+                for task in running { await task.value }
+                once.resume(with: .success(()))
+            }
+            Task.detached {
+                try? await Task.sleep(for: .seconds(max(0, timeout)))
+                once.resume(with: .success(()))
+            }
+        }
+    }
+
     // MARK: Accounts
 
     /// Adds an account after sign-in and starts syncing it.
@@ -139,12 +159,21 @@ public final class SyncCoordinator {
         if isRunning { launch(sync) }
     }
 
-    /// Stops syncing an account. Delete its data separately with `MailStore.removeAccount`.
-    public func removeAccount(id: String) {
-        tasks.removeValue(forKey: id)?.cancel()
+    /// Removes an account from this Mac: stops its sync and waits until it has stopped, so nothing
+    /// writes the account back, then deletes its data (`MailStore.removeAccount`), its downloaded
+    /// attachments and its drafts' files.
+    public func removeAccount(id: String) async throws {
+        let task = tasks.removeValue(forKey: id)
+        task?.cancel()
         syncs.removeValue(forKey: id)
         statuses.removeValue(forKey: id)
         lastOpCounts.removeValue(forKey: id)
+        await task?.value
+        let store = self.store, configuration = self.configuration
+        try await Task.detached(priority: .userInitiated) {
+            try store.removeAccount(id).delete(draftFilesDirectory: configuration.draftFilesDirectory,
+                                               folders: [configuration.attachmentFolder(for: id)])
+        }.value
     }
 
     /// The account signed in again after `syncState == .needsAuth`; sync resumes with a fresh client.
@@ -228,23 +257,19 @@ public final class SyncCoordinator {
 
     // MARK: Mute
 
-    /// Mutes threads: archives them and labels them "Muted" (a user label Tern creates in each account
-    /// the first time, one Gmail request), through `MailStore.perform`, so it's instant and undoable.
-    /// New mail in a muted thread is archived again as it arrives. Returns the undo.
+    /// Mutes threads: archives them and labels them "Muted" through `MailStore.perform`
+    /// (`AccountSync.mute`), so it's instant, works offline and is undoable. The first time in an
+    /// account the engine finds or creates the label in Gmail when it sends the change. New mail in a
+    /// muted thread is archived again as it arrives. Returns the undo.
     @discardableResult
     public func mute(_ keys: [ThreadKey]) async throws -> UndoToken {
-        var actions: [(action: MailAction, threads: [ThreadKey])] = []
-        for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
-            guard let sync = syncs[accountId] else { throw SyncError.unknownAccount(accountId) }
-            actions.append((.moveToLabel(try await sync.muteLabelId()), threads))
-        }
+        for accountId in Set(keys.map(\.accountId)) where syncs[accountId] == nil { throw SyncError.unknownAccount(accountId) }
         let store = self.store
-        let planned = actions
-        return try await Task.detached(priority: .userInitiated) { try store.perform(planned) }.value
+        return try await Task.detached(priority: .userInitiated) { try AccountSync.mute(keys, in: store) }.value
     }
 
-    /// Unmutes threads: removes the "Muted" label (they stay where they are, like Gmail's unmute).
-    /// No network wait. Returns the undo.
+    /// Unmutes threads: removes the "Muted" label, or its stand-in before the label is known (they
+    /// stay where they are, like Gmail's unmute). No network wait. Returns the undo.
     @discardableResult
     public func unmute(_ keys: [ThreadKey]) async throws -> UndoToken {
         let store = self.store
@@ -252,8 +277,10 @@ public final class SyncCoordinator {
             try store.database.writer.write { db in
                 var actions: [(action: MailAction, threads: [ThreadKey])] = []
                 for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
-                    guard let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value else { continue }
-                    actions.append((.removeLabel(label), threads))
+                    if let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value {
+                        actions.append((.removeLabel(label), threads))
+                    }
+                    actions.append((.removeLabel(MailStore.pendingMuteLabel), threads))
                 }
                 return try MailStore.perform(db, actions)
             }

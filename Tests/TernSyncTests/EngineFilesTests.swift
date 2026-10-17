@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 import GRDB
 import Testing
@@ -23,7 +24,7 @@ import TernCore
 
     let url = try await h.sync.downloadAttachment(report)
     #expect(try Data(contentsOf: url) == pdf)
-    #expect(url.path.hasSuffix("/\(testEmail)/\(delivered.id)/report.pdf"))
+    #expect(url.path.hasSuffix("/\(testEmail)/\(delivered.id)/\(report.partId)/report.pdf"))
     #expect(url.path.hasPrefix(h.configuration.attachmentCacheDirectory.path))
     let stored = try #require(try h.store.threadDetail(h.thread(delivered.threadId))?.attachments[delivered.id]?.first { $0.partId == report.partId })
     #expect(stored.localPath == url.path)
@@ -40,6 +41,79 @@ import TernCore
     try await h.sync.prefetchBodies()
     let refetched = try h.store.threadDetail(h.thread(delivered.threadId))?.attachments[delivered.id]?.first { $0.partId == report.partId }
     #expect(refetched?.localPath == url.path)
+    try? FileManager.default.removeItem(at: h.configuration.attachmentCacheDirectory)
+}
+
+/// Whether the file carries the `com.apple.quarantine` extended attribute.
+private func hasQuarantine(_ url: URL) -> Bool {
+    getxattr(url.path, "com.apple.quarantine", nil, 0, 0, 0) > 0
+}
+
+@Test func attachmentsWhoseNamesTheFileSystemConfusesGetTheirOwnFiles() async throws {
+    let h = try Harness()
+    let files = [("a:b.pdf", "colon"), ("a-b.pdf", "dash"), ("Report.pdf", "upper"), ("report.pdf", "lower")]
+    let delivered = await h.fake.deliver(FakeEmail(subject: "Four files", attachments: files.map {
+        FakeAttachment(filename: $0.0, mimeType: "application/pdf", data: Data($0.1.utf8))
+    }))
+    try await h.syncFully()
+    let attachments = try #require(try h.store.threadDetail(h.thread(delivered.threadId))?.attachments[delivered.id])
+    #expect(attachments.count == 4)
+
+    var paths = Set<String>()
+    for attachment in attachments { paths.insert(try await h.sync.downloadAttachment(attachment).path.lowercased()) }
+    #expect(paths.count == 4, "four files, even on a case-insensitive disk")
+    for (name, content) in files {
+        let attachment = try #require(attachments.first { $0.filename == name })
+        let url = try await h.sync.downloadAttachment(attachment)
+        #expect(try Data(contentsOf: url) == Data(content.utf8), "\(name) has its own bytes")
+        #expect(!url.lastPathComponent.contains(":"))
+    }
+    try? FileManager.default.removeItem(at: h.configuration.attachmentCacheDirectory)
+}
+
+@Test func downloadedAttachmentsAreQuarantined() async throws {
+    let h = try Harness()
+    let delivered = await h.fake.deliver(FakeEmail(subject: "Invoice", attachments: [
+        FakeAttachment(filename: "invoice.terminal", mimeType: "application/octet-stream", data: Data("open -a Calculator".utf8)),
+        FakeAttachment(filename: "notes.txt", mimeType: "text/plain", data: Data("old".utf8)),
+    ]))
+    try await h.syncFully()
+    let attachments = try #require(try h.store.threadDetail(h.thread(delivered.threadId))?.attachments[delivered.id])
+    let terminal = try #require(attachments.first { $0.filename == "invoice.terminal" })
+    let url = try await h.sync.downloadAttachment(terminal)
+    #expect(hasQuarantine(url))
+    let properties = try #require(try url.resourceValues(forKeys: [.quarantinePropertiesKey]).quarantineProperties)
+    #expect(properties[kLSQuarantineAgentNameKey as String] as? String == "Tern")
+    #expect(properties[kLSQuarantineTypeKey as String] as? String == kLSQuarantineTypeEmailAttachment as String)
+
+    // A file cached by an older build, without the flag, gets it when it's next opened.
+    let notes = try #require(attachments.first { $0.filename == "notes.txt" })
+    let old = h.configuration.attachmentCacheDirectory.appendingPathComponent("old-notes.txt")
+    try FileManager.default.createDirectory(at: h.configuration.attachmentCacheDirectory, withIntermediateDirectories: true)
+    try Data("old".utf8).write(to: old)
+    try await h.store.database.writer.write { db in try MailStore.setAttachmentPath(db, notes, path: old.path) }
+    #expect(!hasQuarantine(old))
+    #expect(try await h.sync.downloadAttachment(notes) == old)
+    #expect(hasQuarantine(old))
+
+    // Saving a copy (Save to Downloads) keeps it.
+    let copy = h.configuration.attachmentCacheDirectory.appendingPathComponent("copy.terminal")
+    try FileManager.default.copyItem(at: url, to: copy)
+    #expect(hasQuarantine(copy))
+    try? FileManager.default.removeItem(at: h.configuration.attachmentCacheDirectory)
+}
+
+@Test func forwardedFilesDownloadedForADraftAreQuarantined() async throws {
+    let h = try Harness()
+    let delivered = await h.fake.deliver(FakeEmail(subject: "Script", attachments: [
+        FakeAttachment(filename: "run.command", mimeType: "application/octet-stream", data: Data("echo hi".utf8)),
+    ]))
+    try await h.syncFully()
+    var content = try #require(try h.drafts.makeDraft(.forward(h.thread(delivered.threadId)), now: h.clock.now()))
+    content.draft.toList = [Participant(email: "bo@example.com")]
+    let local = try await h.sync.withLocalFiles(content.assembledDraft(updatedAt: h.clock.now()))
+    let path = try #require(local.attachments.first?.path)
+    #expect(hasQuarantine(URL(fileURLWithPath: path)))
     try? FileManager.default.removeItem(at: h.configuration.attachmentCacheDirectory)
 }
 

@@ -73,9 +73,10 @@ final class AppServices {
     /// Mutes threads (archive now, keep later replies out of the inbox). Nil until sync supports it;
     /// the reader's Mute item is disabled meanwhile.
     var mute: (([ThreadKey]) -> Void)?
-    /// Mutes threads through sync (archive + Tern's "Muted" label; later replies stay archived).
-    /// Returns the undo token. Nil until sync runs; `m` then just archives.
-    var muteThreads: (([ThreadKey]) async throws -> UndoToken)?
+    /// Mutes threads through sync (archive + Tern's "Muted" label; later replies stay archived): a
+    /// local write, called on the model's serial write queue like every other action. Returns the
+    /// undo token. Nil until sync runs; `m` then just archives.
+    var muteThreads: (@Sendable ([ThreadKey]) throws -> UndoToken)?
     /// Downloads the bodies of a thread's messages stored without one. Set by sync; the reader calls
     /// it when a thread opens and re-renders when they land.
     var fetchBodies: ((ThreadKey) async throws -> Void)?
@@ -90,7 +91,7 @@ final class AppServices {
         self.store = store
         self.search = SearchService(store.database)
         removeAccount = { account in
-            try await Task.detached { try store.removeAccount(account.id) }.value
+            _ = try await Task.detached { try store.removeAccount(account.id) }.value
         }
     }
 

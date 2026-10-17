@@ -77,7 +77,8 @@ public struct SyncConfiguration: Sendable {
     /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
     public var historyFullFetchLimit: Int = 30
     /// After history expires, stored Trash and Spam (up to this many) have their labels read back
-    /// (20 units each); beyond it they're just moved to Trash or Spam locally.
+    /// (20 units each) during the resync; beyond it they're moved to Trash or Spam locally at once
+    /// and their exact labels are read in the background afterwards (`labelCheckStep`).
     public var resyncHiddenRefreshLimit: Int = 200
     /// Rate of the background body trickle for mail stored without a body.
     public var trickleUnitsPerMinute: Int = 1_200
@@ -93,9 +94,14 @@ public struct SyncConfiguration: Sendable {
     /// First retry delay for a failed op or request; doubles each attempt.
     public var retryBaseDelay: Double = 2
     public var retryMaxDelay: Double = 300
+    /// When drafts.send answers that a staged draft is gone but Sent doesn't show the message (its
+    /// search can lag a send, and the draft may also have been deleted in another client), Sent is
+    /// checked again after each of these delays. If it never shows up, the draft is kept, marked
+    /// failed, and not sent again unless the user sends it.
+    public var sendConfirmationDelays: [Double] = [10, 30, 90]
     /// Retries for a read request (5xx, network) before the sync step gives up for now.
     public var maxRequestRetries: Int = 5
-    /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<filename>`.
+    /// Where downloaded attachments are cached: `<dir>/<account>/<message>/<part>/<filename>`.
     public var attachmentCacheDirectory: URL = SyncConfiguration.defaultAttachmentDirectory
     /// `DraftStore.filesDirectory`: forwarded attachments are downloaded into a draft's folder
     /// before it's sent, and the folder is removed once it has been.
@@ -104,6 +110,11 @@ public struct SyncConfiguration: Sendable {
     public var observeSystemWake: Bool = true
 
     public init() {}
+
+    /// The folder holding one account's downloaded attachments.
+    public func attachmentFolder(for accountId: String) -> URL {
+        attachmentCacheDirectory.appendingPathComponent(AccountSync.safeFilename(accountId, fallback: "account"), isDirectory: true)
+    }
 
     /// ~/Library/Caches/Tern/attachments
     public static var defaultAttachmentDirectory: URL {
@@ -210,6 +221,57 @@ public final class SyncStatus: Identifiable {
         if quotaUsed != snapshot.quotaUsed { quotaUsed = snapshot.quotaUsed }
         if lastSyncAt != snapshot.lastSyncAt { lastSyncAt = snapshot.lastSyncAt }
         if lastError != snapshot.lastError { lastError = snapshot.lastError }
+    }
+}
+
+/// Counts the transactions that wrote Gmail's state for one account (history, resyncs, fetched
+/// messages). Each bumps it from inside its transaction, so a fetch can compare, inside its own write
+/// transaction, against the value it saw before it went to Gmail: a change means something newer
+/// may already be stored.
+final class ServerWriteCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func bump() { lock.withLock { count += 1 } }
+}
+
+/// Resumes a continuation exactly once, with the first result any of several racing callers hands
+/// it, even one that arrives before the continuation is set. Later results are dropped.
+final class ResumeOnce<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var early: Result<Value, Error>?
+    private var finished = false
+
+    func set(_ continuation: CheckedContinuation<Value, Error>) {
+        lock.lock()
+        guard let early else {
+            self.continuation = continuation
+            lock.unlock()
+            return
+        }
+        finished = true
+        lock.unlock()
+        continuation.resume(with: early)
+    }
+
+    func resume(with result: Result<Value, Error>) {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        guard let continuation else {
+            if early == nil { early = result }
+            lock.unlock()
+            return
+        }
+        finished = true
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(with: result)
     }
 }
 

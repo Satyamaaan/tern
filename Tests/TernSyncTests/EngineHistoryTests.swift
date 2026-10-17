@@ -114,6 +114,67 @@ import TernCore
     #expect(try h.message(next.id) != nil)
 }
 
+@Test func aLargeTrashAndSpamGetExactLabelsAfterAResync() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.resyncHiddenRefreshLimit = 2
+    let h = try Harness(configuration: configuration)
+    let seeded = await seed(h.fake, count: 20, inboxEvery: 1)
+    let project = try await h.fake.createLabel(name: "Clients")
+    let junk = await h.fake.deliver(FakeEmail(subject: "Prize", date: testNow.addingTimeInterval(-30), labels: [SystemLabel.spam]))
+    try await h.syncFully()
+    #expect(try h.message(junk.id)?.labelIds == [SystemLabel.spam])
+
+    // While Tern is away long enough for history to expire, mail is trashed and relabelled on the phone.
+    let trashed = seeded.prefix(5).map(\.id)
+    await h.fake.remoteModify([trashed[0]], add: [SystemLabel.starred])
+    await h.fake.remoteModify([trashed[1]], add: [project.id])
+    await h.fake.remoteModify([trashed[2]], remove: [SystemLabel.unread])
+    await h.fake.remoteModify(trashed, add: [SystemLabel.trash], remove: [SystemLabel.inbox])
+    await h.fake.remoteModify([junk.id], add: [SystemLabel.trash], remove: [SystemLabel.spam])
+    await h.fake.expireHistory()
+    await h.fake.resetCallLog()
+
+    try await h.sync.fullResync()
+    // At once: out of the inbox and in Trash, not in Spam as well.
+    for id in trashed + [junk.id] {
+        let labels = Set(try #require(try h.message(id)).labelIds)
+        #expect(labels.contains(SystemLabel.trash) && !labels.contains(SystemLabel.inbox) && !labels.contains(SystemLabel.spam))
+    }
+    #expect(await h.fake.fetchCalls.filter { $0.format == .minimal }.isEmpty, "too many to read during the resync")
+    let queued = try await h.store.database.reader.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM label_check") ?? 0 }
+    #expect(queued == 6)
+
+    // One background step, then a quit: the next run finishes the rest.
+    try await h.sync.labelCheckStep()
+    let relaunched = h.relaunched()
+    try await relaunched.prepare()
+    while try await relaunched.labelCheckStep() {}
+    let left = try await h.store.database.reader.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM label_check") ?? 0 }
+    #expect(left == 0)
+    #expect(Set(await h.fake.fetchCalls.filter { $0.format == .minimal }.flatMap(\.ids)) == Set(trashed + [junk.id]))
+    #expect(try h.message(trashed[0])?.isStarred == true)
+    #expect(try h.message(trashed[1])?.labelIds.contains(project.id) == true)
+    #expect(try h.message(trashed[2])?.isUnread == false)
+    try await relaunched.pollHistory()
+    try await h.expectMirrorsGmail()
+}
+
+@Test func labelChecksRunInTheBackgroundBeforeTheBackfill() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.resyncHiddenRefreshLimit = 0
+    let h = try Harness(configuration: configuration)
+    let seeded = await seed(h.fake, count: 8, inboxEvery: 1)
+    try await h.syncFully()
+    await h.fake.remoteModify([seeded[0].id], add: [SystemLabel.trash, SystemLabel.starred], remove: [SystemLabel.inbox])
+    await h.fake.expireHistory()
+
+    try await h.runLoop(until: {
+        try await h.store.database.reader.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM label_check") ?? 0 } == 0
+            && (try h.message(seeded[0].id)?.isStarred ?? false)
+    })
+    try await h.expectMirrorsGmail()
+}
+
 @Test func historyRetentionExpiresOldStartPoints() async throws {
     let fake = FakeGmail(email: testEmail, historyRetention: 3, sleep: { _ in })
     let first = await fake.deliver(FakeEmail())

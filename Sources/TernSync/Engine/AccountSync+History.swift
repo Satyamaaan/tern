@@ -96,7 +96,6 @@ extension AccountSync {
             }
         }
 
-        historyGeneration += 1
         let labelUpdates = labels
         let deletions = Array(deleted)
         let now = clock.now()
