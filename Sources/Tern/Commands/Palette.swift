@@ -144,6 +144,7 @@ final class PaletteController {
             for id in m.prefs.recentCommands where ids.contains(id) {
                 if let command = registry[id] {
                     recentItems.append(PaletteItem(id: "recent.\(id)", title: command.displayTitle, shortcut: command.shortcutText,
+                                                   leading: Self.icons[id].map { .icon($0) } ?? .none,
                                                    run: { [registry] in registry.run(id) }))
                 }
             }
@@ -169,12 +170,16 @@ final class PaletteController {
     }
 
     private static let icons: [String: Icon] = [
-        "archive": .done, "snooze": .snoozed, "trash": .trash, "spam": .spam, "moveToInbox": .inbox,
-        "star": .starred, "needsReply": .needsReply, "label": .label, "project": .allMail, "reply": .needsReply,
-        "compose": .compose, "search": .search, "go.inbox": .inbox, "go.needsReply": .needsReply,
-        "go.snoozed": .snoozed, "go.starred": .starred, "go.drafts": .drafts, "go.sent": .sent,
-        "go.allMail": .allMail, "go.spam": .spam, "go.trash": .trash, "go.label": .label, "newProject": .plus,
-        "addAccount": .plus,
+        "archive": .archive, "snooze": .snoozed, "trash": .trash, "spam": .spam, "moveToInbox": .inbox,
+        "star": .star, "needsReply": .needsReply, "label": .label, "project": .folder, "unread": .unread,
+        "mute": .mute, "undo": .undo, "reply": .reply, "replyAll": .replyAll, "forward": .forward,
+        "compose": .compose, "search": .search, "summarize": .sparkles, "print": .print, "quickLook": .eye,
+        "find": .search, "markAllRead": .done, "palette": .command,
+        "go.inbox": .inbox, "go.needsReply": .needsReply, "go.snoozed": .snoozed, "go.starred": .starred,
+        "go.drafts": .drafts, "go.sent": .sent, "go.allMail": .allMail, "go.spam": .spam, "go.trash": .trash,
+        "go.label": .label, "go.project": .folder, "newProject": .plus, "addAccount": .plus,
+        "settings": .settings, "shortcuts": .keyboard, "toggleSidebar": .sidebar, "listOnly": .readingPane,
+        "splitInbox": .inbox, "appearance.toggle": .sun,
     ]
 
     private func threadItem(_ row: ThreadRow) -> PaletteItem {
@@ -333,8 +338,9 @@ struct PaletteView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if sections.isEmpty {
                         Text("No matches")
-                            .font(.display(15))
-                            .foregroundStyle(Color(Theme.text3))
+                            .font(.display(17))
+                            .tracking(-0.2)
+                            .foregroundStyle(Color(Theme.text2))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 28)
                     }

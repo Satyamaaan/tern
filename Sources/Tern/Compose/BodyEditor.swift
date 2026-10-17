@@ -701,14 +701,14 @@ struct FormattingBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            button("bold", .bold, on: state.bold, help: "Bold  ⌘B")
-            button("italic", .italic, on: state.italic, help: "Italic  ⌘I")
-            button("underline", .underline, on: state.underline, help: "Underline  ⌘U")
-            button("link", .link, on: state.link, help: "Link  ⌘K")
+            button(.bold, .bold, on: state.bold, help: "Bold  ⌘B")
+            button(.italic, .italic, on: state.italic, help: "Italic  ⌘I")
+            button(.underline, .underline, on: state.underline, help: "Underline  ⌘U")
+            button(.link, .link, on: state.link, help: "Link  ⌘K")
             Rectangle().fill(Color(Theme.hairline)).frame(width: 1, height: 16).padding(.horizontal, 3)
-            button("list.bullet", .bullet, on: state.block == .bullet, help: "Bulleted list  ⌘⇧8")
-            button("list.number", .numbered, on: state.block == .numbered, help: "Numbered list  ⌘⇧7")
-            button("text.quote", .quote, on: state.block == .quote, help: "Quote  ⌘⇧9")
+            button(.listBullet, .bullet, on: state.block == .bullet, help: "Bulleted list  ⌘⇧8")
+            button(.listNumber, .numbered, on: state.block == .numbered, help: "Numbered list  ⌘⇧7")
+            button(.quote, .quote, on: state.block == .quote, help: "Quote  ⌘⇧9")
         }
         .padding(4)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
@@ -718,11 +718,9 @@ struct FormattingBar: View {
         .fixedSize()
     }
 
-    private func button(_ symbol: String, _ action: Action, on: Bool, help: String) -> some View {
+    private func button(_ icon: Icon, _ action: Action, on: Bool, help: String) -> some View {
         Button { perform(action) } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(on ? Theme.text1 : Theme.text2))
+            IconView(icon: icon, size: 15, color: Color(on ? Theme.text1 : Theme.text2))
                 .frame(width: 26, height: Theme.Control.small)
                 .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).fill(Color(on ? Theme.selected : .clear)))
         }

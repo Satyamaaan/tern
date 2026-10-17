@@ -17,7 +17,7 @@ struct GoogleClientSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Google client", detail: detail) {
+            SettingsRow(title: "Google client", detail: detail, icon: .key) {
                 if !editing {
                     Button(stored == nil ? "Add…" : "Replace…") { editing = true }
                         .buttonStyle(TernButtonStyle(.secondary))
@@ -33,8 +33,8 @@ struct GoogleClientSection: View {
     }
 
     private var detail: String {
-        guard let stored else { return "Not set. Tern reads Gmail through a Google Cloud client of your own." }
-        return "\(GoogleClientText.masked(stored)) · Desktop app · stored in your Keychain"
+        guard let stored else { return "Not set. Tern reads Gmail through your own Google Cloud client." }
+        return "\(GoogleClientText.masked(stored)) · Desktop app · in your Keychain"
     }
 
     private var editor: some View {

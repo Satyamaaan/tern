@@ -10,9 +10,10 @@ struct ProjectEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(draft.isNew ? "New project" : "Edit project")
-                .font(.ui(15, .semibold))
+                .font(.display(18))
+                .tracking(-0.2)
                 .foregroundStyle(Color(Theme.text1))
-                .padding(.bottom, 16)
+                .padding(.bottom, 14)
 
             field("Name") {
                 TextField("Acme redesign", text: $draft.name)
@@ -36,15 +37,17 @@ struct ProjectEditor: View {
             }
             Hairline()
             field("Icon") {
-                HStack(spacing: 4) {
-                    ForEach(ProjectDraft.icons, id: \.self) { icon in
-                        Image(systemName: icon)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(draft.icon == icon ? Theme.projectColor(draft.colorIndex) : Theme.text2))
-                            .frame(width: 24, height: 24)
-                            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Color(Theme.selected).opacity(draft.icon == icon ? 1 : 0)))
-                            .contentShape(Rectangle())
-                            .onTapGesture { draft.icon = icon }
+                HStack(spacing: 2) {
+                    ForEach(ProjectDraft.icons, id: \.self) { name in
+                        let chosen = draft.icon == name
+                        let color = Theme.projectColor(draft.colorIndex)
+                        Button { draft.icon = name } label: {
+                            IconView(icon: .project(name), size: 15, color: Color(chosen ? color : Theme.text2))
+                                .frame(width: 26, height: 26)
+                                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                    .fill(Color(color).opacity(chosen ? 0.14 : 0)))
+                        }
+                        .buttonStyle(IconButtonStyle())
                     }
                 }
             }
@@ -65,20 +68,14 @@ struct ProjectEditor: View {
                 .padding(.bottom, 8)
             ForEach($draft.rules) { $rule in
                 HStack(spacing: 8) {
-                    Picker("", selection: $rule.field) {
-                        ForEach(ProjectDraft.ruleFields, id: \.self) { field in
-                            Text(ProjectDraft.fieldTitle(field)).tag(field)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 150)
+                    RuleFieldMenu(field: $rule.field)
                     TextField(ProjectDraft.fieldPlaceholder(rule.field), text: $rule.value)
                         .textFieldStyle(.plain)
                         .font(.ui(13))
                     Button {
                         draft.rules.removeAll { $0.id == rule.id }
                     } label: {
-                        IconView(icon: .plus, size: 12, color: Color(Theme.text3)).rotationEffect(.degrees(45))
+                        IconView(icon: .close, size: 14, color: Color(Theme.text3))
                             .frame(width: Theme.Control.small, height: Theme.Control.small)
                     }
                     .buttonStyle(IconButtonStyle())
@@ -119,4 +116,37 @@ struct ProjectEditor: View {
     }
 
     private func save() { model.saveProject(draft) }
+}
+
+/// The field a rule matches on: a quiet bordered menu button instead of the stock pop-up.
+private struct RuleFieldMenu: View {
+    @Binding var field: ProjectRule.Field
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+        Menu {
+            Picker("", selection: $field) {
+                ForEach(ProjectDraft.ruleFields, id: \.self) { field in
+                    Text(ProjectDraft.fieldTitle(field)).tag(field)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 6) {
+                Text(ProjectDraft.fieldTitle(field)).font(.ui(13)).foregroundStyle(Color(Theme.text1))
+                Spacer(minLength: 4)
+                // Menu labels drop custom views, so the chevron is a template image.
+                Image(nsImage: Icon.chevronDown.image(size: 12)).foregroundStyle(Color(Theme.text3))
+            }
+            .padding(.horizontal, 10)
+            .frame(width: 150, height: Theme.Control.regular)
+            .contentShape(shape)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .background(shape.strokeBorder(Color(Theme.hairlineStrong)))
+        .fixedSize()
+    }
 }

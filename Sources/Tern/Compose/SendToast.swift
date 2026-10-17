@@ -109,9 +109,8 @@ struct SendToastView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 10) {
                 Text(text(at: context.date))
-                    .font(.ui(13))
+                    .font(.numeric(13))
                     .foregroundStyle(Color(Theme.text1))
-                    .monospacedDigit()
                 if state.undo != nil {
                     Text("·").foregroundStyle(Color(Theme.text3))
                     Button {

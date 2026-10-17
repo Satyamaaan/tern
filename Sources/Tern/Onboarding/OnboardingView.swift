@@ -32,6 +32,7 @@ struct OnboardingView: View {
 
             Text("Mail at the speed you think.")
                 .font(.display(30))
+                .tracking(-0.5)
                 .foregroundStyle(Color(Theme.text1))
                 .padding(.top, 28)
                 .padding(.bottom, 24)
@@ -181,9 +182,13 @@ struct OnboardingView: View {
                     Text(option.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                     Spacer()
                     if let executable = option.executable {
-                        Text(CLITool.find(executable) == nil ? "Not found" : "Found")
-                            .font(.ui(12))
-                            .foregroundStyle(Color(CLITool.find(executable) == nil ? Theme.text3 : Theme.text1))
+                        let found = CLITool.find(executable) != nil
+                        HStack(spacing: 5) {
+                            if found { IconView(icon: .done, size: 14, color: Color(Theme.text1)) }
+                            Text(found ? "Found" : "Not found")
+                                .font(.ui(12))
+                                .foregroundStyle(Color(found ? Theme.text1 : Theme.text3))
+                        }
                     }
                 }
                 .frame(height: 40)
@@ -197,7 +202,8 @@ struct OnboardingView: View {
     private var doneStep: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("You're set.")
-                .font(.ui(15, .semibold))
+                .font(.display(18))
+                .tracking(-0.2)
                 .foregroundStyle(Color(Theme.text1))
             Text("Press ⌘K any time for every command and its shortcut. e archives, z undoes, j and k move.")
                 .font(.ui(13))

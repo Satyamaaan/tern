@@ -113,7 +113,8 @@ struct AccountPicker: View {
                     Text(account.displayName).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                 }
                 Text(model.account?.email ?? model.accountId).font(.ui(13)).foregroundStyle(Color(Theme.text3))
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
+                // Menu labels drop custom views, so the chevron is a template image.
+                Image(nsImage: Icon.chevronDown.image(size: 12)).foregroundStyle(Color(Theme.text3))
             }
             .frame(height: 40)
             .contentShape(Rectangle())
