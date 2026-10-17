@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// `--snapshot <dir>`: renders the main window at 1320×840 (light, dark, the ⌘K palette, the reader with
-/// a thread, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
+/// `--snapshot <dir>`: renders the main window at 1320×840 (the list in light and dark, the ⌘K palette, the
+/// reader over the list, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
 /// and quits. WebKit only paints into a window on screen, so after the launch and j/k measurements the
 /// window is ordered in at 1 % opacity and click-through, without activating the app: nothing shows.
 @MainActor
@@ -13,6 +13,7 @@ struct Snapshotter {
 
     func run(into directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        Self.installDemoLogos()
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
         // Launch time: first layout and a full render of the window with its rows.
@@ -57,10 +58,10 @@ struct Snapshotter {
         model.toasts = []
 
 
-        model.toggleListOnly()
-        shot("wide-one-line-light")
-        shot("wide-one-line-dark", dark: true)
-        model.toggleListOnly()
+        model.toggleReadingPane()
+        shot("reading-pane-light")
+        shot("reading-pane-dark", dark: true)
+        model.toggleReadingPane()
 
         model.searchText = "invoice"
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
@@ -72,15 +73,7 @@ struct Snapshotter {
             model.setScope(.account(account.id))
             model.prefs.moreExpanded = true
             shot("one-account-light")
-            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-            if let index = model.snapshot.items.firstIndex(where: { if case .waterline = $0 { true } else { false } }), let list {
-                let rect = list.table.rect(ofRow: index)
-                list.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, rect.minY - 360)))
-                list.scrollView.reflectScrolledClipView(list.scrollView.contentView)
-                shot("waterline-light")
-                shot("waterline-dark", dark: true)
-                list.scrollView.contentView.scroll(to: .zero)
-            }
+            shot("one-account-dark", dark: true)
             model.prefs.moreExpanded = wasExpanded
             model.setScope(.all)
         }
@@ -92,9 +85,30 @@ struct Snapshotter {
         shot("chord-light")
         model.chordHUD = nil
 
-        model.prefs.sidebarCollapsed = true
-        shot("sidebar-collapsed-light")
-        model.prefs.sidebarCollapsed = false
+        model.prefs.sidebarOpen = true
+        shot("sidebar-open-light")
+        shot("sidebar-open-dark", dark: true)
+        model.prefs.sidebarOpen = false
+
+        // The search field revealed above the list, before typing: suggestions only.
+        model.beginSearch()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        shot("search-open-light")
+        shot("search-open-dark", dark: true)
+        model.endSearch(restoreFocus: true)
+
+        // A narrow window: tabs that don't fit move into `…`, rows take two lines.
+        let size = window.contentView?.frame.size ?? MainWindow.defaultSize
+        window.setContentSize(NSSize(width: 980, height: 700))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        shot("narrow-light")
+        shot("narrow-dark", dark: true)
+        model.toggleReadingPane()
+        // The reader's page lays out again at its new width before WebKit's snapshot of it is taken.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        shot("narrow-pane-light")
+        model.toggleReadingPane()
+        window.setContentSize(size)
 
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-light.png"), dark: false)
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-dark.png"), dark: true)

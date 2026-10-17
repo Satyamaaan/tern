@@ -33,17 +33,45 @@ enum Theme {
     static func accountColor(_ index: Int) -> NSColor { rgb(accountHues[abs(index) % accountHues.count]) }
     static func projectColor(_ index: Int) -> NSColor { rgb(projectHues[abs(index) % projectHues.count]) }
 
-    /// Chip text color for a category; the chip background is this color at 12%.
+    /// Letter avatars: initials on a soft neutral disc.
+    static let avatarFill = dynamic(light: 0xE8E8E4, dark: 0x2E2E2E)
+    static let avatarText = dynamic(light: 0x55554F, dark: 0xB4B4AE)
+    /// The faint edge around logo avatars.
+    static let avatarRing = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white.withAlphaComponent(0.14) : .black.withAlphaComponent(0.1)
+    }
+
+    /// The small colour on tab and tag icons, the only hue in the chrome. Labels stay `text2`; "needs
+    /// reply" stays `ink`, because what needs you reads through ink, not colour.
     static func categoryColor(_ category: MailCategory) -> NSColor {
         switch category {
-        case .newsletter: dynamic(light: 0x6E5BD0, dark: 0xA89BF5)
-        case .receipt: dynamic(light: 0x23764A, dark: 0x5CCB91)
-        case .notification: dynamic(light: 0x5E6B7A, dark: 0x94A3B3)
-        case .calendar: dynamic(light: 0x2F6FD8, dark: 0x78A8FF)
-        case .promotion: dynamic(light: 0x96620E, dark: 0xE0B04F)
-        case .security: dynamic(light: 0xB4232F, dark: 0xFF8A93)
-        case .people, .other: text2
+        case .people: dynamic(light: 0x2F6FD8, dark: 0x6EA2FF)
+        case .newsletter: dynamic(light: 0x1E9E5A, dark: 0x4CC38A)
+        case .notification: dynamic(light: 0xC98500, dark: 0xF0B429)
+        case .receipt: dynamic(light: 0x138A7E, dark: 0x3CC8B4)
+        case .calendar: dynamic(light: 0x4F5BD5, dark: 0x8C95FF)
+        case .promotion: dynamic(light: 0xDD6B1D, dark: 0xFF9E57)
+        case .security: dynamic(light: 0xC2334A, dark: 0xFF6B81)
+        case .other: text3
         }
+    }
+
+    /// The Important tab's purple tag.
+    static let importantColor = dynamic(light: 0x7C5CDB, dark: 0xA78BFA)
+
+    /// Avatar tint for an account in the unified view: the account hue, soft, readable in both themes.
+    static func accountTint(_ index: Int) -> (fill: NSColor, text: NSColor) {
+        let hue = accountHues[abs(index) % accountHues.count]
+        let base = rgb(hue)
+        return (
+            NSColor(name: nil) { appearance in
+                base.withAlphaComponent(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.32 : 0.18)
+            },
+            NSColor(name: nil) { appearance in
+                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return base.blended(withFraction: dark ? 0.55 : 0.35, of: dark ? .white : .black) ?? base
+            }
+        )
     }
 
     /// Corner radii. Only avatars, status dots and the Flock are round; nothing is a pill.
@@ -86,24 +114,20 @@ enum Theme {
 
     enum Weight { case regular, medium, semibold }
 
+    /// Inter, the one typeface: every label, row and the reader.
     static func ui(_ size: CGFloat, _ weight: Weight = .regular) -> NSFont {
-        let name = switch weight {
-        case .regular: "Geist-Regular"
-        case .medium: "Geist-Medium"
-        case .semibold: "Geist-SemiBold"
-        }
-        return NSFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: weight == .regular ? .regular : weight == .medium ? .medium : .semibold)
+        FontCache.font(.text, size, weight)
     }
 
-    static func mono(_ size: CGFloat = 12, _ weight: Weight = .regular) -> NSFont {
-        NSFont(name: weight == .regular ? "GeistMono-Regular" : "GeistMono-Medium", size: size)
-            ?? .monospacedDigitSystemFont(ofSize: size, weight: .regular)
+    /// Inter with tabular figures, so times, counts and keycaps line up.
+    static func numeric(_ size: CGFloat = 12, _ weight: Weight = .regular) -> NSFont {
+        FontCache.font(.numeric, size, weight)
     }
 
-    /// The serif voice: open-thread subject and empty states only.
-    static func serif(_ size: CGFloat, italic: Bool = false) -> NSFont {
-        NSFont(name: italic ? "Newsreader16pt-Italic" : "Newsreader16pt-Medium", size: size)
-            ?? NSFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
+    /// Inter Display SemiBold, the optical size cut for large text: the open thread's subject, empty states
+    /// and headlines.
+    static func display(_ size: CGFloat) -> NSFont {
+        FontCache.font(.display, size, .semibold)
     }
 
     // MARK: Helpers
@@ -129,8 +153,51 @@ extension Color {
 
 extension Font {
     static func ui(_ size: CGFloat, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.ui(size, weight)) }
-    static func mono(_ size: CGFloat = 12, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.mono(size, weight)) }
-    static func serif(_ size: CGFloat, italic: Bool = false) -> Font { Font(Theme.serif(size, italic: italic)) }
+    static func numeric(_ size: CGFloat = 12, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.numeric(size, weight)) }
+    static func display(_ size: CGFloat) -> Font { Font(Theme.display(size)) }
+}
+
+/// Fonts are made once per style, size and weight: rows ask for them on every draw.
+private enum FontCache {
+    enum Style { case text, numeric, display }
+
+    private struct Key: Hashable {
+        let style: Style
+        let size: CGFloat
+        let weight: Theme.Weight
+    }
+
+    nonisolated(unsafe) private static var fonts: [Key: NSFont] = [:]
+    private static let lock = NSLock()
+
+    static func font(_ style: Style, _ size: CGFloat, _ weight: Theme.Weight) -> NSFont {
+        let key = Key(style: style, size: size, weight: weight)
+        lock.lock()
+        defer { lock.unlock() }
+        if let font = fonts[key] { return font }
+        let font = make(style, size, weight)
+        fonts[key] = font
+        return font
+    }
+
+    private static func make(_ style: Style, _ size: CGFloat, _ weight: Theme.Weight) -> NSFont {
+        let name = switch (style, weight) {
+        case (.display, _): "InterDisplay-SemiBold"
+        case (_, .regular): "Inter-Regular"
+        case (_, .medium): "Inter-Medium"
+        case (_, .semibold): "Inter-SemiBold"
+        }
+        let systemWeight: NSFont.Weight = weight == .regular ? .regular : weight == .medium ? .medium : .semibold
+        let base = NSFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: style == .display ? .semibold : systemWeight)
+        guard style == .numeric else { return base }
+        let tabular = base.fontDescriptor.addingAttributes([
+            .featureSettings: [[
+                NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
+                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector,
+            ]],
+        ])
+        return NSFont(descriptor: tabular, size: size) ?? base
+    }
 }
 
 // MARK: - Shell additions

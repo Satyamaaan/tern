@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The three buttons that replace a row's time on hover: Done, Snooze, `…`.
+/// The three buttons that replace a row's tags and time on hover: Done, Snooze, `…`.
 struct RowHoverBar: View {
     let model: AppModel
     let keys: [ThreadKey]
@@ -14,13 +14,13 @@ struct RowHoverBar: View {
                 SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
             } label: {
                 // Menu labels on macOS only render text and images.
-                Image(nsImage: Icon.snoozed.image(size: 14))
+                Image(nsImage: Icon.snoozed.image(size: 15))
                     .foregroundStyle(Color(Theme.text2))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .frame(width: 24, height: 22)
+            .frame(width: 26, height: 24)
             .help("Snooze (h)")
             HoverButton(icon: .ellipsis, help: "More") {
                 guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
@@ -31,7 +31,7 @@ struct RowHoverBar: View {
             }
         }
         .environment(model.services)
-        .frame(width: 80, height: 24, alignment: .trailing)
+        .frame(width: ThreadRowView.hoverWidth, height: 24, alignment: .trailing)
     }
 }
 
@@ -43,8 +43,8 @@ private struct HoverButton: View {
 
     var body: some View {
         Button(action: action) {
-            IconView(icon: icon, size: 14)
-                .frame(width: 24, height: 22)
+            IconView(icon: icon, size: 15)
+                .frame(width: 26, height: 24)
                 .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected).opacity(hovering ? 1 : 0)))
                 .contentShape(Rectangle())
         }

@@ -17,7 +17,7 @@ struct Hairline: View {
 struct IconButton: View {
     let icon: Icon
     var size: CGFloat = Theme.Control.regular
-    var iconSize: CGFloat = 15
+    var iconSize: CGFloat = 16
     var help: String = ""
     let action: () -> Void
 
@@ -33,7 +33,7 @@ struct IconButton: View {
 
 // MARK: - Buttons
 
-/// Every text button in the app. 6 px corners, Geist Medium, 28 pt (24 pt small), no shadow.
+/// Every text button in the app. 6 px corners, Inter Medium, 28 pt (24 pt small), no shadow.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
 /// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
@@ -145,14 +145,14 @@ extension View {
     }
 }
 
-/// A shortcut key in Geist Mono, e.g. the `/` in the search field or `⌘K` in the palette.
+/// A shortcut key in Inter with tabular figures, e.g. the `/` in the search field or `⌘K` in the palette.
 struct Keycap: View {
     let text: String
     var inverted = false
 
     var body: some View {
         Text(text)
-            .font(.mono(11))
+            .font(.numeric(11))
             .foregroundStyle(inverted ? Color(Theme.bg) : Color(Theme.text3))
             .padding(.horizontal, 5)
             .frame(minWidth: 20, minHeight: 20)
@@ -194,7 +194,7 @@ struct Dot: View {
     }
 }
 
-/// Section caps: Geist 11/14 500, +0.6 tracking, `text3`.
+/// Section caps: Inter 11/14 500, +0.6 tracking, `text3`.
 struct CapsLabel: View {
     let text: String
 
@@ -206,24 +206,17 @@ struct CapsLabel: View {
     }
 }
 
-/// The project's SF Symbol (or emoji), tinted with its colour on a 16% tint square.
+/// The project's icon (or emoji) in its colour: a tag icon, so it carries the project's hue.
 struct ProjectGlyph: View {
     let project: Project
-    var size: CGFloat = 15
+    var size: CGFloat = 16
 
     var body: some View {
-        let color = Color(Theme.projectColor(project.colorIndex))
-        ZStack {
-            RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.16))
-            if let icon = project.icon, icon.unicodeScalars.first?.properties.isEmojiPresentation == true {
-                Text(icon).font(.system(size: size * 0.62))
-            } else {
-                Image(systemName: project.icon ?? "folder")
-                    .font(.system(size: size * 0.55, weight: .semibold))
-                    .foregroundStyle(color)
-            }
+        if let icon = project.icon, icon.unicodeScalars.first?.properties.isEmojiPresentation == true {
+            Text(icon).font(.system(size: size * 0.8)).frame(width: size, height: size)
+        } else {
+            IconView(icon: Icon.project(project.icon), size: size, color: Color(Theme.projectColor(project.colorIndex)))
         }
-        .frame(width: size, height: size)
     }
 }
 

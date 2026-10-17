@@ -36,11 +36,12 @@ struct ReaderTrust: Sendable {
 /// What the payload needs besides the thread itself.
 struct ReaderContext {
     var accountEmails: Set<String>
-    var accountColorIndex: Int
     /// Gmail label id → name, for the thread's account.
     var labelNames: [String: String]
     var trust: ReaderTrust
     var summary: [String: Any]
+    /// Sender pictures by lowercased address, as `data:` URLs (see `ReaderPayload.logos`).
+    var logos: [String: String] = [:]
     var now = Date()
 
     func isMe(_ email: String) -> Bool { accountEmails.contains(email.lowercased()) }
@@ -89,6 +90,7 @@ enum ReaderPayload {
             "subject": detail.thread.subject.isEmpty ? (detail.messages.first?.subject ?? "") : detail.thread.subject,
             "chips": chips(detail, context: context),
             "summary": context.summary,
+            "logos": context.logos,
             "messages": messages,
         ]
         return (payload, loading, deferred)
@@ -118,6 +120,35 @@ enum ReaderPayload {
 
     static func bodyLength(_ message: MailMessage) -> Int {
         (message.bodyHtml?.utf8.count ?? 0) + (message.bodyText?.utf8.count ?? 0)
+    }
+
+    // MARK: Sender pictures
+
+    /// The thread's distinct senders (lowercased), oldest first, whose logos the reader may show and ask
+    /// for. None in Spam or Trash: a forged From shouldn't borrow a real company's logo, and fetching one
+    /// would reach out to whatever domain the sender named.
+    static func logoSenders(_ messages: [MailMessage], threadLabels: [String]) -> [String] {
+        if threadLabels.contains(SystemLabel.spam) || threadLabels.contains(SystemLabel.trash) { return [] }
+        var seen = Set<String>()
+        return messages.compactMap { message in
+            let email = message.fromEmail.lowercased()
+            return !email.isEmpty && seen.insert(email).inserted ? email : nil
+        }
+    }
+
+    static func logoSenders(_ detail: ThreadDetail) -> [String] {
+        logoSenders(detail.messages, threadLabels: detail.thread.labelIds)
+    }
+
+    /// `data:` URLs for the senders that have a logo, from `lookup` (PNG bytes, e.g.
+    /// `SenderLogos.shared.pngData(forEmail:)`). Senders without one keep their letter avatar.
+    static func logos(_ senders: [String], lookup: (String) -> Data?) -> [String: String] {
+        var map: [String: String] = [:]
+        for email in senders {
+            guard let png = lookup(email), !png.isEmpty else { continue }
+            map[email] = "data:image/png;base64," + png.base64EncodedString()
+        }
+        return map
     }
 
     // MARK: Pieces
@@ -154,7 +185,6 @@ enum ReaderPayload {
             "from": name,
             "email": message.fromEmail.lowercased(),
             "initials": initials(message.from),
-            "hue": hue(for: message.fromEmail, mine: mine, context: context),
             "toLine": toLine,
             "details": details,
             "date": shortDate(message.date, now: context.now),
@@ -171,21 +201,24 @@ enum ReaderPayload {
     }
 
     private static func chips(_ detail: ThreadDetail, context: ReaderContext) -> [[String: Any]] {
+        func chip(_ text: String, _ kind: String, _ icon: Icon, _ color: String) -> [String: Any] {
+            ["text": text, "kind": kind, "icon": icon.svgMarkup, "color": color]
+        }
         var chips: [[String: Any]] = []
         if let ai = detail.ai {
-            if ai.needsReply { chips.append(["text": "Needs reply", "kind": "needs"]) }
+            if ai.needsReply { chips.append(chip("Needs reply", "needs", .needsReply, "var(--ink)")) }
             if ai.category != .people, ai.category != .other {
-                chips.append(["text": categoryName(ai.category), "kind": "cat", "color": "var(--cat-\(ai.category.rawValue))"])
+                chips.append(chip(categoryName(ai.category), "cat", .category(ai.category), "var(--cat-\(ai.category.rawValue))"))
             }
         }
         for project in detail.projects {
-            chips.append(["text": project.name, "kind": "project", "color": ReaderResources.hex(Theme.projectColor(project.colorIndex))])
+            chips.append(chip(project.name, "project", .project(project.icon), ReaderResources.hex(Theme.projectColor(project.colorIndex))))
         }
         for id in detail.thread.labelIds where !SystemLabel.all.contains(id) && !id.hasPrefix("CATEGORY_") {
-            if let name = context.labelNames[id] { chips.append(["text": name, "kind": "label"]) }
+            if let name = context.labelNames[id] { chips.append(chip(name, "label", .label, "var(--text2)")) }
         }
         if let until = detail.snoozedUntil {
-            chips.append(["text": "Snoozed · \(SnoozeOption.detailText(until, now: context.now))", "kind": "label"])
+            chips.append(chip("Snoozed · \(SnoozeOption.detailText(until, now: context.now))", "snoozed", .snoozed, "var(--text2)"))
         }
         return chips
     }
@@ -219,14 +252,6 @@ enum ReaderPayload {
             .filter { $0.first?.isLetter == true }
         let letters = words.prefix(2).compactMap(\.first).map { String($0).uppercased() }
         return letters.isEmpty ? "?" : letters.joined()
-    }
-
-    private static func hue(for email: String, mine: Bool, context: ReaderContext) -> String {
-        if mine { return ReaderResources.hex(Theme.accountColor(context.accountColorIndex)) }
-        var hash: UInt32 = 2_166_136_261
-        for byte in email.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
-        let hues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0x8F7F62, 0xB05C7A, 0x6B7F4A, 0x5E6B7A, 0x7A6A5C]
-        return ReaderResources.hex(Theme.rgb(hues[Int(hash % UInt32(hues.count))]))
     }
 
     /// "10:42" today, "Tue" this week, "Oct 12" this year, "Oct 12 '25" before.

@@ -27,7 +27,7 @@ final class ListItemLayoutFragment: NSTextLayoutFragment {
 
 enum ListMarkerDrawing {
     static let attributes: [NSAttributedString.Key: Any] = [
-        .font: Theme.ui(EditorStyle.fontSize), .foregroundColor: Theme.text2,
+        .font: Theme.numeric(EditorStyle.fontSize), .foregroundColor: Theme.text2,
     ]
 
     /// Right-aligns the marker 6 pt before where the item's text starts, on its first line.

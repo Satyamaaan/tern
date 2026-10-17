@@ -2,176 +2,110 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The middle column: header with the Flock, search field, split tabs, the list, toasts.
+/// The list: a centred column of one-line rows under the title bar's tabs, the search field above it
+/// while searching, and the floating bottom bar.
 struct ListColumn: View {
     @Environment(AppModel.self) private var model
-    /// Leaves room for the traffic lights when the sidebar is hidden.
-    var leadingInset: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            ListHeader(leadingInset: leadingInset)
-            SearchField()
-                .padding(.horizontal, 12)
-            if model.showsSplits {
-                SplitTabs()
-            } else {
-                Spacer().frame(height: 10)
-                Hairline()
+        GeometryReader { geometry in
+            let column = ListLayout.column(width: geometry.size.width)
+            VStack(spacing: 0) {
+                if model.searchShown {
+                    SearchField()
+                        .frame(width: column.width)
+                        .padding(.top, 4)
+                        .padding(.bottom, 6)
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity.combined(with: .offset(y: -6)))
+                }
+                ZStack {
+                    MessageListView(model: model)
+                    if model.listLoaded && model.snapshot.isEmpty {
+                        EmptyListView()
+                            .background(Color(Theme.bg))
+                    }
+                }
             }
-            ZStack {
-                MessageListView(model: model)
-                if model.listLoaded && model.snapshot.isEmpty {
-                    EmptyListView()
-                        .background(Color(Theme.bg))
+            .overlay(alignment: .top) {
+                if model.showsSuggestions {
+                    SearchSuggestions()
+                        .frame(width: column.width)
+                        .padding(.top, 4 + SearchField.height + 4)
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if model.prefs.readingPane || !model.readerExpanded {
+                    BottomBar()
+                        .padding(.bottom, 14)
+                        .transition(.opacity)
                 }
             }
         }
         .background(Color(Theme.bg))
-        .overlay(alignment: .bottom) { ToastStack() }
-        .overlay(alignment: .top) {
-            if model.showsSuggestions {
-                SearchSuggestions()
-                    .padding(.top, MainWindow.headerHeight + 32 + 6)
-                    .padding(.horizontal, 12)
-                    .transition(.opacity)
-            }
-        }
+        .animation(.easeOut(duration: 0.12), value: model.searchShown)
         .animation(.easeOut(duration: 0.09), value: model.showsSuggestions)
     }
 }
 
-// MARK: - Header
+/// Where the list's centred column sits: full width with small margins in a narrow list, at most
+/// `maxColumn` wide on a big window. Rows, headers, the search field and empty states all use it.
+enum ListLayout {
+    static let maxColumn: CGFloat = 1040
 
-struct ListHeader: View {
-    @Environment(AppModel.self) private var model
-    var leadingInset: CGFloat = 0
+    static func margin(for width: CGFloat) -> CGFloat { width >= 760 ? 28 : 8 }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(model.title)
-                .font(.ui(15, .semibold))
-                .foregroundStyle(Color(Theme.text1))
-                .lineLimit(1)
-            if let count = model.flockCount, count > 0 {
-                FlockView(count: count)
-            }
-            Spacer(minLength: 8)
-            MenuButton(icon: .ellipsis, help: "List options") { listMenu() }
-        }
-        .padding(.leading, 18 + leadingInset)
-        .padding(.trailing, 14)
-        .frame(height: MainWindow.headerHeight)
-        .background(WindowDragArea())
+    static func column(width: CGFloat) -> (x: CGFloat, width: CGFloat) {
+        let margin = margin(for: width)
+        let inner = max(min(width - 2 * margin, maxColumn), 0)
+        return (floor((width - inner) / 2), inner)
     }
 
-    private func listMenu() -> NSMenu {
-        let model = self.model
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(ClosureMenuItem("Mark All as Read", enabled: !model.snapshot.isEmpty) { model.markAllRead() })
-        menu.addItem(ClosureMenuItem("Select All", key: "a", modifiers: .command, enabled: !model.snapshot.isEmpty) { model.selectAll() })
-        menu.addItem(.separator())
-        let density = NSMenu()
-        for option in Density.allCases {
-            let item = ClosureMenuItem(option.title) { model.prefs.density = option }
-            item.state = model.prefs.density == option ? .on : .off
-            density.addItem(item)
-        }
-        let densityItem = NSMenuItem(title: "Density", action: nil, keyEquivalent: "")
-        densityItem.submenu = density
-        menu.addItem(densityItem)
-        let split = ClosureMenuItem("Split Inbox") { model.setSplitInbox(!model.prefs.splitInbox) }
-        split.state = model.prefs.splitInbox ? .on : .off
-        menu.addItem(split)
-        let sort = NSMenuItem(title: "Sort: Newest First", action: nil, keyEquivalent: "")
-        sort.isEnabled = false
-        menu.addItem(sort)
-        return menu
-    }
-}
-
-/// One ink dot per thread that needs you (max 12, then "+n"). Each triage action lifts a dot away.
-struct FlockView: View {
-    let count: Int
-    @State private var lifts: [UUID] = []
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<min(count, 12), id: \.self) { _ in
-                Circle().fill(Color(Theme.ink)).frame(width: 6, height: 6)
-            }
-            if count > 12 {
-                Text("+\(count - 12)")
-                    .font(.mono(12))
-                    .foregroundStyle(Color(Theme.text3))
-                    .lineLimit(1)
-                    .padding(.leading, 3)
-            }
-        }
-        .fixedSize()
-        .overlay(alignment: .leading) {
-            ForEach(lifts, id: \.self) { id in
-                LiftingDot(offsetX: CGFloat(max(min(count, 12), 0)) * 11) { lifts.removeAll { $0 == id } }
-            }
-        }
-        .onChange(of: count) { old, new in
-            guard new < old else { return }
-            lifts.append(UUID())
-        }
-    }
-}
-
-/// A dot that drifts 6 px up and fades in 180 ms.
-private struct LiftingDot: View {
-    let offsetX: CGFloat
-    let done: () -> Void
-    @State private var lifted = false
-
-    var body: some View {
-        Circle()
-            .fill(Color(Theme.ink))
-            .frame(width: 6, height: 6)
-            .offset(x: offsetX, y: lifted ? -6 : 0)
-            .opacity(lifted ? 0 : 1)
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.18)) { lifted = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: done)
-            }
+    static func column(in bounds: CGRect) -> CGRect {
+        let column = column(width: bounds.width)
+        return CGRect(x: bounds.minX + column.x, y: bounds.minY, width: column.width, height: bounds.height)
     }
 }
 
 // MARK: - Search field
 
+/// The search field, revealed above the list by `/`, ⌘F or the bottom bar; Esc hides it again.
 struct SearchField: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
 
+    static let height: CGFloat = 36
+
     var body: some View {
         @Bindable var model = model
         HStack(spacing: 8) {
-            IconView(icon: .search, size: 15, color: Color(Theme.text3))
-            TextField("Search", text: $model.searchText)
+            IconView(icon: .search, size: 16, color: Color(Theme.text3))
+            TextField("Search mail", text: $model.searchText)
                 .textFieldStyle(.plain)
                 .font(.ui(13))
                 .foregroundStyle(Color(Theme.text1))
                 .focused($focused)
-            if !model.searchText.isEmpty {
-                Button { model.endSearch(restoreFocus: true) } label: {
-                    Text("esc").font(.mono(11)).foregroundStyle(Color(Theme.text3))
-                        .padding(.horizontal, 5).frame(height: 20)
-                }
-                .buttonStyle(.plain)
-            } else if !focused {
-                Keycap(text: "/")
+            if model.isSearching, !model.isPinned(model.activeTab) {
+                Button("Pin") { model.pin(model.activeTab) }
+                    .buttonStyle(TernButtonStyle(.quiet, size: .small))
+                    .help("Pin this search as a tab")
             }
+            Button { model.endSearch(restoreFocus: true) } label: { Keycap(text: "esc") }
+                .buttonStyle(.plain)
+                .help("Close search  Esc")
         }
-        .padding(.leading, 10)
+        .padding(.leading, 12)
         .padding(.trailing, 6)
-        .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+        .frame(height: Self.height)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.hover)))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous)
             .strokeBorder(Color(focused ? Theme.hairlineStrong : .clear), lineWidth: 1))
+        .onAppear {
+            // The field appears because search began; take the keyboard once it is in the window.
+            DispatchQueue.main.async { if model.searchFieldFocused { focused = true } }
+        }
         .onChange(of: focused) { _, value in
             if model.searchFieldFocused != value { model.searchFieldFocused = value }
             if value {
@@ -233,9 +167,7 @@ private struct SuggestionRow: View {
                 }
                 Spacer(minLength: 8)
             case .ask(let text):
-                Text("✦")
-                    .font(.ui(12))
-                    .foregroundStyle(Color(Theme.text2))
+                IconView(icon: .sparkles, size: 14, color: Color(Theme.text2))
                     .frame(width: 16)
                 (Text("Ask: ").foregroundStyle(Color(Theme.text2)) + Text(text).foregroundStyle(Color(Theme.text1)))
                     .font(.ui(13))
@@ -255,48 +187,12 @@ private struct SuggestionRow: View {
     private static func icon(_ kind: SearchSuggestion.Kind) -> Icon {
         switch kind {
         case .contact, .account: .person
-        case .label, .project: .label
+        case .label: .label
+        case .project: .folder
         case .category: .inbox
-        case .operator: .search
+        case .operator: .command
         case .recent: .snoozed
         }
-    }
-}
-
-// MARK: - Split tabs
-
-struct SplitTabs: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            ForEach(InboxSplit.allCases) { split in
-                let active = split == model.split
-                Button { model.showSplit(split) } label: {
-                    HStack(spacing: 4) {
-                        Text(split.title)
-                            .font(.ui(13, active ? .medium : .regular))
-                            .foregroundStyle(Color(active ? Theme.text1 : Theme.text2))
-                        let count = model.unreadCount(split)
-                        if count > 0 {
-                            Text("\(count)").font(.mono(12)).foregroundStyle(Color(Theme.text3))
-                        }
-                    }
-                    .fixedSize()
-                    .padding(.bottom, 9)
-                    .overlay(alignment: .bottom) {
-                        if active { Rectangle().fill(Color(Theme.text1)).frame(height: 2) }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 18)
-        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 40, maxHeight: 40, alignment: .bottomLeading)
-        .clipped()
-        .overlay(alignment: .bottom) { Hairline() }
     }
 }
 

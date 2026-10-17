@@ -18,6 +18,17 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .advanced: "Advanced"
         }
     }
+
+    var icon: Icon {
+        switch self {
+        case .accounts: .at
+        case .ai: .sparkles
+        case .appearance: .sun
+        case .shortcuts: .command
+        case .notifications: .notification
+        case .advanced: .sliders
+        }
+    }
 }
 
 /// AI choices. Stored in the database `setting` table so the AI lane reads the same values.
@@ -130,7 +141,7 @@ struct SettingsView: View {
                 Spacer().frame(height: 44)
                 ForEach(SettingsSection.allCases) { section in
                     SidebarRow(title: section.title, selected: state.section == section) {
-                        EmptyView()
+                        IconView(icon: section.icon, size: 15, color: Color(state.section == section ? Theme.text1 : Theme.text2))
                     } action: {
                         state.section = section
                     }
@@ -144,10 +155,11 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(state.section.title)
-                        .font(.ui(15, .semibold))
+                        .font(.display(22))
+                        .tracking(-0.3)
                         .foregroundStyle(Color(Theme.text1))
-                        .padding(.top, 40)
-                        .padding(.bottom, 14)
+                        .padding(.top, 38)
+                        .padding(.bottom, 12)
                     content
                 }
                 .padding(.horizontal, 32)
@@ -174,19 +186,28 @@ struct SettingsView: View {
 
 // MARK: - Rows and controls
 
-/// A flat settings row: title (+ detail) on the left, control on the right, hairline below.
+/// A flat settings row: title (+ detail) on the left, control on the right, hairline below. An icon,
+/// when given, sits before the title on its first line.
 struct SettingsRow<Control: View>: View {
     let title: String
     var detail: String?
+    var icon: Icon?
     @ViewBuilder let control: () -> Control
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
-                    if let detail {
-                        Text(detail).font(.ui(12)).foregroundStyle(Color(Theme.text3)).fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if let icon {
+                        // Centred on the title's x-height.
+                        IconView(icon: icon, size: 16, color: Color(Theme.text2))
+                            .alignmentGuide(.firstTextBaseline) { $0.height / 2 + 4.5 }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
+                        if let detail {
+                            Text(detail).font(.ui(12)).foregroundStyle(Color(Theme.text3)).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 Spacer(minLength: 12)
@@ -253,7 +274,7 @@ private struct AccountsSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             if model.accounts.isEmpty {
                 Text("No accounts yet.")
-                    .font(.serif(18, italic: true))
+                    .font(.display(16))
                     .foregroundStyle(Color(Theme.text2))
                     .padding(.vertical, 12)
                 Hairline()
@@ -319,7 +340,7 @@ private struct AISettings: View {
             SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
                 TextField("Default", text: $state.aiModel)
                     .textFieldStyle(.plain)
-                    .font(.mono(12))
+                    .font(.numeric(12))
                     .multilineTextAlignment(.trailing)
                     .frame(width: 180)
                     .disabled(state.provider == .off)
@@ -372,9 +393,9 @@ private struct ShortcutsSettings: View {
                 HStack {
                     Text(row.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                     Spacer()
-                    Text(row.shortcut).font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                    ShortcutKeys(shortcut: row.shortcut)
                 }
-                .frame(height: 30)
+                .frame(height: 32)
                 Hairline()
             }
         }

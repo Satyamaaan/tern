@@ -41,7 +41,7 @@ enum ReaderResources {
     static let warmupPayload: [String: Any] = {
         func message(_ id: String, expanded: Bool, body: [String: Any]?) -> [String: Any] {
             var item: [String: Any] = [
-                "id": id, "from": "Tern", "email": "warm@tern.local", "initials": "T", "hue": "#4F7CAC",
+                "id": id, "from": "Tern", "email": id == "w7" ? "logo@tern.local" : "warm@tern.local", "initials": "T",
                 "toLine": "to me", "details": [["From", "Tern"]], "date": "9:41", "dateLong": "9:41", "dateFull": "",
                 "snippet": "Warm up", "unread": false, "draft": false, "imagesAllowed": false, "bodyVersion": "1",
                 "attachments": [["id": "\(id)-a", "name": "a.pdf", "size": "1 KB", "kind": "file"]],
@@ -57,8 +57,13 @@ enum ReaderResources {
         let plain: [String: Any] = ["html": "<div class=\"tern-plain\">Warm up</div>", "css": "", "bodyStyle": "", "mode": "plain", "blocked": 0]
         return [
             "key": "warmup", "subject": "Warm up",
-            "chips": [["text": "Needs reply", "kind": "needs"], ["text": "Newsletter", "kind": "cat", "color": "var(--cat-newsletter)"]],
+            "chips": [
+                ["text": "Needs reply", "kind": "needs", "icon": Icon.needsReply.svgMarkup, "color": "var(--ink)"],
+                ["text": "Newsletter", "kind": "cat", "icon": Icon.newsletter.svgMarkup, "color": "var(--cat-newsletter)"],
+            ],
             "summary": ["state": "line", "text": "Warm up", "expandable": true],
+            // A 1×1 PNG, so the first real logo doesn't pay for the image path.
+            "logos": ["logo@tern.local": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="],
             "messages": [message("w1", expanded: false, body: nil)] + (2...6).map { message("w\($0)", expanded: false, body: nil) }
                 + [message("w7", expanded: true, body: plain), message("w8", expanded: true, body: rich)],
         ]
@@ -78,6 +83,7 @@ enum ReaderResources {
             ("bg", Theme.bg), ("raised", Theme.raised), ("hover", Theme.hover), ("selected", Theme.selected),
             ("hairline", Theme.hairline), ("hairlineStrong", Theme.hairlineStrong), ("text1", Theme.text1),
             ("text2", Theme.text2), ("text3", Theme.text3), ("ink", Theme.ink), ("inkSoft", Theme.inkSoft),
+            ("avatarFill", Theme.avatarFill), ("avatarText", Theme.avatarText),
         ] + MailCategory.allCases.map { ("cat-\($0.rawValue)", Theme.categoryColor($0)) }
         func block(_ name: NSAppearance.Name) -> String {
             var css = ""

@@ -1,12 +1,9 @@
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-SemiBold.ttf"); font-weight: 600; }
-@font-face { font-family: "Geist Mono"; src: url("tern-app://fonts/GeistMono-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: "Geist Mono"; src: url("tern-app://fonts/GeistMono-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Newsreader; src: url("tern-app://fonts/Newsreader16pt-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Newsreader; src: url("tern-app://fonts/Newsreader16pt-Italic.ttf"); font-style: italic; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Regular.ttf"); font-weight: 400; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Medium.ttf"); font-weight: 500; }
+@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-SemiBold.ttf"); font-weight: 600; }
+@font-face { font-family: "Inter Display"; src: url("tern-app://fonts/InterDisplay-SemiBold.ttf"); font-weight: 600; }
 
-:root { color-scheme: light; --ui: Geist, -apple-system, "Helvetica Neue", sans-serif; --mono: "Geist Mono", ui-monospace, Menlo, monospace; }
+:root { color-scheme: light; --ui: Inter, -apple-system, "Helvetica Neue", sans-serif; --display: "Inter Display", Inter, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html { background: transparent; -webkit-text-size-adjust: none; }
@@ -17,52 +14,54 @@ body {
 ::selection { background: color-mix(in srgb, var(--ink) 16%, transparent); }
 #warm { position: absolute; left: -9999px; top: 0; visibility: hidden; }
 #warm .w1 { font: 400 13px var(--ui); } #warm .w2 { font: 500 13px var(--ui); } #warm .w3 { font: 600 13px var(--ui); }
-#warm .w4 { font: 400 12px var(--mono); } #warm .w5 { font: 500 24px Newsreader; } #warm .w6 { font: italic 22px Newsreader; }
+#warm .w4 { font: 400 12px var(--ui); font-variant-numeric: tabular-nums; } #warm .w5 { font: 600 24px var(--display); }
 
-#thread { max-width: 760px; margin: 0 auto; padding: 6px 32px 40px; }
-.mono { font-family: var(--mono); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+/* A centred reading column: 720 px of content. */
+#thread { max-width: 784px; margin: 0 auto; padding: 10px 32px 48px; }
+.num { font-variant-numeric: tabular-nums; }
+svg path { vector-effect: non-scaling-stroke; }
 
 /* Header */
 .subject {
-  font: 500 24px/30px Newsreader, Georgia, serif; letter-spacing: -0.2px; margin: 0 0 10px;
-  color: var(--text1); overflow-wrap: anywhere;
+  font: 600 24px/31px var(--display); letter-spacing: -0.35px; margin: 0 0 12px;
+  color: var(--text1); overflow-wrap: anywhere; text-wrap: balance;
 }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
 .chips:empty { display: none; }
 .chip {
-  height: 18px; padding: 0 6px; border-radius: 4px; font: 500 11px/18px var(--ui); white-space: nowrap;
-  color: var(--chip, var(--text2)); background: color-mix(in srgb, var(--chip, var(--text2)) 12%, transparent);
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px 0 6px; border-radius: 4px;
+  border: 1px solid var(--hairlineStrong); font: 500 12px/20px var(--ui); color: var(--text2); white-space: nowrap;
 }
-.chip.needs { color: var(--ink); background: var(--inkSoft); }
-.chip.needs::before {
-  content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--ink);
-  margin-right: 5px; vertical-align: 1px;
-}
-.chip.label { color: var(--text2); background: var(--hover); }
+.chip svg { width: 13px; height: 13px; flex: none; color: var(--chip, var(--text2)); }
+.chip svg path { stroke-width: 1.15px; }
 
-.summary { display: flex; gap: 8px; color: var(--text2); margin: 0 0 18px; max-width: 640px; font-size: 13px; line-height: 19px; }
-.summary .spark { color: var(--text3); flex: none; }
+.summary { display: flex; gap: 8px; color: var(--text2); margin: 0 0 20px; font-size: 13px; line-height: 19px; }
+.summary .spark { flex: none; width: 15px; height: 19px; display: grid; place-items: center; color: var(--text3); }
+.summary .spark svg { width: 15px; height: 15px; }
+.summary .spark svg path { stroke-width: 1.1px; }
 .summary .text { min-width: 0; }
 .summary .text p { margin: 0; }
 .summary ul { margin: 0; padding: 0 0 0 16px; }
 .summary li { margin: 0 0 3px; }
 .summary.action { color: var(--text3); }
 .summary.clickable .text:hover, .summary.action:hover { color: var(--text1); }
+.summary.action:hover .spark { color: var(--text2); }
 .summary.loading .text { color: var(--text3); }
 .summary .fold { color: var(--text3); margin-left: 6px; }
 
-/* Messages */
+/* Messages. Avatars sit on one axis: 24 px on collapsed lines, 28 px on open headers, both centred in a
+   28 px column, so names and bodies start 38 px in. */
 .msgs { margin: 0; }
 .msg { border-top: 1px solid var(--hairline); }
-.msg:last-child { border-bottom: 0; }
 .line {
-  height: 42px; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 6px; margin: 0 -6px;
+  height: 40px; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 8px; margin: 0 -8px;
   border-radius: 6px;
 }
 .line:hover { background: var(--hover); }
+.line .av { width: 24px; height: 24px; margin: 0 2px; font-size: 9.5px; }
 .line .from { font-weight: 500; white-space: nowrap; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .line .snip { color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-.line .date, .mhead .date { color: var(--text3); flex: none; margin-left: auto; }
+.line .date, .mhead .date { color: var(--text3); flex: none; margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 .line .draft { color: var(--ink); font-weight: 500; font-style: italic; flex: none; }
 .msg.unread .line .from { font-weight: 600; }
 .msg.open > .line { display: none; }
@@ -73,23 +72,36 @@ body {
   color: var(--text3); font-size: 12px;
 }
 .more .count {
-  height: 20px; min-width: 28px; padding: 0 7px; border-radius: 4px; background: var(--hover); display: grid;
-  place-items: center; font: 500 11px/16px var(--mono);
+  height: 20px; min-width: 28px; padding: 0 7px; border-radius: 4px; border: 1px solid var(--hairlineStrong); display: grid;
+  place-items: center; font: 500 11px/16px var(--ui); font-variant-numeric: tabular-nums; color: var(--text2);
 }
-.more:hover .count { background: var(--selected); color: var(--text2); }
+.more:hover { color: var(--text2); }
+.more:hover .count { background: var(--hover); }
 
+/* Sender pictures: a logo clipped round with a faint inner ring, else initials on a neutral disc. */
 .av {
-  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  font: 600 11px/1 var(--ui); color: #fff; background: var(--hue, #74746E); letter-spacing: 0.2px;
+  position: relative; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  overflow: hidden; font: 600 10.5px/1 var(--ui); letter-spacing: 0.2px; color: var(--avatarText); background: var(--avatarFill);
 }
-.mhead { display: flex; gap: 10px; align-items: center; padding: 14px 6px 0; margin: 0 -6px; border-radius: 6px; min-width: 0; }
+.av.logo { background: #FFFFFF; }
+.av img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.av.logo::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+:root[data-theme="dark"] .av.logo::after { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.mhead {
+  display: flex; gap: 10px; align-items: flex-start; padding: 14px 8px 0; margin: 0 -8px; border-radius: 6px; min-width: 0;
+}
+.mhead .av { margin-top: 3px; }
 .mhead .who { min-width: 0; flex: 1; }
-.mhead .row1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.mhead .row1 { display: flex; gap: 6px; align-items: baseline; min-width: 0; line-height: 18px; }
 .mhead .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 60%; }
 .mhead .addr { color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mhead .date { line-height: 18px; }
 .mhead .to { color: var(--text3); font-size: 12px; line-height: 16px; display: inline-flex; align-items: center; gap: 3px; }
 .mhead .to:hover { color: var(--text2); }
-.mhead .to svg { width: 9px; height: 9px; stroke: currentColor; fill: none; stroke-width: 1.6; transition: transform 90ms; }
+.mhead .to svg { width: 11px; height: 11px; transition: transform 90ms; }
+.mhead .to svg path { stroke-width: 1.3px; }
 .msg.details-open .mhead .to svg { transform: rotate(180deg); }
 .details {
   margin: 10px 0 0 38px; padding: 10px 12px; border-radius: 6px; background: var(--hover);
@@ -108,7 +120,7 @@ body {
 
 /* Mail draws only inside its own box: offsets, negative margins and transforms are clipped. */
 .mbody {
-  display: block; margin: 14px 0 0 38px; max-width: 640px; position: relative; overflow: clip;
+  display: block; margin: 14px 0 0 38px; max-width: 682px; position: relative; overflow: clip;
   contain: layout paint; isolation: isolate;
   color: var(--text1); font: 14px/1.5714 var(--ui); min-height: 22px;
 }
@@ -128,9 +140,10 @@ body {
 }
 .att:hover { background: var(--hover); }
 .att:focus-visible, .att.selected { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--ink) 45%, transparent); border-color: transparent; }
-.att svg { width: 15px; height: 15px; stroke: var(--text2); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.att svg { width: 16px; height: 16px; color: var(--text2); flex: none; }
+.att svg path { stroke-width: 1.3px; }
 .att .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.att .size { color: var(--text3); flex: none; }
+.att .size { color: var(--text3); flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
 .att.busy .size { opacity: 0.5; }
 
 .msg.open { padding-bottom: 18px; }

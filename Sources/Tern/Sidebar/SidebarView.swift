@@ -3,31 +3,21 @@ import SwiftUI
 import TernCore
 import UniformTypeIdentifiers
 
-/// Left column: compose, account switcher, mailboxes, projects, sync status.
+/// The sidebar behind the bottom bar's toggle (⌃⌘S): mailboxes, projects, accounts, the sync line and
+/// the light/dark switch.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                IconButton(icon: .compose, help: "New message (c)") { model.compose() }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: MainWindow.headerHeight)
-            .background(WindowDragArea())
-
-            AccountSwitcher()
-                .padding(.horizontal, 10)
-                .padding(.top, 2)
-                .padding(.bottom, 10)
-
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 1) {
                     mailboxes
                     projects
+                    accounts
                 }
                 .padding(.horizontal, 10)
+                .padding(.top, 6)
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.never)
@@ -49,7 +39,7 @@ struct SidebarView: View {
         row(.sent, "Sent", .sent)
         row(.allMail, "All mail", .allMail)
         SidebarRow(title: "More", selected: false, titleColor: Theme.text2) {
-            IconView(icon: model.prefs.moreExpanded ? .chevronDown : .more, size: 15)
+            IconView(icon: model.prefs.moreExpanded ? .chevronDown : .ellipsis, size: 16)
         } action: {
             withAnimation(.easeOut(duration: 0.15)) { model.prefs.moreExpanded.toggle() }
         }
@@ -70,9 +60,33 @@ struct SidebarView: View {
             title: title, count: count > 0 ? count : nil, countColor: countColor, countWeight: countWeight,
             selected: model.kind == kind && !model.isSearching
         ) {
-            IconView(icon: icon, size: 15)
+            IconView(icon: icon, size: 16)
         } action: {
             model.show(kind)
+        }
+    }
+
+    // MARK: Accounts
+
+    @ViewBuilder private var accounts: some View {
+        if model.accounts.count > 1 {
+            CapsLabel(text: "Accounts")
+                .padding(.leading, 8)
+                .frame(height: 22)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+            SidebarRow(title: "All accounts", selected: model.scope == .all) {
+                IconView(icon: .inbox, size: 16)
+            } action: {
+                model.setScope(.all)
+            }
+            ForEach(model.accounts) { account in
+                SidebarRow(title: model.accountTitle(account), selected: model.scope == .account(account.id)) {
+                    AccountAvatar(account: account, size: 16)
+                } action: {
+                    model.setScope(.account(account.id))
+                }
+            }
         }
     }
 
@@ -113,7 +127,7 @@ struct SidebarRow<Leading: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             leading()
-                .frame(width: 15, height: 15)
+                .frame(width: 16, height: 16)
             Text(title)
                 .font(.ui(13, selected ? .medium : .regular))
                 .foregroundStyle(Color(titleColor))
@@ -123,7 +137,7 @@ struct SidebarRow<Leading: View>: View {
                 trailing
             } else if let count {
                 Text(count.formatted())
-                    .font(.mono(12, countWeight))
+                    .font(.numeric(12, countWeight))
                     .foregroundStyle(Color(countColor))
             }
         }
@@ -146,7 +160,7 @@ private struct LabelRow: View {
 
     var body: some View {
         SidebarRow(title: label.name, selected: model.kind == .label(label.id) && !model.isSearching, dropTargeted: targeted) {
-            IconView(icon: .label, size: 15)
+            IconView(icon: .label, size: 16)
         } action: {
             model.show(.label(label.id))
         }
@@ -168,7 +182,7 @@ private struct ProjectsHeader: View {
         HStack {
             CapsLabel(text: "Projects")
             Spacer()
-            IconButton(icon: .plus, size: 20, iconSize: 12, help: "New project") { model.newProject() }
+            IconButton(icon: .plus, size: 20, iconSize: 14, help: "New project  ⇧⌘P") { model.newProject() }
                 .opacity(hovering ? 1 : 0)
         }
         .padding(.leading, 8)
@@ -254,7 +268,6 @@ private struct ProjectRow: View {
 struct SyncStatusLine: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
-    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 7) {
@@ -262,21 +275,17 @@ struct SyncStatusLine: View {
             Spacer(minLength: 0)
             // Light/dark switch, shown on hover only so the footer stays one quiet line.
             Button { model.prefs.appearance = AppearanceMode.flipped } label: {
-                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(Theme.text3))
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+                IconView(icon: colorScheme == .dark ? .sun : .moon, size: 15, color: Color(Theme.text2))
+                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IconButtonStyle())
             .help(colorScheme == .dark ? "Switch to Light Appearance (⇧⌘L)" : "Switch to Dark Appearance (⇧⌘L)")
-            .opacity(hovering ? 1 : 0)
-            .allowsHitTesting(hovering)
         }
-        .onHover { hovering = $0 }
         .font(.ui(12))
-        .padding(.horizontal, 18)
+        .padding(.leading, 18)
+        .padding(.trailing, 10)
         .frame(height: 44)
+        .overlay(alignment: .top) { Hairline() }
     }
 
     @ViewBuilder private var content: some View {

@@ -154,14 +154,17 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(model.kindTitle)
-                .font(.ui(13, .medium))
-                .foregroundStyle(Color(Theme.text2))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 84)
-                .padding(.trailing, 20)
-                .frame(height: 38)
+            HStack(spacing: 7) {
+                IconView(icon: model.kindIcon, size: 14, color: Color(Theme.text3))
+                Text(model.kindTitle)
+                    .font(.ui(13, .medium))
+                    .foregroundStyle(Color(Theme.text2))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 84)
+            .padding(.trailing, 20)
+            .frame(height: 38)
             Hairline()
             ComposerFields(model: model)
             BodyEditorView(controller: model.editor)
@@ -227,9 +230,7 @@ struct InlineComposerCard: View {
             } else {
                 Button { model.headerExpanded = true } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: symbol)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color(Theme.text3))
+                        IconView(icon: model.kindIcon, size: 14, color: Color(Theme.text3))
                         Text("To").font(.ui(13)).foregroundStyle(Color(Theme.text3))
                         Text(model.recipientSummary).font(.ui(13)).foregroundStyle(Color(Theme.text1)).lineLimit(1)
                         Spacer()
@@ -252,12 +253,16 @@ struct InlineComposerCard: View {
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
     }
+}
 
-    private var symbol: String {
-        switch model.kind {
-        case .forward: "arrowshape.turn.up.right"
-        case .replyAll: "arrowshape.turn.up.left.2"
-        default: "arrowshape.turn.up.left"
+extension ComposerModel {
+    /// The glyph beside `kindTitle` and the inline card's recipient summary.
+    var kindIcon: Icon {
+        switch kind {
+        case .new: .compose
+        case .reply: .reply
+        case .replyAll: .replyAll
+        case .forward: .forward
         }
     }
 }

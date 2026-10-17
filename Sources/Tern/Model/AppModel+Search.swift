@@ -15,6 +15,7 @@ extension AppModel {
     func beginSearch() {
         palette = nil
         focus = .list
+        readerExpanded = false
         searchFieldFocused = true
     }
 
@@ -51,6 +52,8 @@ extension AppModel {
         if !isSearching {
             cursorBeforeSearch = cursor
             isSearching = true
+            // Results show in the list, so a thread open over it closes.
+            readerExpanded = false
         }
         searchGeneration += 1
         searchLimit = Self.searchPage

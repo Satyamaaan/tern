@@ -109,9 +109,8 @@ struct SendToastView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 10) {
                 Text(text(at: context.date))
-                    .font(.ui(13))
+                    .font(.numeric(13))
                     .foregroundStyle(Color(Theme.text1))
-                    .monospacedDigit()
                 if state.undo != nil {
                     Text("·").foregroundStyle(Color(Theme.text3))
                     Button {
@@ -121,7 +120,7 @@ struct SendToastView: View {
                         HStack(spacing: 6) {
                             Text("Undo").font(.ui(13, .medium)).foregroundStyle(Color(Theme.ink))
                             Text("Z")
-                                .font(.mono(11))
+                                .font(.numeric(11))
                                 .foregroundStyle(Color(Theme.text3))
                                 .frame(width: 16, height: 16)
                                 .background(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(Color(Theme.hairlineStrong)))

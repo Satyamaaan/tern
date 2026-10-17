@@ -17,7 +17,7 @@ struct GoogleClientSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Google client", detail: detail) {
+            SettingsRow(title: "Google client", detail: detail, icon: .key) {
                 if !editing {
                     Button(stored == nil ? "Add…" : "Replace…") { editing = true }
                         .buttonStyle(TernButtonStyle(.secondary))
@@ -33,8 +33,8 @@ struct GoogleClientSection: View {
     }
 
     private var detail: String {
-        guard let stored else { return "Not set. Tern reads Gmail through a Google Cloud client of your own." }
-        return "\(GoogleClientText.masked(stored)) · Desktop app · stored in your Keychain"
+        guard let stored else { return "Not set. Tern reads Gmail through your own Google Cloud client." }
+        return "\(GoogleClientText.masked(stored)) · Desktop app · in your Keychain"
     }
 
     private var editor: some View {
@@ -112,10 +112,10 @@ struct GoogleClientFields: View {
     var body: some View {
         VStack(spacing: 0) {
             row("Client ID") {
-                TextField("1234567890-abc.apps.googleusercontent.com", text: $clientId).textFieldStyle(.plain).font(.mono(12))
+                TextField("1234567890-abc.apps.googleusercontent.com", text: $clientId).textFieldStyle(.plain).font(.numeric(12))
             }
             row("Client secret") {
-                SecureField("GOCSPX-…", text: $clientSecret).textFieldStyle(.plain).font(.mono(12))
+                SecureField("GOCSPX-…", text: $clientSecret).textFieldStyle(.plain).font(.numeric(12))
             }
         }
     }

@@ -66,7 +66,7 @@ extension AppModel {
 
     /// Starts reading a different list (mailbox, scope or split changed).
     func reloadList() {
-        source = ListSource(mailbox: mailbox, split: showsSplits ? split : nil)
+        source = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
         limit = Self.pageSize
         hidden = [:]
         pendingCursor = nil
@@ -119,7 +119,6 @@ extension AppModel {
         let old = snapshot
         snapshot = ListSnapshot(
             rows: rows,
-            needsReplyFirst: !isSearching && source.needsReplyFirst,
             groupsByDate: isSearching || source.groupsByDate,
             footer: serverSearchFooter.map(ListItem.serverSearch))
 

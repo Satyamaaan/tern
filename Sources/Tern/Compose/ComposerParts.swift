@@ -50,7 +50,7 @@ struct SignatureBlock: View {
                 .foregroundStyle(Color(Theme.text3))
                 .fixedSize(horizontal: false, vertical: true)
             Button(action: remove) {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
+                IconView(icon: .close, size: 12, color: Color(Theme.text3))
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(IconButtonStyle())
@@ -70,9 +70,7 @@ struct QuoteBlock: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Button { model.quoteExpanded.toggle() } label: {
-                    Text("•••")
-                        .font(.ui(11, .semibold))
-                        .foregroundStyle(Color(hovering ? Theme.text1 : Theme.text2))
+                    IconView(icon: .ellipsis, size: 16, color: Color(hovering ? Theme.text1 : Theme.text2))
                         .frame(width: 32, height: 18)
                         .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
                             .fill(Color(hovering ? Theme.hairlineStrong : Theme.pill)))
@@ -104,9 +102,7 @@ struct AttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: Self.symbol(for: attachment.mimeType))
-                .font(.system(size: 12))
-                .foregroundStyle(Color(Theme.text2))
+            IconView(icon: Self.icon(for: attachment.mimeType), size: 14, color: Color(Theme.text2))
             Text(attachment.filename)
                 .font(.ui(13))
                 .foregroundStyle(Color(Theme.text1))
@@ -115,11 +111,11 @@ struct AttachmentChip: View {
                 .frame(maxWidth: 220, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
             Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
-                .font(.mono(12))
+                .font(.numeric(12))
                 .foregroundStyle(Color(Theme.text3))
             Button(action: remove) {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(Theme.text3))
-                    .frame(width: 16, height: 16)
+                IconView(icon: .close, size: 12, color: Color(Theme.text3))
+                    .frame(width: 18, height: 18)
             }
             .buttonStyle(IconButtonStyle())
             .opacity(hovering ? 1 : 0)
@@ -133,14 +129,12 @@ struct AttachmentChip: View {
         .help(attachment.needsFetch ? "\(attachment.filename) — from the original message" : attachment.filename)
     }
 
-    static func symbol(for mimeType: String) -> String {
-        if mimeType.hasPrefix("image/") { return "photo" }
-        if mimeType == "application/pdf" { return "doc.richtext" }
-        if mimeType.contains("spreadsheet") || mimeType.contains("excel") || mimeType == "text/csv" { return "tablecells" }
-        if mimeType.contains("zip") || mimeType.contains("compressed") { return "doc.zipper" }
-        if mimeType.hasPrefix("video/") { return "film" }
-        if mimeType.hasPrefix("audio/") { return "waveform" }
-        return "doc"
+    static func icon(for mimeType: String) -> Icon {
+        if mimeType.hasPrefix("image/") { return .image }
+        if mimeType.contains("zip") || mimeType.contains("compressed") { return .zip }
+        if mimeType.hasPrefix("video/") { return .video }
+        if mimeType.hasPrefix("audio/") { return .audio }
+        return .file
     }
 }
 
@@ -179,7 +173,7 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - Bottom: ✦ instruction, Send, attach, AI, discard
+// MARK: - Bottom: AI instruction, Send, attach, AI, discard
 
 struct ComposerBottomArea: View {
     @Bindable var model: ComposerModel
@@ -190,16 +184,20 @@ struct ComposerBottomArea: View {
             HStack(spacing: 4) {
                 SendButton(model: model)
                     .padding(.trailing, 6)
-                ComposerIconButton(symbol: "paperclip", help: "Attach files  ⌘⇧A") { model.attach() }
+                ComposerIconButton(icon: .paperclip, help: "Attach files  ⌘⇧A") { model.attach() }
                 if model.aiAvailable {
+                    let open = model.aiInstruction != nil
+                    let color = Color(open ? Theme.text1 : Theme.text2)
                     Button { model.toggleAI() } label: {
-                        HStack(spacing: 5) {
-                            Text("✦").font(.ui(13))
+                        HStack(spacing: 6) {
+                            IconView(icon: .sparkles, size: 16, color: color)
                             if model.mode == .window { Text("Write with AI").font(.ui(13)) }
                         }
-                        .foregroundStyle(Color(model.aiInstruction != nil ? Theme.text1 : Theme.text2))
-                        .padding(.horizontal, 8)
+                        .foregroundStyle(color)
+                        .padding(.horizontal, model.mode == .window ? 8 : 6)
                         .frame(height: Theme.Control.regular)
+                        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                            .fill(Color(Theme.selected).opacity(open ? 1 : 0)))
                     }
                     .buttonStyle(IconButtonStyle())
                     .help("Write with AI  ⌘J")
@@ -219,7 +217,7 @@ struct ComposerBottomArea: View {
                     Button("Discard") { model.discard() }
                         .buttonStyle(TernButtonStyle(.secondary, size: .small))
                 } else {
-                    ComposerIconButton(symbol: "trash", help: "Discard draft  ⌘⇧D") { model.requestDiscard() }
+                    ComposerIconButton(icon: .trash, help: "Discard draft  ⌘⇧D") { model.requestDiscard() }
                 }
             }
             .padding(.horizontal, model.mode == .window ? 14 : 10)
@@ -245,9 +243,8 @@ struct SendButton: View {
             .help("Send  ⌘↵")
             Rectangle().fill(Color(Theme.onInk).opacity(0.22)).frame(width: 1, height: 14)
             Button { model.sendLaterOpen.toggle() } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 24)
+                IconView(icon: .chevronDown, size: 14, color: Color(Theme.onInk))
+                    .frame(width: 26)
             }
             .buttonStyle(SendHalfStyle())
             .help("Send later  ⌘⇧L")
@@ -298,10 +295,7 @@ struct SendLaterPopover: View {
                 MenuRow(title: "Send and archive", detail: "⌘⇧↵") { model.send(archive: true) }
                 Hairline().padding(.vertical, 4)
             }
-            Text("SEND LATER")
-                .font(.ui(11, .medium))
-                .tracking(0.6)
-                .foregroundStyle(Color(Theme.text3))
+            CapsLabel(text: "Send later")
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
                 .padding(.bottom, 2)
@@ -335,7 +329,7 @@ struct SendLaterPopover: View {
     }
 }
 
-/// One popover row: title, detail in mono at the right, optional keycap.
+/// One popover row: title, detail in tabular figures at the right, optional keycap.
 struct MenuRow: View {
     let title: String
     let detail: String?
@@ -347,10 +341,10 @@ struct MenuRow: View {
             HStack(spacing: 8) {
                 Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                 Spacer(minLength: 12)
-                if let detail { Text(detail).font(.mono(12)).foregroundStyle(Color(Theme.text3)) }
+                if let detail { Text(detail).font(.numeric(12)).foregroundStyle(Color(Theme.text3)) }
                 if let key {
                     Text(key)
-                        .font(.mono(11))
+                        .font(.numeric(11))
                         .foregroundStyle(Color(Theme.text3))
                         .frame(width: 18, height: 18)
                         .background(RoundedRectangle(cornerRadius: Theme.Radius.chip).strokeBorder(Color(Theme.hairlineStrong)))
@@ -363,13 +357,13 @@ struct MenuRow: View {
     }
 }
 
-/// "✦ Tell AI how to reply…" above the bottom bar; Return runs it.
+/// "Tell AI how to reply…" with the sparkles glyph above the bottom bar; Return runs it.
 struct AIInstructionBar: View {
     let model: ComposerModel
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("✦").font(.ui(13)).foregroundStyle(Color(Theme.text2))
+            IconView(icon: .sparkles, size: 16, color: Color(Theme.text2))
             ComposerTextField(
                 model: model, field: .ai, text: model.aiInstruction ?? "",
                 placeholder: model.kind == .reply || model.kind == .replyAll ? "Tell AI how to reply…" : "Describe the email to write…",
@@ -378,7 +372,7 @@ struct AIInstructionBar: View {
             if model.aiBusy {
                 Text("Writing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
             } else {
-                Text("↵").font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                Text("↵").font(.numeric(12)).foregroundStyle(Color(Theme.text3))
             }
         }
         .padding(.horizontal, 12)
@@ -391,15 +385,13 @@ struct AIInstructionBar: View {
 
 /// A 28 pt icon button that fills on hover.
 struct ComposerIconButton: View {
-    let symbol: String
+    let icon: Icon
     let help: String
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .foregroundStyle(Color(Theme.text2))
+            IconView(icon: icon, size: 16, color: Color(Theme.text2))
                 .frame(width: Theme.Control.regular, height: Theme.Control.regular)
         }
         .buttonStyle(IconButtonStyle())

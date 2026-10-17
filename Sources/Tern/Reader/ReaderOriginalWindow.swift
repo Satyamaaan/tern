@@ -19,7 +19,7 @@ enum ReaderOriginalWindow {
         if let text = scroll.documentView as? NSTextView {
             text.isEditable = false
             text.isRichText = false
-            text.font = Theme.mono(12)
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
             text.textColor = Theme.text1
             text.backgroundColor = Theme.raised
             text.textContainerInset = NSSize(width: 16, height: 16)

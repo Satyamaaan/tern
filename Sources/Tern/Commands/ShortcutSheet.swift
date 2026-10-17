@@ -31,9 +31,9 @@ struct ShortcutSheet: View {
                                         HStack {
                                             Text(row.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
                                             Spacer(minLength: 12)
-                                            Text(row.shortcut).font(.mono(12)).foregroundStyle(Color(Theme.text3))
+                                            ShortcutKeys(shortcut: row.shortcut)
                                         }
-                                        .frame(height: 24)
+                                        .frame(height: 26)
                                     }
                                 }
                             }
@@ -53,6 +53,26 @@ struct ShortcutSheet: View {
     }
 
     private static let columns: [[CommandGroup]] = [[.actions], [.goTo, .accounts, .settings]]
+}
+
+/// A shortcut as small keycaps, one per space-separated key ("g i", "c ⌘N").
+struct ShortcutKeys: View {
+    let shortcut: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(shortcut.split(separator: " ").enumerated()), id: \.offset) { _, key in
+                Text(key)
+                    .font(.numeric(11, .medium))
+                    .foregroundStyle(Color(Theme.text2))
+                    .padding(.horizontal, 4)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).fill(Color(Theme.hover)))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous).strokeBorder(Color(Theme.hairline)))
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// Rows for the shortcut sheet and the Settings → Shortcuts table.

@@ -33,6 +33,12 @@ enum RowFormat {
         return (names.joined(separator: ", "), count)
     }
 
+    /// Whose picture the row shows: the first sender who isn't you; nil when only you wrote.
+    static func avatarParticipant(_ thread: MailThread) -> Participant? {
+        let me = thread.accountId
+        return thread.participants.first { $0.email.lowercased() != me }
+    }
+
     /// "Draft to Maya" for threads whose newest message is your unsent draft.
     static func draftLine(_ thread: MailThread) -> String? {
         guard thread.hasDraft else { return nil }

@@ -151,13 +151,17 @@ final class CommandRegistry {
                     hiddenInPalette: true, isEnabled: { m.cursor != nil }) { m.open() },
             Command(id: "back", title: "Back to List", group: .goTo, keys: [.special(.escape)], menu: .go, section: 2,
                     hiddenInPalette: true) { m.back() },
-            Command(id: "nextSplit", title: "Next Split", group: .goTo, keys: [.special(.tab)], menu: .go, section: 3,
-                    isEnabled: { m.showsSplits }) { m.cycleSplit(1) },
-            Command(id: "previousSplit", title: "Previous Split", group: .goTo, keys: [.special(.tab, [.shift])], menu: .go, section: 3,
-                    isEnabled: { m.showsSplits }) { m.cycleSplit(-1) },
+            Command(id: "nextSplit", title: "Next Tab", group: .goTo, keys: [.special(.tab)], menu: .go, section: 3,
+                    isEnabled: { !m.isSearching }) { m.cycleTab(1) },
+            Command(id: "previousSplit", title: "Previous Tab", group: .goTo, keys: [.special(.tab, [.shift])], menu: .go, section: 3,
+                    isEnabled: { !m.isSearching }) { m.cycleTab(-1) },
+            Command(id: "tab.all", title: "All", group: .goTo, keys: [.option("1")], menu: .go, section: 4,
+                    aliases: ["inbox", "tab", "everything"]) { m.select(.all) },
+            Command(id: "tab.needsReply", title: "Needs Reply Tab", group: .goTo, keys: [.option("2")], menu: .go, section: 4,
+                    aliases: ["tab", "waiting"], hiddenInPalette: true) { m.select(.needsReply) },
         ]
         for (index, split) in InboxSplit.allCases.enumerated() {
-            list.append(Command(id: "split.\(split.rawValue)", title: split.title, group: .goTo, keys: [.option("\(index + 1)")],
+            list.append(Command(id: "split.\(split.rawValue)", title: split.title, group: .goTo, keys: [.option("\(index + 3)")],
                                 menu: .go, section: 4, aliases: ["split", "tab"],
                                 isEnabled: { m.prefs.splitInbox }) { m.showSplit(split) })
         }
@@ -168,13 +172,17 @@ final class CommandRegistry {
                     hiddenInPalette: true) { m.togglePalette() },
             Command(id: "search", title: "Search Mail", group: .actions, keys: [.key("/")], menu: .view,
                     aliases: ["find"]) { m.beginSearch() },
+            Command(id: "pinTab", title: "Pin This Search as a Tab", group: .actions, menu: .view,
+                    aliases: ["saved search", "tab"], isEnabled: { m.isSearching && !m.isPinned(m.activeTab) }) { m.pin(m.activeTab) },
             Command(id: "shortcuts", title: "Keyboard Shortcuts", group: .settings, keys: [.key("?")], menu: .help,
                     aliases: ["help", "keys", "cheat sheet"]) { m.showsShortcuts.toggle() },
-            Command(id: "toggleSidebar", title: "Hide Sidebar", group: .settings, keys: [.command("\\")], menu: .view, section: 1,
-                    currentTitle: { m.prefs.sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar" }) { m.toggleSidebar() },
-            Command(id: "listOnly", title: "List Only", group: .settings, keys: [.command("\\", shift: true)], menu: .view, section: 1,
-                    aliases: ["hide reader", "full width"],
-                    currentTitle: { m.listOnly ? "Show Reader" : "List Only" }) { m.toggleListOnly() },
+            Command(id: "toggleSidebar", title: "Show Sidebar", group: .settings,
+                    keys: [KeyShortcut(key: .char("s"), modifiers: [.control, .command])], menu: .view, section: 1,
+                    aliases: ["mailboxes", "projects", "labels"],
+                    currentTitle: { m.prefs.sidebarOpen ? "Hide Sidebar" : "Show Sidebar" }) { m.toggleSidebar() },
+            Command(id: "readingPane", title: "Show Reading Pane", group: .settings, keys: [.command("\\")], menu: .view, section: 1,
+                    aliases: ["split view", "side by side", "reader", "list only"],
+                    currentTitle: { m.prefs.readingPane ? "Hide Reading Pane" : "Show Reading Pane" }) { m.toggleReadingPane() },
         ]
         for density in Density.allCases {
             list.append(Command(id: "density.\(density.rawValue)", title: "Density: \(density.title)", group: .settings,
@@ -210,8 +218,11 @@ final class CommandRegistry {
                     aliases: ["tl;dr", "ai"], isEnabled: { reading() && m.services.ai != nil }) { reader.summarize() },
             Command(id: "showOriginal", title: "Show Original", group: .actions, menu: .message, section: 4,
                     aliases: ["source", "headers", "raw"], isEnabled: reading) { reader.showOriginal() },
+            // ⌘F finds in the open conversation while it is on screen, and searches mail otherwise.
             Command(id: "find", title: "Find in Conversation…", group: .actions, keys: [.command("f")], menu: .edit,
-                    isEnabled: reading) { reader.find() },
+                    currentTitle: { reading() && m.readerVisible ? "Find in Conversation…" : "Search Mail" }) {
+                if reading() && m.readerVisible { reader.find() } else { m.beginSearch() }
+            },
             Command(id: "findNext", title: "Find Next", group: .actions, keys: [.command("g")], menu: .edit,
                     hiddenInPalette: true, isEnabled: reading) { reader.findNext() },
             Command(id: "findPrevious", title: "Find Previous", group: .actions, keys: [.command("g", shift: true)], menu: .edit,

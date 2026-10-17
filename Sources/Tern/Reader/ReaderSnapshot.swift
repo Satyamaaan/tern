@@ -7,11 +7,11 @@ import WebKit
 
 /// Renders the reader offscreen for design and speed checks, then quits:
 ///
-///     ./build.sh --debug && open -W -g -n build/Tern.app --args -ApplePersistenceIgnoreState YES \
-///       --env TERN_READER_SNAPSHOT=/tmp/tern-shots/reader --env CFFIXED_USER_HOME=/tmp/tern-reader-home
+///     swift build && mkdir -p /tmp/tern-reader-home && TERN_READER_SNAPSHOT=/tmp/tern-shots/reader \
+///       CFFIXED_USER_HOME=/tmp/tern-reader-home .build/debug/Tern -ApplePersistenceIgnoreState YES --fake
 ///
-/// `-g` keeps the app in the background and the harness hides the shell window at once; the
-/// temporary home keeps the shell away from the real database.
+/// The harness starts with the first reader, so the shell needs a mailbox (`--fake`); it hides the
+/// shell window at once, and the temporary home keeps the shell away from the real database.
 /// Uses an in-memory fake mailbox plus `ReaderSnapshotFixtures`, writes `<fixture>-<light|dark>.png`
 /// and `timings.txt`. The window is click-through and 1 % opaque, so nothing shows on screen while
 /// WebKit still paints at full speed.
@@ -36,10 +36,13 @@ enum ReaderSnapshot {
         var prefetch: [ThreadKey] = []
     }
 
+    /// The reader as it sits over the list: on `bg`, with Back and the hover position showing.
     struct Root: View {
         let selection: Selection
         var body: some View {
-            ReaderView(key: selection.key, prefetch: selection.prefetch)
+            ReaderView(key: selection.key, prefetch: selection.prefetch,
+                       position: ReaderPosition(index: 12, total: 48, previous: {}, next: {}), onBack: {})
+                .background(Color(Theme.bg))
         }
     }
 
@@ -86,6 +89,11 @@ enum ReaderSnapshot {
                 suggestReplies: { _ in ["Signing today", "Call Thursday?", "Looks good, thanks"] },
                 draftReply: { _, _ in "" }, naturalLanguageQuery: { $0 })
             ReaderReplyBar.alwaysShowQuickReplies = true
+            ReaderTopBar.alwaysShowPosition = true
+            // SenderLogos only fetches in the app; two senders get a stand-in logo through the same path.
+            let logos = [ReaderSnapshotFixtures.maya.email: ReaderSnapshotFixtures.logo("L", 0x111111),
+                         "hello@weeklybuild.example": ReaderSnapshotFixtures.logo("W", 0x5B4BDB)]
+            ReaderModel.logoOverride = { logos[$0] }
 
             let selection = Selection()
             let hosting = NSHostingView(rootView: Root(selection: selection).environment(services))
@@ -161,6 +169,7 @@ enum ReaderSnapshot {
             if let chain = fixtures.first(where: { $0.name == "reply-chain" }) {
                 await interactionChecks(chain.key, selection: selection, services: services)
             }
+            ReaderModel.logoOverride = nil
             await measure(store: store, selection: selection)
             try? log.joined(separator: "\n").write(to: output.appendingPathComponent("timings.txt"), atomically: true, encoding: .utf8)
             print(log.joined(separator: "\n"))
@@ -263,6 +272,19 @@ enum ReaderSnapshot {
             let open = try? await js("return document.querySelectorAll('.msg.open').length + ' of ' + document.querySelectorAll('.msg').length")
             note("checks: messages open after find (expand all) = \(open.map { "\($0)" } ?? "?")")
             model.closeFind()
+
+            // A logo that arrives after the paint swaps only the avatars: open messages and scroll stay.
+            let state = "return document.querySelectorAll('.msg.open').length + ' open, scrollTop ' + document.scrollingElement.scrollTop"
+            _ = try? await js("window.scrollTo(0, 120); return true;")
+            let before = try? await js(state)
+            let jonas = ReaderSnapshotFixtures.logo("K", 0x2F6FD8)
+            let previous = ReaderModel.logoOverride
+            ReaderModel.logoOverride = { $0 == ReaderSnapshotFixtures.jonas.email ? jonas : previous?($0) }
+            model.refreshLogos()
+            try? await Task.sleep(for: .milliseconds(150))
+            let after = try? await js(state)
+            let swapped = try? await js("return document.querySelectorAll('.av.logo[data-email=\"jonas@kiteworks.dev\"] img').length")
+            note("checks: late logo → \(swapped.map { "\($0)" } ?? "?") Jonas avatars swapped; \(before.map { "\($0)" } ?? "?") → \(after.map { "\($0)" } ?? "?")")
         }
 
         /// A body over the inline sanitize limit arrives after the first paint; notes when.

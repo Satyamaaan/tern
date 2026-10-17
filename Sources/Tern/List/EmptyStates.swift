@@ -1,32 +1,35 @@
 import SwiftUI
 import TernCore
 
-/// What the list shows with nothing in it: the tern for inbox zero, one serif line elsewhere.
+/// What the list shows with nothing in it: the tern for inbox zero, one quiet line elsewhere.
 struct EmptyListView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Group {
             if model.isSeeding {
-                SerifLine(text: "Setting up the demo mailbox…")
+                EmptyLine(text: "Setting up the demo mailbox…")
             } else if model.isSearching {
-                SerifLine(text: "Nothing matches “\(model.searchText.trimmingCharacters(in: .whitespaces))”.")
-            } else if case .inbox = model.kind {
+                EmptyLine(text: "Nothing matches “\(model.searchText.trimmingCharacters(in: .whitespaces))”.")
+            } else if case .inbox = model.kind, model.split == nil {
                 InboxZeroView(cleared: model.prefs.clearedToday)
+            } else if case .inbox = model.kind {
+                EmptyLine(text: "Nothing in this tab.")
             } else {
-                SerifLine(text: model.kind.emptyLine)
+                EmptyLine(text: model.kind.emptyLine)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-private struct SerifLine: View {
+private struct EmptyLine: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.serif(22, italic: true))
+            .font(.display(17))
+            .tracking(-0.2)
             .foregroundStyle(Color(Theme.text2))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
@@ -48,7 +51,8 @@ struct InboxZeroView: View {
                 .frame(width: 132, height: 66)
             VStack(spacing: 6) {
                 Text("Nothing needs you.")
-                    .font(.serif(22, italic: true))
+                    .font(.display(20))
+                    .tracking(-0.3)
                     .foregroundStyle(Color(Theme.text1))
                 Text(cleared > 0 ? "\(cleared) cleared today" : "All caught up")
                     .font(.ui(12))

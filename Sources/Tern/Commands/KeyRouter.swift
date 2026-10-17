@@ -27,7 +27,7 @@ final class KeyRouter {
         // ⌘ shortcuts that mean something different outside text fields.
         bare.append((.command("a"), registry["selectAll"]!))
         bare.append((.command("z"), registry["undo"]!))
-        bare.append((.command("\\", shift: true), registry["listOnly"]!))
+        bare.append((.command("\\"), registry["readingPane"]!))
         for command in registry.chordCommands {
             if let chord = command.chord { chords[chord] = command }
         }
