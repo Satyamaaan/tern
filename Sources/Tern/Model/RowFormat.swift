@@ -6,7 +6,10 @@ enum RowFormat {
     /// "17m", "3h", "Tue", "Oct 12", "Oct 12 '25".
     static func compactTime(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let seconds = now.timeIntervalSince(date)
-        if seconds < 60 { return seconds < -60 ? dayMonth.string(from: date) : "now" }
+        if seconds < 60 {
+            // Slightly in the future (clock skew, scheduled mail): "now" today, the date otherwise.
+            return calendar.isDate(date, inSameDayAs: now) || seconds > -60 ? "now" : dayMonth.string(from: date)
+        }
         if seconds < 3600 { return "\(Int(seconds / 60))m" }
         if calendar.isDate(date, inSameDayAs: now) { return "\(Int(seconds / 3600))h" }
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0

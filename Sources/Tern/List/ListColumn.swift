@@ -96,9 +96,11 @@ struct FlockView: View {
                 Text("+\(count - 12)")
                     .font(.mono(12))
                     .foregroundStyle(Color(Theme.text3))
+                    .lineLimit(1)
                     .padding(.leading, 3)
             }
         }
+        .fixedSize()
         .overlay(alignment: .leading) {
             ForEach(lifts, id: \.self) { id in
                 LiftingDot(offsetX: CGFloat(max(min(count, 12), 0)) * 11) { lifts.removeAll { $0 == id } }

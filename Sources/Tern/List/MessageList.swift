@@ -227,10 +227,20 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let width = scrollView.frame.width
         guard width != lastWidth else { return }
         lastWidth = width
-        let next = RowStyle.resolve(model.prefs.density, width: width)
+        updateStyle()
+    }
+
+    /// Switches between one and two lines when the width or density preference crosses over.
+    private func updateStyle() {
+        let next = RowStyle.resolve(model.prefs.density, width: scrollView.frame.width)
         guard next != style else { return }
         style = next
         table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<items.count))
+        refreshVisibleRows()
+    }
+
+    /// The focus ring follows the window's key state.
+    func windowKeyChanged() {
         refreshVisibleRows()
     }
 
@@ -246,9 +256,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.lastWidth = self.scrollView.frame.width
-                    self.style = RowStyle.resolve(self.model.prefs.density, width: self.lastWidth)
-                    self.table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<self.items.count))
+                    self.updateStyle()
                     self.refreshVisibleRows()
                     self.observePreferences()
                 }
@@ -323,6 +331,20 @@ final class MessageTableView: NSTableView {
     private(set) var isDragging = false
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyStateChanged), name: name, object: window)
+        }
+    }
+
+    @objc private func keyStateChanged() {
+        MainActor.assumeIsolated { controller?.windowKeyChanged() }
+    }
 
     override func becomeFirstResponder() -> Bool {
         MainActor.assumeIsolated { controller?.model.focus = .list }
