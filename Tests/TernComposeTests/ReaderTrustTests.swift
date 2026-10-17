@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Tern
@@ -57,4 +58,20 @@ private func mail(_ id: String, from: String, labels: [String], fromMe: Bool = f
 
     trust.remoteImages = false
     #expect(![sent, newsletter, stranger].contains(where: trust.allows), "no remote images when the blocker isn't installed")
+}
+
+@MainActor
+@Test func showOriginalLetsClosedWindowsGo() {
+    weak var closedWindow: NSWindow?
+    autoreleasepool {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled, .closable],
+                              backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        ReaderOriginalWindow.track(window)
+        closedWindow = window
+        #expect(ReaderOriginalWindow.openCount == 1)
+        window.close()
+    }
+    #expect(ReaderOriginalWindow.openCount == 0)
+    #expect(closedWindow == nil, "nothing holds a closed Show Original window")
 }
