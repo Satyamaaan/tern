@@ -114,3 +114,22 @@ extension Font {
     static func mono(_ size: CGFloat = 12, _ weight: Theme.Weight = .regular) -> Font { Font(Theme.mono(size, weight)) }
     static func serif(_ size: CGFloat, italic: Bool = false) -> Font { Font(Theme.serif(size, italic: italic)) }
 }
+
+// MARK: - Shell additions
+
+extension Theme {
+    /// Status dot for "Up to date".
+    static let syncOK = rgb(0x3E9A86)
+
+    /// Names for `projectHues`, in order, for colour menus.
+    static let projectColorNames = ["Vermilion", "Blue", "Green", "Violet", "Ochre", "Rose", "Teal", "Slate"]
+
+    /// A small filled circle for menu items (account and project colours).
+    static func swatch(_ color: NSColor, size: CGFloat = 10) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
+            return true
+        }
+    }
+}

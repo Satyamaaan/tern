@@ -206,6 +206,32 @@ extension MailStore {
         }
     }
 
+    // MARK: Projects
+
+    public func projectRules(_ projectId: String) throws -> [ProjectRule] {
+        try database.reader.read { db in
+            try ProjectRule.filter(Column("projectId") == projectId).order(Column("id")).fetchAll(db)
+        }
+    }
+
+    /// Creates or updates a project and replaces its rules.
+    public func saveProject(_ project: Project, rules: [ProjectRule]) throws {
+        try database.writer.write { db in
+            try project.upsert(db)
+            try db.execute(sql: "DELETE FROM project_rule WHERE projectId = ?", arguments: [project.id])
+            for var rule in rules {
+                rule.id = nil
+                rule.projectId = project.id
+                try rule.insert(db)
+            }
+        }
+    }
+
+    /// Deletes a project; its threads stay where they are.
+    public func deleteProject(_ projectId: String) throws {
+        try database.writer.write { db in _ = try Project.deleteOne(db, key: projectId) }
+    }
+
     /// Rebuilds the full-text index from the message table.
     public func rebuildSearchIndex() throws {
         try database.writer.write { db in

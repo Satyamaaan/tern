@@ -1,31 +1,16 @@
-import SwiftUI
-import TernCore
+import AppKit
 
-// Placeholder shell so the package builds; the UI shell lane replaces this.
+/// Entry point. The app is AppKit-managed (our own main window, menus and key handling) with SwiftUI
+/// views inside; see `AppDelegate`.
 @main
-struct TernApp: App {
-    @State private var services: AppServices? = {
-        Theme.registerFonts()
-        let fake = CommandLine.arguments.contains("--fake") || ProcessInfo.processInfo.environment["TERN_FAKE"] == "1"
-        let url = AppDatabase.defaultURL(name: fake ? "Tern-Fake" : "Tern")
-        return (try? AppDatabase.open(at: url)).map { AppServices(store: MailStore($0)) }
-    }()
-
-    var body: some Scene {
-        WindowGroup("Tern") {
-            if let services {
-                HSplitView {
-                    List((try? services.store.threadRows(in: .unifiedInbox)) ?? []) { row in
-                        VStack(alignment: .leading) {
-                            Text(row.thread.participants.first?.displayName ?? "").font(.ui(13, .semibold))
-                            Text(row.thread.subject).font(.ui(13))
-                        }
-                    }
-                    ReaderView(key: nil)
-                }
-                .environment(services)
-                .frame(minWidth: 900, minHeight: 560)
-            }
-        }
+@MainActor
+enum TernApp {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        // Offscreen snapshots never show a Dock icon or take focus.
+        app.setActivationPolicy(CommandLine.arguments.contains("--snapshot") ? .prohibited : .regular)
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
