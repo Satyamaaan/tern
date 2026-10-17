@@ -83,6 +83,15 @@ import Testing
         #expect(try store.load() == nil)
     }
 
+    @Test func accountsLoadTheSavedClient() throws {
+        let secrets = MemorySecretStore()
+        #expect(try GoogleAccounts(secrets: secrets) == nil)
+        try GoogleClientConfigStore(secrets: secrets).save(testConfig)
+        let accounts = try #require(try GoogleAccounts(secrets: secrets))
+        #expect(accounts.auth.config == testConfig)
+        #expect(accounts.connectedEmails().isEmpty)
+    }
+
     // MARK: Token provider
 
     @Test func concurrentCallersShareOneRefresh() async throws {

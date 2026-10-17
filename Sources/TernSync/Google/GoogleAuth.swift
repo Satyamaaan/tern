@@ -57,8 +57,8 @@ public struct GoogleSignInResult: Sendable {
 /// Installed-app OAuth 2.0 for Google: authorization code with PKCE (S256) and a loopback redirect
 /// to `http://127.0.0.1:<random port>`, plus token refresh and revocation.
 public actor GoogleAuth {
-    public let config: GoogleClientConfig
-    public let endpoints: GoogleEndpoints
+    public nonisolated let config: GoogleClientConfig
+    public nonisolated let endpoints: GoogleEndpoints
     private let session: URLSession
     private let clock: GoogleClock
     private let timeout: TimeInterval
