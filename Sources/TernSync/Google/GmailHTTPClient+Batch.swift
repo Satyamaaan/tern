@@ -90,9 +90,9 @@ extension GmailHTTPClient {
             guard !pending.isEmpty else { break }
 
             if unauthorized {
+                await tokens.invalidate(response.token)
                 guard !refreshedAuth else { throw GmailAPIError.unauthorized }
                 refreshedAuth = true
-                await tokens.invalidate(response.token)
                 // A rejected token is not a server fault: no backoff unless something else failed too.
                 if !serverFailed { continue }
             }

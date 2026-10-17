@@ -291,9 +291,9 @@ public final class GmailHTTPClient: GmailAPI {
             case .success:
                 return Response(data: data, http: http, token: token)
             case .unauthorized:
+                await tokens.invalidate(token)
                 guard !refreshedAuth else { throw GmailAPIError.unauthorized }
                 refreshedAuth = true
-                await tokens.invalidate(token)
             case .retry(let retryAfter, let rateLimited, let error):
                 try await backOff(retry: retries, retryAfter: retryAfter, rateLimited: rateLimited, finalError: error)
                 retries += 1
