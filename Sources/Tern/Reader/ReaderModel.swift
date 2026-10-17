@@ -53,6 +53,8 @@ final class ReaderModel {
 
     /// Senders whose remote images load, shared by every reader.
     private static var trustedSenders: Set<String>?
+    /// Messages whose images the user loaded once, for this run of the app.
+    private static var loadedMessages = Set<MessageKey>()
     private static let signposter = OSSignposter(subsystem: "dev.tern.mail", category: "Reader")
     private static let log = Logger(subsystem: "dev.tern.mail", category: "Reader")
 
@@ -147,8 +149,11 @@ final class ReaderModel {
         let names = Dictionary(labels(for: accountId).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         return ReaderContext(
             accountEmails: emails, accountColorIndex: services?.account(accountId)?.colorIndex ?? 0,
-            labelNames: names, trustedSenders: Self.trustedSenders ?? [], remoteImages: engine.blocksRemoteLoads,
-            summary: summaryPayload())
+            labelNames: names, trust: trust, summary: summaryPayload())
+    }
+
+    private var trust: ReaderTrust {
+        ReaderTrust(senders: Self.trustedSenders ?? [], messages: Self.loadedMessages, remoteImages: engine.blocksRemoteLoads)
     }
 
     func labels(for accountId: String) -> [MailLabel] {
@@ -179,15 +184,11 @@ final class ReaderModel {
         guard let services, !keys.isEmpty else { return }
         services.prefetchBodies?(keys)
         let store = services.store
-        let trusted = Self.trustedSenders ?? []
-        let mine = Set(services.accounts.map { $0.email.lowercased() })
-        let remoteImages = engine.blocksRemoteLoads
+        let trust = trust
         Task.detached(priority: .utility) {
             for key in keys.prefix(4) {
                 guard let detail = try? store.threadDetail(key), let target = ReaderPayload.targetMessage(detail) else { continue }
-                let sender = target.fromEmail.lowercased()
-                let allowed = remoteImages && (trusted.contains(sender) || mine.contains(sender) || sender == key.accountId)
-                _ = ReaderBodies.shared.body(for: target, trusted: allowed)
+                _ = ReaderBodies.shared.body(for: target, trusted: trust.allows(target))
             }
         }
     }
@@ -205,6 +206,8 @@ final class ReaderModel {
         case "needBody":
             if let id = message["id"] as? String { sendBody(id) }
         case "loadImages":
+            if let id = message["id"] as? String { loadImages(messageId: id) }
+        case "alwaysImages":
             if let sender = message["sender"] as? String { trustImages(from: sender) }
         case "attachment":
             attachmentEvent(message)
@@ -241,6 +244,14 @@ final class ReaderModel {
         engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
     }
 
+    /// "Load images": this message only.
+    private func loadImages(messageId: String) {
+        guard let detail, let key, let message = detail.messages.first(where: { $0.id == messageId }) else { return }
+        Self.loadedMessages.insert(message.key)
+        receive(detail, for: key)
+    }
+
+    /// "Always load from …": every message from this sender, except in Spam.
     private func trustImages(from sender: String) {
         let sender = sender.lowercased()
         guard !sender.isEmpty, let services else { return }
