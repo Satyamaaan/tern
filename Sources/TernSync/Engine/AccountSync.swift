@@ -40,6 +40,7 @@ public actor AccountSync {
     var pollRequested = true
     var nextPollAt = Date.distantPast
     var nextLabelRefreshAt = Date.distantPast
+    var nextSendAsRefreshAt = Date.distantPast
     /// When the earliest deferred op becomes due.
     var nextOpAt: Date?
     var consecutiveFailures = 0
@@ -177,8 +178,9 @@ public actor AccountSync {
         }
     }
 
-    /// One pass: queued ops, a history poll when due (with a full resync if history expired),
-    /// then one step of bulk or background work if the quota allows.
+    /// One pass: queued ops, send-as settings when due (at start, then daily), a history poll when
+    /// due (with a full resync if history expired), then one step of bulk or background work if the
+    /// quota allows.
     /// Returns true when more background work can run right away.
     @discardableResult
     public func syncOnce() async throws -> Bool {
@@ -188,6 +190,7 @@ public actor AccountSync {
         try await drainOps()
 
         let now = clock.now()
+        if now >= nextSendAsRefreshAt { try await refreshSendAsIfPossible(now: now) }
         if pollRequested || now >= nextPollAt {
             pollRequested = false
             nextPollAt = now.addingTimeInterval(isActive ? configuration.activePollInterval : configuration.inactivePollInterval)

@@ -122,6 +122,7 @@ public actor FakeGmail: GmailAPI {
     public private(set) var quotaViolations = 0
     private var counter = 0
     private var labelCounter = 0
+    private var identities: [GmailSendAs]?
 
     /// - Parameters:
     ///   - historyRetention: Keep at most this many history records; older start points throw `.historyExpired`.
@@ -146,6 +147,8 @@ public actor FakeGmail: GmailAPI {
     // MARK: Test controls
 
     public func setLatency(_ seconds: Double) { latency = seconds }
+    /// What `sendAs` returns; nil for the account address alone, without a name or signature.
+    public func setSendAs(_ identities: [GmailSendAs]?) { self.identities = identities }
     public func setHistoryPageSize(_ size: Int) { historyPageSize = size }
 
     public func setHistoryRetention(_ records: Int?) {
@@ -444,7 +447,7 @@ public actor FakeGmail: GmailAPI {
 
     public func sendAs() async throws -> [GmailSendAs] {
         try await begin(.sendAs, units: GmailQuota().sendAs)
-        return [GmailSendAs(sendAsEmail: email, isPrimary: true, isDefault: true)]
+        return identities ?? [GmailSendAs(sendAsEmail: email, isPrimary: true, isDefault: true)]
     }
 
     // MARK: Mutations
