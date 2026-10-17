@@ -17,7 +17,10 @@ let package = Package(
             dependencies: [.product(name: "GRDB", package: "GRDB.swift")]
         ),
         // Google sign-in, Gmail API client, sync engine, pending-action queue.
-        .target(name: "TernSync", dependencies: ["TernCore"]),
+        .target(
+            name: "TernSync",
+            dependencies: ["TernCore", .product(name: "GRDB", package: "GRDB.swift")]
+        ),
         // Classification, summaries and reply drafts through the local Codex / Claude CLI.
         .target(name: "TernAI", dependencies: ["TernCore"]),
         // The Mac app.
