@@ -6,6 +6,10 @@ extension GmailHTTPClient {
     /// fail with 429, a rate-limit 403 or 5xx are retried in a smaller batch after a backoff; ids
     /// that answer 404 (deleted) or 400 (not a valid id) are left out. The result keeps the order of
     /// `ids`, without duplicates.
+    ///
+    /// A batch that still fails after its retries fails the whole call and its finished batches are
+    /// dropped, so pass a few hundred ids at a time. With the 2026 quota (6,000 units a minute,
+    /// 20 per metadata get, 60 per full get) 150 ids in metadata format use about half a minute of quota.
     public func messages(ids: [String], format: GmailMessageFormat) async throws -> [GmailMessage] {
         var seen = Set<String>()
         let unique = ids.filter { seen.insert($0).inserted }
