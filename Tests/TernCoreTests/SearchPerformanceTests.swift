@@ -78,7 +78,11 @@ private enum Perf {
     static func time(_ query: String, search: SearchService, hits: Bool, sort: SearchSort = .newest) throws -> Timing {
         let options = SearchOptions(sort: sort)
         func run() throws -> Int {
-            hits ? try search.searchHits(query, options: options).count : try search.search(SearchQuery(query), options: options).count
+            guard hits else { return try search.search(SearchQuery(query), options: options).count }
+            let found = try search.searchHits(query, options: options)
+            // A list shows about 20 rows: the marked-up words are found for those, as the UI would.
+            for hit in found.prefix(20) { _ = hit.highlights; _ = hit.subjectHighlights }
+            return found.count
         }
         _ = try run() // warm the page cache and statement caches
         // Best of a few rounds: a busy machine (parallel builds, Spotlight, VMs) only ever makes a round
@@ -102,7 +106,7 @@ private enum Perf {
 @Test(.enabled(if: !Perf.skip, "TERN_SKIP_PERF=1"))
 func searchAnswersWithinTheKeystrokeBudgetOnFiftyThousandMessages() throws {
     let search = SearchService(try Perf.database())
-    var report = "\nsearch timings, 50,000 messages, best of \(Perf.rounds) rounds of \(Perf.runs) runs (ms; hits = with matched message and excerpt)\n"
+    var report = "\nsearch timings, 50,000 messages, best of \(Perf.rounds) rounds of \(Perf.runs) runs (ms; hits = with matched message, excerpt, and highlights of the first 20)\n"
     var worst: [(String, Perf.Timing)] = []
     var all: [Double] = []
 
@@ -123,6 +127,25 @@ func searchAnswersWithinTheKeystrokeBudgetOnFiftyThousandMessages() throws {
                      sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.95)], sorted.last!)
     print(report)
 
+    // The UI's per-keystroke call asks for a first page, not 100 rows.
+    var firstPage: [Double] = []
+    for (_, queries) in Perf.groups {
+        for query in queries {
+            let options = SearchOptions(limit: 40)
+            _ = try search.searchHits(query, options: options)
+            var best = Double.infinity
+            for _ in 0..<Perf.runs {
+                let start = DispatchTime.now().uptimeNanoseconds
+                for hit in try search.searchHits(query, options: options).prefix(20) { _ = hit.highlights; _ = hit.subjectHighlights }
+                best = min(best, Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+            }
+            firstPage.append(best)
+        }
+    }
+    firstPage.sort()
+    print(String(format: "first page of 40 (best of %d runs): p50 %.1f ms, p95 %.1f ms, max %.1f ms",
+                 Perf.runs, firstPage[firstPage.count / 2], firstPage[Int(Double(firstPage.count) * 0.95)], firstPage.last!))
+
     for (group, timing) in worst {
         #expect(timing.p95 <= Perf.budgetMs, "\(group): '\(timing.query)' p95 \(timing.p95) ms > \(Perf.budgetMs) ms")
     }
@@ -131,11 +154,20 @@ func searchAnswersWithinTheKeystrokeBudgetOnFiftyThousandMessages() throws {
 @Test(.enabled(if: !Perf.skip, "TERN_SKIP_PERF=1"))
 func relevanceRankingStaysWithinBudgetToo() throws {
     let search = SearchService(try Perf.database())
-    for query in ["roadmap", "the", "t", "the roadmap", "from:github invoice", "lisbon flights", "subject:invoice"] {
+    for query in [
+        "roadmap", "the", "t", "th", "the roadmap", "from:github invoice", "lisbon flights", "subject:invoice", "invoice", "ro",
+        "kiteworks", "design review", "from:g", "in:inbox the", "is:unread the", "has:attachment the", "the -a",
+    ] {
         let timing = try Perf.time(query, search: search, hits: true, sort: .relevance)
         print(String(format: "relevance %-24@ %4d results p50 %5.1f p95 %5.1f", "'\(query)'" as NSString, timing.results, timing.p50, timing.p95))
         #expect(timing.p95 <= Perf.budgetMs, "relevance '\(query)' p95 \(timing.p95) ms")
     }
+
+    // Known limit, reported and not asserted: ranking an all-mailbox word (`the`) under a filter that keeps ~1% of
+    // threads (`is:starred`) has to score every match to fill the page, so it costs ~2x the budget.
+    let slow = try Perf.time("is:starred the", search: search, hits: true, sort: .relevance)
+    print(String(format: "relevance %-24@ %4d results p50 %5.1f p95 %5.1f   (known limit: not asserted)",
+                 "'is:starred the'" as NSString, slow.results, slow.p50, slow.p95))
 }
 
 @Test(.enabled(if: !Perf.skip, "TERN_SKIP_PERF=1"))
@@ -149,4 +181,30 @@ func searchResultsAreFilledForTheBenchmarkQueries() throws {
     #expect(try !search.search("has:attachment").isEmpty)
     #expect(try !search.search("is:snoozed").isEmpty)
     #expect(try !search.search("larger:1K").isEmpty)
+}
+
+@Test(.enabled(if: !Perf.skip, "TERN_SKIP_PERF=1"))
+func suggestionsAreInstantEvenWithTwentyThousandContacts() throws {
+    let database = try AppDatabase.inMemory()
+    try database.writer.write { db in
+        try Account(email: "alex@acme.com", displayName: "Acme").insert(db)
+        for index in 0..<20_000 {
+            let first = ["Maya", "Marco", "Mark", "Priya", "Jonas", "Hana", "Leo", "Sofia", "Daniel", "Grace"][index % 10]
+            try Contact(id: "\(first.lowercased())\(index)@company\(index % 400).com", name: "\(first) Person\(index)",
+                        sentCount: index % 7, receivedCount: index % 13, lastContacted: Date(timeIntervalSince1970: Double(index))).insert(db)
+        }
+        for index in 0..<200 { try MailLabel(accountId: "alex@acme.com", id: "Label_\(index)", name: "Label \(index)").insert(db) }
+    }
+    let search = SearchService(database)
+    for partial in ["from:", "from:m", "from:ma", "from:mar", "to:pri", "from:company1", "from:zzzz", "label:l", "label:label-1", "fro", "is:u", ""] {
+        var samples: [Double] = []
+        for _ in 0..<15 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            _ = try search.suggestions(for: partial)
+            samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+        }
+        let p95 = samples.sorted()[Int(Double(samples.count) * 0.95)]
+        print(String(format: "suggestions %-16@ p95 %5.1f ms", "'\(partial)'" as NSString, p95))
+        #expect(p95 <= Perf.budgetMs, "suggestions '\(partial)' p95 \(p95) ms")
+    }
 }

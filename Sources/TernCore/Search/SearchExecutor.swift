@@ -236,77 +236,41 @@ struct SearchExecutor {
 
     /// Weights per column: subject, sender, recipients, snippet, body.
     private static let bm25 = "bm25(message_fts, 10.0, 4.0, 2.0, 1.0, 1.0)"
-    /// How many of the newest matches get ranked when a word is too common to rank them all.
-    static let rankedPool = 800
 
-    /// Matching threads, best match first, each with its best-scoring message. Exact when the words are
-    /// rare; for very common words it ranks the newest `rankedPool` matching messages.
+    /// Matching threads, best match first, each with its best-scoring message. Scoring every match costs
+    /// ~0.4 µs, so this is exact even for words that match most of the mailbox. It first takes the 4,000
+    /// best-scoring messages (a bounded sort is cheaper than sorting all of them), and widens to every match
+    /// only when filters leave the page short.
     func runRanked() throws -> [Found] {
         guard let fts = compiled.fts else { return try run(try choosePlan()) }
-        let messageFilter = SQLFragment.all(compiled.messageConds)
-        let threadFilter = SQLFragment.all(compiled.threadConds)
+        let firstPool = 4_000
+        let ordered = try ranked(fts, pool: firstPool)
+        if ordered.count >= limit { return ordered }
+        // Short page: only widen when the first round actually left matches out.
+        let matches = try countFTS(fts)
+        return matches <= firstPool ? ordered : try ranked(fts, pool: 1_000_000)
+    }
 
-        if try countFTS(fts) <= Self.ftsCap {
-            // bm25() cannot be aggregated, so rank messages and keep each thread's best one.
-            var sql = SQLBuilder()
-            sql.add("""
-                SELECT m.accountId, m.threadId, m.seq FROM message_fts f
-                CROSS JOIN message m ON m.seq = f.rowid CROSS JOIN thread t ON t.accountId = m.accountId AND t.id = m.threadId
-                WHERE message_fts MATCH ?
-                """, fts)
-            sql.add(" AND ", messageFilter)
-            sql.add(" AND ", threadFilter)
-            sql.add(" ORDER BY \(Self.bm25), t.lastDate DESC")
-            let cursor = try Row.fetchCursor(db, sql: sql.sql, arguments: StatementArguments(sql.arguments))
-            var seen = Set<ThreadKey>()
-            var ordered: [Found] = []
-            while ordered.count < limit, let row = try cursor.next() {
-                let key = ThreadKey(accountId: row[0], threadId: row[1])
-                if seen.insert(key).inserted { ordered.append(Found(key: key, messageSeq: row[2])) }
-            }
-            return ordered
-        }
-
-        // Too common to rank everything: the newest matching messages first, then score those.
+    private func ranked(_ fts: String, pool: Int) throws -> [Found] {
         var sql = SQLBuilder()
+        // LIMIT also keeps the subquery's ORDER BY: without one SQLite drops the sort, and the loop order with it.
         sql.add("""
-            SELECT m.seq, m.accountId, m.threadId FROM message m INDEXED BY message_by_date WHERE\u{20}
-            """, SQLFragment.all(compiled.messageConds + [Self.probe(fts)]))
-        sql.add(" AND EXISTS (SELECT 1 FROM thread t WHERE t.accountId = m.accountId AND t.id = m.threadId AND ")
-        sql.add(threadFilter)
-        sql.add(") ORDER BY m.date DESC LIMIT ?", Self.rankedPool)
-        let candidates = try sql.rows(db)
-        guard !candidates.isEmpty else { return [] }
-
-        var found: [ThreadKey: Found] = [:]
-        var order: [ThreadKey] = []
-        var bySeq: [Int64: ThreadKey] = [:]
-        for row in candidates {
-            let key = ThreadKey(accountId: row[1], threadId: row[2])
-            bySeq[row[0]] = key
-            if found[key] == nil {
-                found[key] = Found(key: key, messageSeq: row[0])
-                order.append(key)
-            }
+            SELECT m.accountId, m.threadId, m.seq FROM (
+              SELECT rowid AS r, \(Self.bm25) AS score FROM message_fts WHERE message_fts MATCH ?
+              ORDER BY score, rowid DESC LIMIT \(pool)) c
+            CROSS JOIN message m ON m.seq = c.r
+            CROSS JOIN thread t ON t.accountId = m.accountId AND t.id = m.threadId
+            WHERE\u{20}
+            """, fts)
+        sql.add(SQLFragment.all(compiled.messageConds + compiled.threadConds))
+        let cursor = try Row.fetchCursor(db, sql: sql.sql, arguments: StatementArguments(sql.arguments))
+        var seen = Set<ThreadKey>()
+        var ordered: [Found] = []
+        while ordered.count < limit, let row = try cursor.next() {
+            let key = ThreadKey(accountId: row[0], threadId: row[1])
+            if seen.insert(key).inserted { ordered.append(Found(key: key, messageSeq: row[2])) }
         }
-        let list = bySeq.keys.map(String.init).joined(separator: ",")
-        var scores: [ThreadKey: Double] = [:]
-        for row in try Row.fetchAll(db, sql: """
-            SELECT rowid, \(Self.bm25) FROM message_fts WHERE message_fts MATCH ? AND rowid IN (\(list))
-            """, arguments: [fts]) {
-            guard let key = bySeq[row[0]] else { continue }
-            let score: Double = row[1]
-            if score < (scores[key] ?? .infinity) {
-                scores[key] = score
-                found[key]?.messageSeq = row[0]
-            }
-        }
-        let position = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        let ranked = order.sorted {
-            let (a, b) = (scores[$0] ?? .infinity, scores[$1] ?? .infinity)
-            return a != b ? a < b : position[$0]! < position[$1]!
-        }
-        return ranked.prefix(limit).compactMap { found[$0] }
+        return ordered
     }
 }
 

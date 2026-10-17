@@ -542,3 +542,24 @@ private func makeFixture() throws -> Fixture {
     #expect(hits.map(\.row.thread.id) == ["t10"])
     #expect(try f.ids("tacos", account: home.id, sort: .relevance) == [])
 }
+
+@Test func relevanceFindsTheSameThreadsAsNewest() throws {
+    let f = try makeFixture()
+    let queries = [
+        "tacos", "roadmap", "r", "from:maya", "lisbon OR invoice", "tacos -gate", "in:inbox tacos", "subject:lisbon",
+        "to:hotel", "cc:carol", "has:attachment roadmap", "label:work invoice", "tacos (gate OR roadmap)", "account:home lisbon",
+    ]
+    for text in queries {
+        let newest = try f.ids(text, sort: .newest)
+        let ranked = try f.ids(text, sort: .relevance)
+        #expect(Set(ranked) == Set(newest) && ranked.count == newest.count, "\(text): \(ranked) vs \(newest)")
+    }
+    #expect(try f.ids("-tacos", sort: .relevance) == (try f.ids("-tacos", sort: .newest)))   // nothing to rank: falls back to newest
+}
+
+@Test func relevanceRespectsTheLimitAndNamesTheBestMessage() throws {
+    let f = try makeFixture()
+    let hits = try f.search.searchHits("lisbon", options: SearchOptions(limit: 1, sort: .relevance, now: now, timeZone: utc))
+    #expect(hits.count == 1)
+    #expect(hits.first?.matchedMessageId != nil)
+}

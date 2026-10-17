@@ -4,8 +4,8 @@ import GRDB
 public enum SearchSort: Sendable {
     /// Most recently active thread first.
     case newest
-    /// Best bm25 match first (subject counts most), newest first among equals. Ranks the newest matching
-    /// messages only when a very common word matches thousands.
+    /// Best bm25 match first (subject counts most, then sender, recipients, snippet and body), later-stored
+    /// messages first among equals. Exact for every query; costs a little more for words that match most mail.
     case relevance
 }
 
