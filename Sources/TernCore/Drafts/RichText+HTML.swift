@@ -6,7 +6,7 @@ extension RichText {
     /// HTML, signatures and AI output, not for rendering arbitrary mail.
     public init(html: String) {
         var builder = HTMLBuilder()
-        for token in HTMLTokenizer(html) { builder.consume(token) }
+        for token in DraftHTMLTokenizer(html) { builder.consume(token) }
         self.init(builder.finish())
     }
 
@@ -18,7 +18,7 @@ extension RichText {
 
 // MARK: - Tokenizer
 
-enum HTMLToken: Equatable {
+enum DraftHTMLToken: Equatable {
     case start(name: String, attributes: [String: String], selfClosing: Bool)
     case end(name: String)
     case text(String)
@@ -26,7 +26,7 @@ enum HTMLToken: Equatable {
 
 /// Splits HTML into tags and text. Comments, doctypes and processing instructions are skipped; the
 /// contents of raw-text elements (script, style) come through as one text token.
-struct HTMLTokenizer: Sequence, IteratorProtocol {
+struct DraftHTMLTokenizer: Sequence, IteratorProtocol {
     private let scalars: [Unicode.Scalar]
     private var index = 0
     private var rawTextEnd: String?
@@ -35,7 +35,7 @@ struct HTMLTokenizer: Sequence, IteratorProtocol {
         scalars = Array(html.unicodeScalars)
     }
 
-    mutating func next() -> HTMLToken? {
+    mutating func next() -> DraftHTMLToken? {
         guard index < scalars.count else { return nil }
         if let rawTextEnd {
             self.rawTextEnd = nil
@@ -89,7 +89,7 @@ struct HTMLTokenizer: Sequence, IteratorProtocol {
         CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == ":" || scalar == "_"
     }
 
-    private mutating func readTag() -> HTMLToken? {
+    private mutating func readTag() -> DraftHTMLToken? {
         var position = index + 1
         var closing = false
         if position < scalars.count, scalars[position] == "/" { closing = true; position += 1 }
@@ -222,7 +222,7 @@ private struct HTMLBuilder {
     private var style: RichText.Style { inline.reduce([]) { $0.union($1.style) } }
     private var link: String? { inline.last(where: { $0.link != nil })?.link }
 
-    mutating func consume(_ token: HTMLToken) {
+    mutating func consume(_ token: DraftHTMLToken) {
         if skipDepth > 0 {
             switch token {
             case .start(let name, _, let selfClosing) where name == skipTag && !selfClosing: skipDepth += 1

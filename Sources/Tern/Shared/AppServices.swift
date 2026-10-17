@@ -53,6 +53,14 @@ final class AppServices {
     /// Brings a thread to the front (notifications, mailto links). Set by the shell.
     var showThread: (ThreadKey) -> Void = { _ in }
 
+    /// Reader actions for the shell's key handling and the ⌘K palette (next/previous message, find, print…).
+    let reader = ReaderCommands()
+    /// Text a ✦ quick reply chose for a thread's next reply. The composer reads it and clears it.
+    var replyPrefill: [ThreadKey: String] = [:]
+    /// Mutes threads (archive now, keep later replies out of the inbox). Nil until sync supports it;
+    /// the reader's Mute item is disabled meanwhile.
+    var mute: (([ThreadKey]) -> Void)?
+
     init(store: MailStore) {
         self.store = store
         self.search = SearchService(store.database)
