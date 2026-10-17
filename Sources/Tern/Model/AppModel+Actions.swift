@@ -70,6 +70,25 @@ extension AppModel {
         }
     }
 
+    /// "Send and archive": archives like `e` (the row leaves in the same frame, the next one is selected)
+    /// but without a toast, since the send notice carries the undo. Returns the undo token once written.
+    func archiveSent(_ key: ThreadKey) async -> UndoToken? {
+        if leavesList(.archive), snapshot.rows[key] != nil { hide([key]) }
+        if case .inbox = kind { prefs.clearedToday += 1 }
+        let store = self.store
+        return await withCheckedContinuation { continuation in
+            writes.async {
+                let token = try? store.perform(.archive, on: [key])
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        self.committed([key])
+                        continuation.resume(returning: token)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Hiding triaged rows
 
     func hide(_ keys: [ThreadKey]) {

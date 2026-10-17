@@ -489,9 +489,14 @@ final class ReaderModel {
         return person ? recipient?.firstName : recipient?.displayName
     }
 
+    /// Opens the inline composer, reopening the reply already being written in this thread.
     func reply(all: Bool) {
         guard let key else { return }
-        composing = .reply(key, all: all)
+        if let draft = try? services?.drafts.editingDraft(inThread: key), draft.kind == .reply || draft.kind == .replyAll {
+            composing = .draft(id: draft.id)
+        } else {
+            composing = .reply(key, all: all)
+        }
     }
 
     func forward() {
@@ -502,7 +507,7 @@ final class ReaderModel {
     func quickReply(_ text: String) {
         guard let key else { return }
         services?.replyPrefill[key] = text
-        composing = .reply(key, all: false)
+        reply(all: false)
     }
 
     func perform(_ action: MailAction) {

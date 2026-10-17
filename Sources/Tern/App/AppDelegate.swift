@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             self.showMainWindow()
             self.model.reveal(key)
         }
+        services.archiveSent = { [weak model] key in await model?.archiveSent(key) }
         ReaderWebEngine.shared.webView.didTakeFocus = { [weak model] in model?.focus = .reader }
     }
 

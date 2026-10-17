@@ -25,6 +25,10 @@ final class AppServices {
     var draftFilesDirectory: URL?
     /// Shows the "Sending in 5 s · Undo" notice after Send. When nil the composer shows its own floating pill.
     var showSendUndo: ((SendUndoNotice) -> Void)?
+    /// Archives a thread after "Send and archive", without a toast of its own: the shell takes the row
+    /// out of the list at once and selects the next one. Returns what undoing the send needs. When nil
+    /// the composer archives through the store directly.
+    var archiveSent: ((ThreadKey) async -> UndoToken?)?
 
     /// Drafts and their Gmail operations (compose lane).
     var drafts: DraftStore { DraftStore(store.database, filesDirectory: draftFilesDirectory) }
