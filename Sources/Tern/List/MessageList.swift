@@ -25,6 +25,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var footerHovered: Int?
     private let hoverBar: NSHostingView<RowHoverBar>
     private var lastWidth: CGFloat = 0
+    /// True while a new list replaces the old one; scroll changes then aren't the user's.
+    private var resetting = false
 
     static let headerHeight: CGFloat = 34
     static let footerHeight: CGFloat = 44
@@ -87,8 +89,10 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
         if animation == .reset || old.isEmpty {
             items = new
+            resetting = true
             table.reloadData()
             table.scroll(.zero)
+            resetting = false
             refreshVisibleRows()
             return
         }
@@ -303,9 +307,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     // MARK: Scrolling, paging, hover
 
+    /// Reads the next page near the end, once the user has scrolled a row or more (or the rows don't fill the view):
+    /// a fresh list jumping to the top must not cost a second read, e.g. on every search keystroke.
     @objc private func didScroll() {
-        let visible = table.rows(in: scrollView.contentView.bounds)
-        if visible.location + visible.length >= items.count - 30 { model.loadMore() }
+        let bounds = scrollView.contentView.bounds
+        let visible = table.rows(in: bounds)
+        let nearEnd = visible.location + visible.length >= items.count - 30
+        if !resetting, nearEnd, bounds.minY > style.height || table.frame.height <= bounds.height { model.loadMore() }
         updateHoverFromMouse()
     }
 
