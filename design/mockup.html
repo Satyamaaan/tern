@@ -1,0 +1,298 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tern — main window mockup</title>
+<style>
+  @font-face { font-family: Geist; src: url(../Resources/Fonts/Geist-Regular.ttf); font-weight: 400; }
+  @font-face { font-family: Geist; src: url(../Resources/Fonts/Geist-Medium.ttf); font-weight: 500; }
+  @font-face { font-family: Geist; src: url(../Resources/Fonts/Geist-SemiBold.ttf); font-weight: 600; }
+  @font-face { font-family: "Geist Mono"; src: url(../Resources/Fonts/GeistMono-Regular.ttf); font-weight: 400; }
+  @font-face { font-family: Newsreader; src: url(../Resources/Fonts/Newsreader16pt-Medium.ttf); font-weight: 500; }
+  @font-face { font-family: Newsreader; src: url(../Resources/Fonts/Newsreader16pt-Italic.ttf); font-style: italic; }
+
+  .light {
+    --bg:#FFFFFF; --sidebar:#F6F6F5; --raised:#FFFFFF; --hover:#F1F1EF; --selected:#EBEBE8;
+    --hairline:#E6E6E2; --hairline2:#D6D6D1; --t1:#161616; --t2:#5F5F5A; --t3:#74746E;
+    --accent:#E5461E; --ink:#C23A16; --soft:#FDECE6; --desk:#E9E8E4;
+  }
+  .dark {
+    --bg:#141414; --sidebar:#0E0E0E; --raised:#1A1A1A; --hover:#1F1F1F; --selected:#272727;
+    --hairline:#2A2A2A; --hairline2:#3A3A3A; --t1:#ECECEA; --t2:#A3A39E; --t3:#85857F;
+    --accent:#FF6B3F; --ink:#FF8C66; --soft:#2E1913; --desk:#050505;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font: 13px/18px Geist, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+  .stage { padding: 0; }
+  .window {
+    width: 1320px; height: 840px; display: grid; grid-template-columns: 232px 1px 452px 1px 1fr;
+    background: var(--bg); color: var(--t1); border-radius: 12px; overflow: hidden; position: relative;
+    border: 1px solid var(--hairline2);
+  }
+  .rule { background: var(--hairline); }
+  .mono { font-family: "Geist Mono", ui-monospace, monospace; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+  .t2 { color: var(--t2); } .t3 { color: var(--t3); }
+  svg { display: block; }
+  .icon { width: 15px; height: 15px; stroke: var(--t2); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Sidebar */
+  .sidebar { background: var(--sidebar); padding: 0 10px; display: flex; flex-direction: column; }
+  .side-head { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+  .lights { display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; background: #FF5F57; }
+  .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+  .dark .lights i { background: #3A3A3A !important; }
+  .iconbtn { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; }
+  .iconbtn:hover { background: var(--hover); }
+  .scope { height: 34px; margin: 2px 0 10px; padding: 0 10px; display: flex; align-items: center; gap: 10px;
+    border-radius: 999px; background: var(--bg); border: 1px solid var(--hairline); font-weight: 500; }
+  .dark .scope { background: var(--raised); }
+  .dots { display: flex; } .dots b { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); margin-right: -4px; }
+  .dark .dots b { border-color: var(--raised); }
+  .nav { display: flex; flex-direction: column; gap: 1px; }
+  .nav a { height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 8px; color: var(--t1); text-decoration: none; }
+  .nav a.sel { background: var(--selected); font-weight: 500; }
+  .nav a .n { margin-left: auto; }
+  .nav a .n.hot { color: var(--ink); }
+  .caps { font-size: 11px; line-height: 14px; letter-spacing: .6px; font-weight: 500; color: var(--t3); text-transform: uppercase; }
+  .side-sec { margin: 18px 8px 6px; }
+  .proj { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; }
+  .side-foot { margin-top: auto; padding: 14px 8px; font-size: 12px; color: var(--t3); display: flex; align-items: center; gap: 7px; }
+  .side-foot i { width: 6px; height: 6px; border-radius: 50%; background: #3E9A86; }
+
+  /* List */
+  .list { display: flex; flex-direction: column; min-width: 0; }
+  .list-head { height: 52px; display: flex; align-items: center; padding: 0 14px 0 18px; gap: 12px; }
+  .list-head h1 { font-size: 15px; line-height: 20px; font-weight: 600; margin: 0; }
+  .flock { display: flex; align-items: center; gap: 5px; }
+  .flock i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .flock i.lift { transform: translateY(-5px); opacity: .25; }
+  .search { margin: 0 12px; height: 32px; border-radius: 999px; background: var(--hover); display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; color: var(--t3); }
+  .key { margin-left: auto; height: 20px; min-width: 20px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--hairline2); display: grid; place-items: center; color: var(--t3); background: var(--bg); }
+  .tabs { display: flex; gap: 16px; padding: 0 18px; height: 40px; align-items: end; border-bottom: 1px solid var(--hairline); white-space: nowrap; overflow: hidden; }
+  .tabs span { padding-bottom: 9px; color: var(--t2); }
+  .tabs span.on { color: var(--t1); font-weight: 500; box-shadow: inset 0 -2px 0 var(--t1); }
+  .tabs .mono { margin-left: 4px; color: var(--t3); }
+  .rows { padding: 2px 6px; overflow: hidden; }
+  .group { height: 30px; display: flex; align-items: center; padding: 6px 12px 0; }
+  .water { display: flex; align-items: center; gap: 8px; margin: 6px 12px 2px; }
+  .water hr { flex: 1; border: 0; border-top: 1px dashed color-mix(in srgb, var(--t3) 45%, transparent); margin: 0; }
+  .row > div:last-child { min-width: 0; }
+  .row { height: 56px; display: grid; grid-template-columns: 20px minmax(0, 1fr); padding: 9px 10px 0 2px; border-radius: 8px; }
+  .row.sel { background: var(--selected); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .row.hov { background: var(--hover); }
+  .gut { display: flex; justify-content: center; padding-top: 6px; }
+  .gut i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .l1, .l2 { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+  .l2 { margin-top: 3px; }
+  .who { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+  .unread .who { font-weight: 600; }
+  .acct { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .chip { height: 18px; padding: 0 6px; border-radius: 6px; font-size: 11px; line-height: 18px; font-weight: 500; flex: none; }
+  .when { margin-left: auto; flex: none; color: var(--t3); }
+  .subj { font-weight: 500; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; max-width: 72%; }
+  .prev { color: var(--t3); overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; }
+  .row.sel .prev { color: var(--t2); }
+  .ai { color: var(--t2); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .hoverbtns { margin-left: auto; display: flex; gap: 2px; }
+  .hoverbtns span { width: 24px; height: 22px; border-radius: 6px; display: grid; place-items: center; }
+
+  /* Reader */
+  .reader { background: var(--raised); display: flex; flex-direction: column; min-width: 0; position: relative; }
+  .reader-top { height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 0 14px; }
+  .reader-top .pos { margin-right: auto; padding-left: 20px; }
+  .doc { padding: 6px 40px 0; max-width: 820px; }
+  .doc h2 { font: 500 24px/30px Newsreader, Georgia, serif; letter-spacing: -.2px; margin: 0 0 10px; }
+  .chips { display: flex; gap: 6px; margin-bottom: 14px; }
+  .summary { display: flex; gap: 8px; color: var(--t2); margin-bottom: 18px; max-width: 640px; }
+  .msg-c { height: 42px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--hairline); }
+  .mono-av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; flex: none; }
+  .msg-c .s { color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .msg { border-top: 1px solid var(--hairline); padding-top: 14px; }
+  .msg-h { display: flex; gap: 10px; align-items: center; }
+  .msg-h .who2 { font-weight: 600; }
+  .body { font-size: 14px; line-height: 22px; margin: 14px 0 0 38px; max-width: 640px; }
+  .body p { margin: 0 0 12px; }
+  .quote { display: inline-grid; place-items: center; width: 30px; height: 16px; border-radius: 999px; background: var(--hover); color: var(--t3); font-size: 11px; letter-spacing: 1px; }
+  .att { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 10px; border-radius: 8px; border: 1px solid var(--hairline); margin: 4px 0 0 38px; }
+  .replybar { position: absolute; left: 40px; right: 40px; bottom: 22px; display: flex; gap: 8px; align-items: center; }
+  .replypill { flex: 1; height: 38px; border-radius: 999px; background: var(--hover); display: flex; align-items: center; padding: 0 16px; color: var(--t3); gap: 8px; }
+  .quick { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--hairline); display: flex; align-items: center; gap: 6px; color: var(--t2); white-space: nowrap; }
+  .toast { position: absolute; left: 459px; bottom: 24px; transform: translateX(-50%); height: 36px; padding: 0 8px 0 16px; border-radius: 999px;
+    background: color-mix(in srgb, var(--t1) 92%, transparent); color: var(--bg); display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.14); }
+  .toast .key { background: transparent; border-color: color-mix(in srgb, var(--bg) 35%, transparent); color: var(--bg); margin: 0; }
+</style>
+</head>
+<body>
+<div class="stage">
+<div class="window light" id="win">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="side-head">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div style="margin-left:auto" class="iconbtn"><svg class="icon" viewBox="0 0 16 16"><path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z"/><path d="M9.5 4l2.5 2.5"/></svg></div>
+    </div>
+    <div class="scope">
+      <span class="dots"><b style="background:#4F7CAC"></b><b style="background:#8A6FB3"></b><b style="background:#3E9A86"></b></span>
+      <span style="margin-left:4px">All accounts</span>
+      <svg class="icon" style="margin-left:auto;width:12px;height:12px" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg>
+    </div>
+    <nav class="nav">
+      <a class="sel"><svg class="icon" viewBox="0 0 16 16"><path d="M2 9l2-6h8l2 6v4H2z"/><path d="M2 9h3.5l1 1.5h3l1-1.5H14"/></svg>Inbox<span class="n mono">24</span></a>
+      <a><svg class="icon" viewBox="0 0 16 16"><path d="M6 4L2 8l4 4"/><path d="M2.5 8H10a4 4 0 014 4"/></svg>Needs reply<span class="n mono hot">5</span></a>
+      <a><svg class="icon" viewBox="0 0 16 16"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.5"/></svg>Snoozed<span class="n mono t3">3</span></a>
+      <a><svg class="icon" viewBox="0 0 16 16"><path d="M8 2l1.8 3.8 4.2.5-3.1 2.9.8 4.1L8 11.3 4.3 13.3l.8-4.1L2 6.3l4.2-.5z"/></svg>Starred</a>
+      <a><svg class="icon" viewBox="0 0 16 16"><path d="M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12z"/></svg>Drafts<span class="n mono t3">2</span></a>
+      <a><svg class="icon" viewBox="0 0 16 16"><path d="M2 8l12-5-5 12-2-5z"/></svg>Sent</a>
+      <a><svg class="icon" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M2 6h12"/></svg>All mail</a>
+      <a class="t2"><svg class="icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg>More</a>
+    </nav>
+    <div class="side-sec caps">Projects</div>
+    <nav class="nav">
+      <a><span class="proj" style="background:color-mix(in srgb,#8A6FB3 16%,transparent)"><svg class="icon" style="width:11px;height:11px;stroke:#8A6FB3" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="6" cy="6.5" r=".8"/><circle cx="10" cy="6.5" r=".8"/></svg></span>Lumen redesign<span class="n mono t3">4</span></a>
+      <a><span class="proj" style="background:color-mix(in srgb,#C08A3E 16%,transparent)"><svg class="icon" style="width:11px;height:11px;stroke:#C08A3E" viewBox="0 0 16 16"><path d="M2 8l12-5-5 12-2-5z"/></svg></span>Kiteworks<span class="n mono t3">12</span></a>
+      <a><span class="proj" style="background:color-mix(in srgb,#B05C7A 16%,transparent)"><svg class="icon" style="width:11px;height:11px;stroke:#B05C7A" viewBox="0 0 16 16"><path d="M3 8l5-5 5 5v5H3z"/></svg></span>Home &amp; travel<span class="n mono t3">1</span></a>
+    </nav>
+    <div class="side-foot"><i></i>Up to date</div>
+  </aside>
+  <div class="rule"></div>
+
+  <!-- List -->
+  <section class="list">
+    <div class="list-head">
+      <h1>Inbox</h1>
+      <div class="flock"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="lift"></i><span class="mono t3" style="margin-left:3px">+4</span></div>
+      <div class="iconbtn" style="margin-left:auto"><svg class="icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg></div>
+    </div>
+    <div class="search"><svg class="icon" style="stroke:var(--t3)" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>Search<span class="key mono">/</span></div>
+    <div class="tabs">
+      <span class="on">Important<span class="mono">12</span></span>
+      <span>People<span class="mono">8</span></span>
+      <span>Notifications<span class="mono">31</span></span>
+      <span>Newsletters<span class="mono">9</span></span>
+      <span>Other<span class="mono">40</span></span>
+    </div>
+    <div class="rows">
+      <div class="group caps">Needs reply</div>
+      <div class="row unread sel">
+        <div class="gut"><i></i></div>
+        <div>
+          <div class="l1"><span class="who">Sofia Rossi</span><span class="t3">3</span><span class="acct" style="background:#8A6FB3"></span>
+            <span class="chip" style="margin-left:auto;color:#8A6FB3;background:color-mix(in srgb,#8A6FB3 12%,transparent)">Lumen redesign</span>
+            <svg class="icon" style="width:12px;height:12px;stroke:var(--t3)" viewBox="0 0 16 16"><path d="M10.5 5L5.8 9.7a1.5 1.5 0 002.1 2.1L13 6.7a3 3 0 00-4.2-4.2L3.6 7.6"/></svg>
+            <span class="mono" style="color:var(--t3)">14m</span></div>
+          <div class="l2"><span class="subj">Contract for the Lumen redesign</span><span class="ai">✦ Needs your sign-off on the SOW by Thursday</span></div>
+        </div>
+      </div>
+      <div class="row unread">
+        <div class="gut"><i></i></div>
+        <div>
+          <div class="l1"><span class="who">Maya Chen</span><span class="acct" style="background:#8A6FB3"></span><span class="when mono">1h</span></div>
+          <div class="l2"><span class="subj">Can we move our 1:1?</span><span class="prev">— Thursday is packed with the board prep, would Friday at 10 work for</span></div>
+        </div>
+      </div>
+      <div class="row hov">
+        <div class="gut"></div>
+        <div>
+          <div class="l1"><span class="who">Ethan Brooks</span><span class="acct" style="background:#4F7CAC"></span>
+            <span class="hoverbtns">
+              <span><svg class="icon" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg></span>
+              <span><svg class="icon" viewBox="0 0 16 16"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.5"/></svg></span>
+              <span><svg class="icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg></span>
+            </span></div>
+          <div class="l2"><span class="subj">Dinner Saturday?</span><span class="prev">— We were thinking of the new place on Valencia, are you around this</span></div>
+        </div>
+      </div>
+      <div class="water"><hr><span class="mono t3">3</span></div>
+      <div class="group caps">Today</div>
+      <div class="row unread">
+        <div class="gut"><i></i></div>
+        <div>
+          <div class="l1"><span class="who">Google Calendar</span><span class="acct" style="background:#8A6FB3"></span>
+            <span class="chip" style="margin-left:auto;color:#2F6FD8;background:color-mix(in srgb,#2F6FD8 12%,transparent)">Calendar</span><span class="mono t3">2h</span></div>
+          <div class="l2"><span class="subj">Invitation: Design review @ Thu 2pm</span><span class="prev">— Maya Chen has invited you to an event</span></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="gut"></div>
+        <div>
+          <div class="l1"><span class="who">Jonas, Priya, me</span><span class="t3">6</span><span class="acct" style="background:#8A6FB3"></span><span class="when mono">4h</span></div>
+          <div class="l2"><span class="subj">Q4 roadmap review</span><span class="prev">— Here's the summary from the call: scope stays, timeline moves by a</span></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="gut"></div>
+        <div>
+          <div class="l1"><span class="who" style="font-style:italic;color:var(--t2)">Draft to Kenji</span><span class="acct" style="background:#3E9A86"></span>
+            <span class="chip" style="margin-left:auto;color:#C08A3E;background:color-mix(in srgb,#C08A3E 12%,transparent)">Kiteworks</span><span class="mono t3">5h</span></div>
+          <div class="l2"><span class="subj">Re: Sync engine edge cases</span><span class="prev">— Sounds good, let me check with the team and</span></div>
+        </div>
+      </div>
+      <div class="group caps">Yesterday</div>
+      <div class="row">
+        <div class="gut"></div>
+        <div>
+          <div class="l1"><span class="who">Grace Kim</span><span class="acct" style="background:#8A6FB3"></span>
+            <svg class="icon" style="margin-left:auto;width:12px;height:12px;stroke:var(--t3)" viewBox="0 0 16 16"><path d="M10.5 5L5.8 9.7a1.5 1.5 0 002.1 2.1L13 6.7a3 3 0 00-4.2-4.2L3.6 7.6"/></svg><span class="mono t3">Thu</span></div>
+          <div class="l2"><span class="subj">Brand guidelines v2</span><span class="prev">— Attaching the latest version, the changes are on pages 3 and 7.</span></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="gut"></div>
+        <div>
+          <div class="l1"><span class="who">Mom</span><span class="acct" style="background:#4F7CAC"></span>
+            <span class="chip" style="margin-left:auto;color:#B05C7A;background:color-mix(in srgb,#B05C7A 12%,transparent)">Home &amp; travel</span><span class="mono t3">Thu</span></div>
+          <div class="l2"><span class="subj">Photos from the weekend</span><span class="prev">— Here they are! The one by the lake is my favorite, can you print</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="rule"></div>
+
+  <!-- Reader -->
+  <section class="reader">
+    <div class="reader-top">
+      <span class="pos mono t3">1 of 24</span>
+      <div class="iconbtn"><svg class="icon" viewBox="0 0 16 16"><path d="M3 8.5l3 3 7-7"/></svg></div>
+      <div class="iconbtn"><svg class="icon" viewBox="0 0 16 16"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 5.5v3l2 1.5"/></svg></div>
+      <div class="iconbtn"><svg class="icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg></div>
+    </div>
+    <div class="doc">
+      <h2>Contract for the Lumen redesign</h2>
+      <div class="chips">
+        <span class="chip" style="color:var(--ink);background:var(--soft)">Needs reply</span>
+        <span class="chip" style="color:#8A6FB3;background:color-mix(in srgb,#8A6FB3 12%,transparent)">Lumen redesign</span>
+        <span class="chip" style="color:var(--t2);background:var(--hover)">Clients</span>
+      </div>
+      <div class="summary"><span style="color:var(--ink)">✦</span><span>Sofia needs your sign-off on the SOW before Thursday. She changed the payment schedule to 40/30/30 and moved the first milestone to Nov 14.</span></div>
+
+      <div class="msg-c"><span class="mono-av" style="background:#B05C7A">SR</span><b style="font-weight:500">Sofia Rossi</b><span class="s">Hi Alex, attaching the first draft of the statement of work for the redesign…</span><span class="mono t3">Mon</span></div>
+      <div class="msg-c"><span class="mono-av" style="background:#4F7CAC">AM</span><b style="font-weight:500">me</b><span class="s">Thanks Sofia, two notes on the payment terms before I send it to legal…</span><span class="mono t3">Tue</span></div>
+      <div class="msg">
+        <div class="msg-h"><span class="mono-av" style="background:#B05C7A">SR</span>
+          <div><div><span class="who2">Sofia Rossi</span> <span class="t3">sofia@lumen.io</span></div><div class="t3" style="font-size:12px">to me, Daniel</div></div>
+          <span class="mono t3" style="margin-left:auto">10:42</span></div>
+        <div class="body">
+          <p>Hi Alex,</p>
+          <p>Updated version attached. I took both of your notes: the schedule is now 40/30/30, and the first milestone moves to November 14 so the team has room for the user tests.</p>
+          <p>Could you sign before Thursday? Legal wants it in before the kickoff, and Daniel already booked the room for 9:30.</p>
+          <p>Thanks,<br>Sofia</p>
+          <span class="quote">•••</span>
+        </div>
+        <div class="att"><svg class="icon" viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg><span>Lumen — SOW v3.pdf</span><span class="mono t3">482 KB</span></div>
+      </div>
+    </div>
+    <div class="replybar">
+      <div class="replypill"><svg class="icon" style="stroke:var(--t3)" viewBox="0 0 16 16"><path d="M6 4L2 8l4 4"/><path d="M2.5 8H10a4 4 0 014 4"/></svg>Reply to Sofia…</div>
+      <div class="quick"><span style="color:var(--ink)">✦</span>Signing today</div>
+      <div class="quick"><span style="color:var(--ink)">✦</span>Call Thursday?</div>
+    </div>
+  </section>
+
+  <div class="toast"><span>Archived</span><span class="t3" style="color:inherit;opacity:.6">·</span><span>Undo</span><span class="key mono">z</span></div>
+</div>
+</div>
+</body>
+</html>
