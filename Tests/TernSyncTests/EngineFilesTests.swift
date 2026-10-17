@@ -107,7 +107,8 @@ import TernCore
     #expect(message.bodyHtml == html)
     #expect(message.bodyText == "Big newsletter.")
     #expect(try h.message("n1").map { !$0.hasAttachments } == true)
-    #expect(try h.message("n2")?.bodyState == .metadata, "a body that can't be fetched is left for the prefetch")
+    #expect(try h.message("n2")?.bodyState == .metadata, "a body that can't be fetched is stored without it")
+    #expect(try await h.sync.prefetchBodies() == 0, "the trickle doesn't retry it every round")
 }
 
 @Test func openingAThreadFetchesItsBodiesOnDemand() async throws {

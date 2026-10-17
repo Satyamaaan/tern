@@ -139,29 +139,35 @@ extension AccountSync {
 
     /// Fetches whole threads (`format` full or metadata) and stores their messages. Falls back to
     /// messages.get for the known ids when the client has no threads.get.
-    func fetchThreads(_ threads: [(threadId: String, knownIds: [String])], format: GmailMessageFormat = .full) async throws {
+    func fetchThreads(_ threads: [(threadId: String, knownIds: [String])], format: GmailMessageFormat = .full,
+                      guardHistory: Bool = false) async throws {
         guard !threads.isEmpty else { return }
         if threadsUnsupported {
-            try await fetchAndStore(threads.flatMap(\.knownIds), format: format)
+            try await fetchAndStore(threads.flatMap(\.knownIds), format: format, guardHistory: guardHistory)
             return
         }
         let accountId = self.accountId
         let email = account.email
-        for chunk in threads.syncChunks(configuration.fetchBatchSize) {
-            let fetched: [GmailThread]
+        for chunk in threads.syncChunks(batchSize(cost: configuration.quota.threadCost(format))) {
+            var fetched: [GmailThread] = []
             do {
-                fetched = try await withRetry { [api] in try await api.threads(ids: chunk.map(\.threadId), format: format) }
+                for attempt in 0..<3 {
+                    let generation = historyGeneration
+                    fetched = try await withRetry { [api] in try await api.threads(ids: chunk.map(\.threadId), format: format) }
+                    if !guardHistory || generation == historyGeneration || attempt == 2 { break }
+                }
             } catch GmailAPIError.server(501, GmailThread.unsupported) {
                 threadsUnsupported = true
-                try await fetchAndStore(threads.flatMap(\.knownIds), format: format)
+                try await fetchAndStore(threads.flatMap(\.knownIds), format: format, guardHistory: guardHistory)
                 return
             }
             var parsed: [ParsedMessage] = []
             for thread in fetched {
                 for message in thread.messages ?? [] {
-                    if format == .full, let complete = await withExternalBodies(message) {
+                    if format == .full, let complete = try await withExternalBodies(message) {
                         parsed.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
                     } else {
+                        if format == .full { failedBodies.insert(message.id) }
                         parsed.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
                                                                format: format == .full ? .metadata : format))
                     }
@@ -185,8 +191,15 @@ extension AccountSync {
         let accountId = self.accountId
         if backfillPage == nil {
             let token = account.backfillPageToken.flatMap { $0.isEmpty ? nil : $0 }
-            let listed = try await withRetry { [api, configuration] in
-                try await api.messageIds(query: nil, labelIds: [], pageToken: token, maxResults: configuration.listPageSize)
+            let listed: GmailIdPage
+            do {
+                listed = try await withRetry { [api, configuration] in
+                    try await api.messageIds(query: nil, labelIds: [], pageToken: token, maxResults: configuration.listPageSize)
+                }
+            } catch GmailAPIError.server(400, _) where token != nil {
+                // The saved page token went stale; start over from the top (stored mail is skipped).
+                try await updateAccount { $0.backfillPageToken = "" }
+                return true
             }
             var ids = listed.messages?.map(\.id) ?? []
             if listed.nextPageToken == nil {
@@ -222,33 +235,36 @@ extension AccountSync {
     }
 
     /// After `historyExpired`. Lists every id, then rebuilds each stored message's labels from one
-    /// cheap messages.list per label (a few units per 500 messages, instead of 20 per message),
-    /// keeping bodies. Trash and Spam (which the per-label lists leave out) are read directly, new
-    /// inbox mail is fetched in full, local messages Gmail no longer has are deleted. Other new mail
-    /// comes as metadata, or from the backfill when it hasn't finished (it restarts from the top and
-    /// skips what's stored).
+    /// cheap messages.list per label (5 units per 500 messages, instead of 20 per message), keeping
+    /// bodies. The newest new inbox mail is fetched in full; every other message Gmail has and we
+    /// don't is left to the backfill, which restarts from the top and skips what's stored. Local
+    /// messages Gmail no longer has are deleted. Queued actions still go out between the lists.
     public func fullResync() async throws {
         try await QuotaPriority.$current.withValue(.bulk) { try await resync() }
     }
 
     private func resync() async throws {
         publish { $0.phase = "Resyncing"; $0.fetched = 0; $0.total = nil }
+        let wasNew = account.syncState == .new
         backfillPage = nil
         let profile = try await withRetry { [api] in try await api.profile() }
         messagesTotal = profile.messagesTotal
         let labels = try await syncLabels()
 
         let listed = try await listIds(labelIds: [])
-        let hidden = try await listIds(labelIds: [SystemLabel.trash]) + listIds(labelIds: [SystemLabel.spam])
-        let hiddenSet = Set(hidden)
-        let serverIds = Set(listed).union(hiddenSet)
+        let trash = try await listIds(labelIds: [SystemLabel.trash])
+        let spam = try await listIds(labelIds: [SystemLabel.spam])
+        let hidden = Set(trash).union(spam)
+        let serverIds = Set(listed).union(hidden)
         let accountId = self.accountId
         let local = try await read { db in try MailStore.allMessageIds(db, accountId: accountId) }
 
+        // Per-label lists leave out Trash and Spam, so they rebuild everything else exactly.
         var labelsById: [String: [String]] = [:]
-        for id in listed where local.contains(id) && !hiddenSet.contains(id) { labelsById[id] = [] }
+        for id in listed where local.contains(id) && !hidden.contains(id) { labelsById[id] = [] }
         var inboxIds: [String] = []
         for label in labels where label.id != SystemLabel.trash && label.id != SystemLabel.spam {
+            try await serviceActions()
             let members = try await listIds(labelIds: [label.id])
             if label.id == SystemLabel.inbox { inboxIds = members }
             for id in members where labelsById[id] != nil { labelsById[id]?.append(label.id) }
@@ -258,22 +274,42 @@ extension AccountSync {
             try await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
         }
 
-        let knownHidden = hidden.filter(local.contains)
+        // Stored Trash and Spam: read their labels while that's cheap, else just move them there.
+        let knownHidden = Array(hidden.filter(local.contains))
         var gone = local.subtracting(serverIds)
-        for chunk in knownHidden.syncChunks(configuration.fetchBatchSize) {
-            let fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: .minimal) }
-            let returned = Set(fetched.map(\.id))
-            gone.formUnion(chunk.filter { !returned.contains($0) })
-            let update = Dictionary(fetched.map { ($0.id, $0.labelIds ?? []) }, uniquingKeysWith: { $1 })
-            try await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+        if knownHidden.count <= configuration.resyncHiddenRefreshLimit {
+            for chunk in knownHidden.syncChunks(batchSize(cost: configuration.quota.getMessage)) {
+                try await serviceActions()
+                let fetched = try await withRetry { [api] in try await api.messages(ids: chunk, format: .minimal) }
+                let returned = Set(fetched.map(\.id))
+                gone.formUnion(chunk.filter { !returned.contains($0) })
+                let update = Dictionary(fetched.map { ($0.id, $0.labelIds ?? []) }, uniquingKeysWith: { $1 })
+                try await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+            }
+        } else {
+            let trashSet = Set(trash)
+            for chunk in knownHidden.syncChunks(configuration.writeBatchSize) {
+                try await write { db in
+                    var update: [String: [String]] = [:]
+                    for row in try Row.fetchAll(db, sql: """
+                        SELECT id, labelIds FROM message WHERE accountId = ? AND id IN (\(databaseQuestionMarks(count: chunk.count)))
+                        """, arguments: StatementArguments([accountId] + chunk)) {
+                        let id: String = row["id"]
+                        let json: String = row["labelIds"]
+                        var labels = Set((try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? [])
+                        labels.remove(SystemLabel.inbox)
+                        labels.insert(trashSet.contains(id) ? SystemLabel.trash : SystemLabel.spam)
+                        update[id] = Array(labels)
+                    }
+                    try MailStore.applyServerLabels(db, accountId: accountId, update)
+                }
+            }
         }
 
         let newInbox = inboxIds.filter { !local.contains($0) }
-        try await fetchAndStore(newInbox, format: .full)
-        if account.backfillDone {
-            let newInboxSet = Set(newInbox)
-            try await fetchAndStore((listed + hidden).filter { !local.contains($0) && !newInboxSet.contains($0) }, format: .metadata)
-        }
+        let fetchNow = Array(newInbox.prefix(configuration.historyFullFetchLimit))
+        try await fetchAndStore(fetchNow, format: .full, guardHistory: false)
+        let unknownLeft = serverIds.count - local.intersection(serverIds).count - fetchNow.count
 
         let goneIds = Array(gone)
         let historyId = profile.historyId
@@ -283,12 +319,18 @@ extension AccountSync {
             _ = try AccountSync.updateAccountRow(db, accountId) {
                 $0.historyId = historyId
                 $0.lastSyncAt = now
-                if !$0.backfillDone { $0.backfillPageToken = "" }
+                if wasNew { return }
+                if unknownLeft > 0 || !$0.backfillDone {
+                    $0.backfillDone = false
+                    $0.backfillPageToken = ""
+                }
                 $0.syncState = $0.backfillDone ? .live : .backfilling
             }
         }
+        // An unfinished initial sync plans again from the new lists.
+        if wasNew { initialPlan = nil }
         try await reloadAccount()
-        publishAccount(phase: "Up to date")
+        publishAccount(phase: wasNew ? "Fetching inbox" : "Up to date")
         await publishBackfillProgress()
     }
 
@@ -297,8 +339,11 @@ extension AccountSync {
     @discardableResult
     public func prefetchBodies() async throws -> Int {
         let accountId = self.accountId
+        let skip = failedBodies
         let limit = configuration.prefetchBatchSize
-        let ids = try await read { db in try MailStore.messageIdsNeedingBody(db, accountId: accountId, limit: limit) }
+        let ids = try await read { db in
+            try MailStore.messageIdsNeedingBody(db, accountId: accountId, limit: limit + skip.count)
+        }.filter { !skip.contains($0) }.prefix(limit).map { $0 }
         guard !ids.isEmpty else { return 0 }
         try await fetchAndStore(ids, format: .full) { db, missing in
             try MailStore.deleteMessages(db, accountId: accountId, ids: missing)
@@ -325,17 +370,20 @@ extension AccountSync {
         guard !missing.isEmpty || unsure || local.isEmpty else { return }
 
         if local.isEmpty || missing.count >= configuration.threadFetchMinimum || (unsure && threadsUnsupported) {
-            try await fetchThreads([(threadId, missing)], format: .full)
+            try await fetchThreads([(threadId, missing)], format: .full, guardHistory: true)
             return
         }
         if unsure {
-            let fetched: [GmailThread]
+            let generation = historyGeneration
+            var fetched: [GmailThread]
             do {
                 fetched = try await withRetry { [api] in try await api.threads(ids: [threadId], format: .metadata) }
             } catch GmailAPIError.server(501, GmailThread.unsupported) {
                 threadsUnsupported = true
                 fetched = []
             }
+            // History moved while we read: its changes win; the full fetch below brings the rest.
+            if generation != historyGeneration { fetched = [] }
             let localIds = Set(local.map(\.id))
             let email = account.email
             let messages = fetched.first?.messages ?? []
@@ -349,11 +397,11 @@ extension AccountSync {
             if !fetched.isEmpty { completeThreads.insert(threadId) }
             missing += unknown.map(\.id)
             if missing.count >= configuration.threadFetchMinimum {
-                try await fetchThreads([(threadId, missing)], format: .full)
+                try await fetchThreads([(threadId, missing)], format: .full, guardHistory: true)
                 return
             }
         }
-        try await fetchAndStore(missing, format: .full)
+        try await fetchAndStore(missing, format: .full, guardHistory: true)
     }
 
     @discardableResult
@@ -390,6 +438,11 @@ extension AccountSync {
         try await listRefs(labelIds: labelIds, query: nil).map(\.id)
     }
 
+    /// Ids per call so one request costs at most `maxUnitsPerRequest`.
+    func batchSize(cost: Int) -> Int {
+        max(1, min(configuration.fetchBatchSize, configuration.maxUnitsPerRequest / max(1, cost)))
+    }
+
     /// `ids` that aren't stored with a full body, in order.
     func idsLackingBody(_ ids: [String]) async throws -> [String] {
         let accountId = self.accountId
@@ -410,7 +463,7 @@ extension AccountSync {
                        finally: (@Sendable (Database, [String]) throws -> Void)? = nil) async throws -> [String] {
         let accountId = self.accountId
         let email = account.email
-        let chunks = ids.syncChunks(configuration.fetchBatchSize)
+        let chunks = ids.syncChunks(batchSize(cost: configuration.quota.messageCost(format)))
         guard !chunks.isEmpty else {
             if let finally { try await write { db in try finally(db, []) } }
             return []
@@ -427,10 +480,11 @@ extension AccountSync {
             let returned = Set(fetched.map(\.id))
             missing += chunk.filter { !returned.contains($0) }
             for message in fetched {
-                if format == .full, let complete = await withExternalBodies(message) {
+                if format == .full, let complete = try await withExternalBodies(message) {
                     buffer.append(GmailMessageParser.parse(complete, accountId: accountId, accountEmail: email, format: .full))
                 } else {
-                    // A body part couldn't be fetched: store headers now, the prefetch tries again.
+                    // A body part couldn't be fetched: store headers now, a later open tries again.
+                    if format == .full { failedBodies.insert(message.id) }
                     buffer.append(GmailMessageParser.parse(message, accountId: accountId, accountEmail: email,
                                                            format: format == .full ? .metadata : format))
                 }
@@ -451,14 +505,22 @@ extension AccountSync {
     }
 
     /// Gmail returns large text bodies by attachment id instead of inline data. Fetches them into
-    /// the payload so the parser sees the whole body. Nil when one couldn't be fetched.
-    func withExternalBodies(_ message: GmailMessage) async -> GmailMessage? {
+    /// the payload so the parser sees the whole body. Nil when one couldn't be fetched; rate
+    /// limits, sign-in problems and cancellation still throw.
+    func withExternalBodies(_ message: GmailMessage) async throws -> GmailMessage? {
         guard var payload = message.payload else { return message }
         let paths = AccountSync.externalBodyPaths(payload)
         guard !paths.isEmpty else { return message }
         for (path, attachmentId) in paths {
-            guard let data = try? await withRetry({ [api] in try await api.attachment(messageId: message.id, attachmentId: attachmentId) })
-            else { return nil }
+            let data: Data
+            do {
+                data = try await withRetry { [api] in try await api.attachment(messageId: message.id, attachmentId: attachmentId) }
+            } catch let error as GmailAPIError {
+                switch error {
+                case .rateLimited, .unauthorized: throw error
+                default: return nil
+                }
+            }
             AccountSync.setBodyData(&payload, path: path[...], data: MailParsing.base64URLEncode(data))
         }
         var complete = message

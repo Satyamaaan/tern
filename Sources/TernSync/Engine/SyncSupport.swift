@@ -43,14 +43,21 @@ public struct SyncConfiguration: Sendable {
     public var threadFetchMinimum: Int = 3
     /// messages.list page size (Gmail allows up to 500).
     public var listPageSize: Int = 500
-    /// Ids per messages.get / threads.get call.
+    /// Most ids per messages.get / threads.get call.
     public var fetchBatchSize: Int = 100
+    /// Most quota units one call may cost, so no single request outgrows the budget's headroom
+    /// (16 full messages, 50 metadata, 8 full threads).
+    public var maxUnitsPerRequest: Int = 1_000
     /// Messages per write transaction, so the UI fills in progressively.
     public var writeBatchSize: Int = 250
     /// Older mail is backfilled as metadata (20 units each), this many per background step.
     public var backfillBatchSize: Int = 50
-    /// New mail per history poll fetched in full; beyond it, metadata (bodies follow on demand).
-    public var historyFullFetchLimit: Int = 100
+    /// New mail per history poll fetched in full (30 × 60 units); beyond it, metadata, with bodies
+    /// on demand. Also caps full fetches of new inbox mail in a resync and of server-search results.
+    public var historyFullFetchLimit: Int = 30
+    /// After history expires, stored Trash and Spam (up to this many) have their labels read back
+    /// (20 units each); beyond it they're just moved to Trash or Spam locally.
+    public var resyncHiddenRefreshLimit: Int = 200
     /// Rate of the background body trickle for mail stored without a body.
     public var trickleUnitsPerMinute: Int = 1_200
     /// Messages per trickle batch.

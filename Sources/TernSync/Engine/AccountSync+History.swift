@@ -6,11 +6,13 @@ import TernCore
 extension AccountSync {
     /// Applies every history record since the stored historyId, one page per transaction, saving
     /// the historyId reached with each page. Throws `.historyExpired` when a full resync is needed.
+    /// All pages are read first (2 units each), so after a long gap only the newest
+    /// `historyFullFetchLimit` new messages of the whole gap are fetched in full.
     public func pollHistory() async throws {
         guard let start = account.historyId else { return }
         if clock.now() >= nextLabelRefreshAt { try await syncLabels() }
+        var pages: [(records: [GmailHistory], reaching: String?)] = []
         var pageToken: String?
-        var isFirstPage = true
         repeat {
             let token = pageToken
             let page = try await withRetry { [api] in try await api.history(startHistoryId: start, pageToken: token) }
@@ -18,16 +20,24 @@ extension AccountSync {
             pageToken = page.nextPageToken
             // The mailbox's current historyId is only safe to store when everything fit in one page;
             // across pages, records written in between could otherwise be skipped.
-            let singlePage = isFirstPage && pageToken == nil
-            try await apply(records, reaching: singlePage ? (page.historyId ?? records.last?.id) : records.last?.id)
-            isFirstPage = false
+            let singlePage = pages.isEmpty && pageToken == nil
+            pages.append((records, singlePage ? (page.historyId ?? records.last?.id) : records.last?.id))
         } while pageToken != nil
+
+        var added: [String] = []
+        var seen = Set<String>()
+        for id in pages.flatMap(\.records).flatMap({ $0.messagesAdded ?? [] }).map(\.message.id).reversed()
+        where seen.insert(id).inserted {
+            added.append(id)
+        }
+        let metadataOnly = Set(added.dropFirst(configuration.historyFullFetchLimit))
+        for page in pages { try await apply(page.records, reaching: page.reaching, metadataOnly: metadataOnly) }
         publishAccount(phase: account.backfillDone ? "Up to date" : nil)
     }
 
     /// Reduces records to their net effect per message, fetches added messages in full, then writes
     /// adds, label changes (with unconfirmed local changes replayed on top) and deletes together.
-    func apply(_ records: [GmailHistory], reaching historyId: String?) async throws {
+    func apply(_ records: [GmailHistory], reaching historyId: String?, metadataOnly: Set<String> = []) async throws {
         if records.isEmpty, !(historyId.map { AccountSync.isNewer($0, than: account.historyId) } ?? false) {
             // Nothing changed: keep the account row quiet, persisting the sync time once a minute.
             let now = clock.now()
@@ -87,11 +97,13 @@ extension AccountSync {
         let labelUpdates = labels
         let deletions = Array(deleted)
         let now = clock.now()
-        // New mail comes in full; after a long gap, all but the newest arrive as metadata and get
-        // their bodies on demand, so one poll can't spend minutes of quota.
-        let fullCount = min(fetchOrder.count, configuration.historyFullFetchLimit)
-        let older = try await fetchAndStore(Array(fetchOrder.dropLast(fullCount)), format: .metadata)
-        try await fetchAndStore(Array(fetchOrder.suffix(fullCount)), format: .full) { db, missing in
+        // New mail comes in full; after a long gap, all but the newest arrive as metadata (at bulk
+        // priority) and get their bodies on demand, so one poll can't spend minutes of quota.
+        let metadataIds = fetchOrder.filter(metadataOnly.contains)
+        let older = try await QuotaPriority.$current.withValue(.bulk) {
+            try await fetchAndStore(metadataIds, format: .metadata)
+        }
+        try await fetchAndStore(fetchOrder.filter { !metadataOnly.contains($0) }, format: .full) { db, missing in
             let missing = missing + older
             try MailStore.applyServerLabels(db, accountId: accountId, labelUpdates)
             try MailStore.deleteMessages(db, accountId: accountId, ids: deletions + missing)

@@ -138,3 +138,55 @@ import TernCore
     #expect(states == [.metadata, .metadata, .metadata, .full, .full])
     try await h.expectMirrorsGmail()
 }
+
+@Test func theFullFetchLimitCoversTheWholeGapAcrossPages() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.historyFullFetchLimit = 3
+    let h = try Harness(configuration: configuration)
+    await seed(h.fake, count: 4)
+    try await h.syncFully()
+    await h.fake.setHistoryPageSize(2)
+    var fresh: [GmailMessage] = []
+    for index in 0..<8 { fresh.append(await h.fake.deliver(FakeEmail(subject: "New \(index)", date: testNow.addingTimeInterval(Double(index))))) }
+
+    try await h.sync.pollHistory()
+    let states = try fresh.map { try h.message($0.id)?.bodyState }
+    #expect(states == Array(repeating: .metadata, count: 5) + Array(repeating: .full, count: 3))
+}
+
+@Test func expiredHistoryLeavesOtherNewMailToTheBackfill() async throws {
+    let h = try Harness()
+    await seed(h.fake, count: 20)
+    try await h.syncFully()
+    let archived = await h.fake.deliver(FakeEmail(subject: "Receipt", date: testNow, labels: [SystemLabel.categoryUpdates]))
+    let seeded = await h.fake.allMessageIds
+    await h.fake.expireHistory()
+
+    try h.store.perform(.markRead, on: [h.thread(seeded.last!)])
+    await h.sync.kick()
+    try await h.sync.fullResync()
+    #expect(!(await h.fake.modifyCalls.isEmpty), "a queued action went out during the resync")
+    #expect(try h.message(archived.id) == nil)
+    #expect(try h.account().syncState == .backfilling)
+    #expect(try h.account().backfillPageToken == "")
+
+    while try await h.sync.backfillStep() {}
+    #expect(try h.message(archived.id)?.bodyState == .metadata)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
+}
+
+@Test func expiredHistoryDuringTheInitialSyncKeepsItGoing() async throws {
+    let h = try Harness()
+    await seed(h.fake, count: 40)
+    await h.fake.failNext(with: .server(status: 400, message: "boom"), on: .messages, after: 1)
+    await #expect(throws: GmailAPIError.self) { try await h.sync.initialSync() }
+    await h.fake.expireHistory()
+
+    try await h.sync.syncOnce()
+    #expect(try h.account().syncState == .new)
+    while try await h.sync.syncOnce() {}
+    #expect(try h.account().syncState == .live)
+    #expect(try h.messages().count == 40)
+    #expect(try h.messages().values.allSatisfy { $0.bodyState == .full }, "recent mail still came in full")
+}

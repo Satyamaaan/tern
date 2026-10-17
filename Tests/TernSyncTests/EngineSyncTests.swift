@@ -72,9 +72,13 @@ import TernCore
     }
     let h = try Harness(fake: fake)
     await fake.failNext(with: .server(status: 501, message: GmailThread.unsupported), on: .threads)
+    let started = h.clock.now()
     try await h.sync.initialSync()
     #expect(try h.messages().count == 3)
     #expect(try h.messages().values.allSatisfy { $0.bodyState == .full })
+    #expect(await fake.callCount(.threads) == 1, "not retried")
+    #expect(h.clock.now() == started, "no backoff waits")
+    #expect(await h.sync.budget.totalUnits == 3 * 60 + 5 + 5 + 1 + 1, "the refused threads.get isn't charged")
 }
 
 @Test func changesDuringBackfillArriveThroughHistory() async throws {
@@ -283,4 +287,30 @@ final class PhaseLog: @unchecked Sendable {
     await #expect(throws: GmailAPIError.self) { try await budget.acquire(1, priority: .interactive) }
     clock.advance(11)
     try await budget.acquire(1, priority: .interactive)
+}
+
+@Test func noSingleRequestCostsMoreThanTheCap() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.fetchBatchSize = 100
+    configuration.bulkStepUnits = 6_000
+    let h = try Harness(configuration: configuration)
+    await seed(h.fake, count: 60)
+    try await h.sync.initialSync()
+    #expect(try h.messages().count == 60)
+    let calls = await h.fake.fetchCalls
+    #expect(calls.allSatisfy { $0.ids.count * 60 <= configuration.maxUnitsPerRequest })
+    #expect(calls.contains { $0.ids.count == 16 })
+}
+
+@Test func aStaleBackfillTokenRestartsTheBackfill() async throws {
+    let h = try Harness()
+    await seed(h.fake, count: 80, spacing: 12 * 3600)
+    try await h.sync.initialSync()
+    try await h.sync.backfillStep()
+    try h.store.updateAccount(testEmail) { $0.backfillPageToken = "no-longer-valid" }
+    try await h.sync.reloadAccount()
+
+    while try await h.sync.backfillStep() {}
+    #expect(try h.account().backfillDone)
+    try await h.expectMirrorsGmail()
 }

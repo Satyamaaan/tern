@@ -95,6 +95,14 @@ public actor QuotaBudget {
         return delay(for: units, priority: priority, now: now)
     }
 
+    /// Gives back units charged for a request that never reached Gmail.
+    public func refund(_ units: Int) {
+        if let index = spent.lastIndex(where: { $0.units == units }) {
+            spent.remove(at: index)
+            totalUnits -= units
+        }
+    }
+
     /// Stops all calls for the account (Gmail asked to wait, or its retries ran out).
     public func pause(seconds: Double) {
         let until = clock.now().addingTimeInterval(max(1, seconds))
@@ -172,7 +180,14 @@ struct BudgetedGmail: GmailAPI {
 
     func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread] {
         guard !ids.isEmpty else { return [] }
-        return try await charge(ids.count * quota.threadCost(format)) { try await base.threads(ids: ids, format: format) }
+        let units = ids.count * quota.threadCost(format)
+        do {
+            return try await charge(units) { try await base.threads(ids: ids, format: format) }
+        } catch GmailAPIError.server(501, GmailThread.unsupported) {
+            // The client has no threads.get; nothing reached Gmail.
+            await budget.refund(units)
+            throw GmailAPIError.server(status: 501, message: GmailThread.unsupported)
+        }
     }
 
     func history(startHistoryId: String, pageToken: String?) async throws -> GmailHistoryPage {

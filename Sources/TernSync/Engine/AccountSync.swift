@@ -56,6 +56,10 @@ public actor AccountSync {
     var completeThreads = Set<String>()
     /// Threads next to the selection, waiting for their bodies.
     var adjacentQueue: [String] = []
+    /// Messages whose body couldn't be fetched this run; the trickle skips them.
+    var failedBodies = Set<String>()
+    /// Set by `kick`; long bulk work checks it to send queued actions without waiting.
+    var actionsWaiting = false
     /// The client has no threads.get; fall back to messages.get.
     var threadsUnsupported = false
     private var wakeRequested = false
@@ -104,7 +108,16 @@ public actor AccountSync {
 
     /// Drains queued ops now (call after `MailStore.perform`).
     public func kick() {
+        actionsWaiting = true
         wake()
+    }
+
+    /// Sends queued actions now if any arrived; long bulk work (a full resync) calls this between
+    /// requests so user actions never wait for it.
+    func serviceActions() async throws {
+        guard actionsWaiting else { return }
+        actionsWaiting = false
+        try await QuotaPriority.$current.withValue(.interactive) { try await drainOps() }
     }
 
     /// After the account signs in again (`syncState == .needsAuth`), continues with a fresh client.
@@ -162,6 +175,7 @@ public actor AccountSync {
     public func syncOnce() async throws -> Bool {
         try await prepare()
         if account.historyId == nil { try await startInitialSync() }
+        actionsWaiting = false
         try await drainOps()
 
         let now = clock.now()
@@ -369,6 +383,7 @@ public actor AccountSync {
     func retryDelay(for error: GmailAPIError, attempt: Int) -> Double? {
         switch error {
         case .network: return backoff(attempt)
+        case .server(501, GmailThread.unsupported): return nil
         case .server(let status, _) where status >= 500: return backoff(attempt)
         default: return nil
         }

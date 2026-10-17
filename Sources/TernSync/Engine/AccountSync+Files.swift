@@ -88,7 +88,8 @@ extension AccountSync {
     }
 
     /// Searches Gmail itself (for mail older than the local backfill), stores any messages not
-    /// stored yet, and returns the matching threads, best match first.
+    /// stored yet (the first `historyFullFetchLimit` in full, the rest as metadata with bodies on
+    /// open), and returns the matching threads, best match first.
     public func serverSearch(query: String, limit: Int) async throws -> [ThreadKey] {
         let page = try await withRetry { [api] in
             try await api.messageIds(query: query, labelIds: [], pageToken: nil, maxResults: max(1, min(limit, 500)))
@@ -97,7 +98,11 @@ extension AccountSync {
         let accountId = self.accountId
         let ids = refs.map(\.id)
         let stored = try await read { db in try MailStore.storedMessageIds(db, accountId: accountId, among: ids) }
-        let missing = try await fetchAndStore(ids.filter { !stored.contains($0) }, format: .full, guardHistory: true)
+        let unstored = ids.filter { !stored.contains($0) }
+        let full = Array(unstored.prefix(configuration.historyFullFetchLimit))
+        let rest = Array(unstored.dropFirst(full.count))
+        let missing = try await fetchAndStore(full, format: .full, guardHistory: true)
+            + fetchAndStore(rest, format: .metadata, guardHistory: true)
         let gone = Set(missing)
         var seen = Set<String>()
         return refs.compactMap { ref in
