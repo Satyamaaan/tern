@@ -273,14 +273,15 @@ public actor TriageQueue {
         return written
     }
 
-    /// AI suggestions only fill gaps: they never replace a rule or manual assignment, and a thread keeps
-    /// at most the latest suggestion.
+    /// AI suggestions only fill gaps: they never replace a rule or manual assignment, never undo a manual
+    /// removal, and a thread keeps at most the latest suggestion.
     private static func assign(_ db: Database, _ key: ThreadKey, project: String?) throws {
         let current = try ThreadProject.filter(Column("accountId") == key.accountId && Column("threadId") == key.threadId).fetchAll(db)
         for link in current where link.source == .ai && link.projectId != project {
             try link.delete(db)
         }
-        guard let project, !current.contains(where: { $0.projectId == project }), try Project.exists(db, key: project) else { return }
+        guard let project, !current.contains(where: { $0.projectId == project }), try Project.exists(db, key: project),
+              try !ProjectRules.isExcluded(db, key, from: project) else { return }
         try ThreadProject(accountId: key.accountId, threadId: key.threadId, projectId: project, source: .ai).insert(db)
     }
 
