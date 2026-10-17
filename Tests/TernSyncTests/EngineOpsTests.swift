@@ -117,6 +117,67 @@ import TernCore
     #expect(try h.inboxThreadIds().contains(seeded[0].threadId), "the local change is rolled back to Gmail's state")
 }
 
+extension Harness {
+    /// Performs `action` while Gmail rejects every batchModify, until its op has failed for good.
+    func failForGood(_ action: MailAction, on threadId: String) async throws {
+        await fake.failNext(100, with: .server(status: 400, message: "Invalid request"), on: .batchModify)
+        try store.perform(action, on: [thread(threadId)])
+        for _ in 0..<12 {
+            try await sync.drainOps()
+            clock.advance(1000)
+        }
+        await fake.clearFailures()
+    }
+
+    func failedCount() throws -> Int {
+        try store.database.reader.read { db in try MailStore.pendingOpCounts(db)[testEmail]?.failed ?? 0 }
+    }
+
+    /// One pass of the run loop with a history poll.
+    func poll() async throws {
+        await sync.syncNow()
+        try await sync.syncOnce()
+    }
+}
+
+@Test func aFailedChangeIsClearedOnceItNoLongerMatters() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 8, inboxEvery: 1)
+    try await h.syncFully()
+
+    // Done again since, successfully: no longer a change that didn't reach Gmail.
+    try await h.failForGood(.archive, on: seeded[0].threadId)
+    #expect(try h.failedCount() == 1)
+    try await h.poll()
+    #expect(try h.failedCount() == 1, "still matters while Gmail doesn't have it")
+    try h.store.perform(.archive, on: [h.thread(seeded[0].threadId)])
+    try await h.poll()
+    #expect(try h.failedCount() == 0)
+
+    // The thread is deleted in Gmail.
+    try await h.failForGood(.markRead, on: seeded[1].threadId)
+    #expect(try h.failedCount() == 1)
+    await h.fake.remoteDelete([seeded[1].id])
+    try await h.poll()
+    #expect(try h.failedCount() == 0)
+
+    // The label it adds is deleted in Gmail.
+    let label = try await h.fake.createLabel(name: "Clients")
+    try await h.sync.syncLabels()
+    try await h.failForGood(.addLabel(label.id), on: seeded[2].threadId)
+    #expect(try h.failedCount() == 1)
+    try await h.fake.deleteLabel(id: label.id)
+    h.clock.advance(h.configuration.labelRefreshInterval + 1)
+    try await h.poll()
+    #expect(try h.failedCount() == 0)
+
+    // The account is removed.
+    try await h.failForGood(.star, on: seeded[3].threadId)
+    #expect(try h.failedCount() == 1)
+    try h.store.removeAccount(testEmail)
+    #expect(try h.ops().isEmpty)
+}
+
 @Test func laterLabelOpsWaitBehindOneThatIsBackingOff() async throws {
     let h = try Harness()
     let seeded = await seed(h.fake, count: 4)

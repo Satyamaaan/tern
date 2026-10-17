@@ -91,3 +91,25 @@ private func count(_ store: MailStore, _ sql: String, _ accountId: String) throw
     await coordinator.shutdown()
     try? FileManager.default.removeItem(at: configuration.attachmentCacheDirectory)
 }
+
+@MainActor
+@Test func aDownloadInFlightWhenItsAccountIsRemovedLeavesNoFile() async throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    let configuration = SyncConfiguration.test()
+    let fake = FakeGmail(email: testEmail, sleep: { _ in })
+    let delivered = await fake.deliver(FakeEmail(subject: "Scan", attachments: [
+        FakeAttachment(filename: "scan.pdf", mimeType: "application/pdf", data: Data("pdf".utf8)),
+    ]))
+    let coordinator = SyncCoordinator(store: store, accounts: [Account(email: testEmail)], apiProvider: { _ in fake },
+                                      encodeDraft: testEncoder, configuration: configuration, clock: EngineTestClock())
+    try await #require(coordinator.sync(for: testEmail)).initialSync()
+    let attachment = try #require(try store.threadDetail(ThreadKey(accountId: testEmail, threadId: delivered.threadId))?.attachments[delivered.id]?.first)
+
+    // The account is removed while the file is on its way.
+    await fake.onNext(.attachment) { try? await coordinator.removeAccount(id: testEmail) }
+    await #expect(throws: SyncError.unknownAccount(testEmail)) { try await coordinator.downloadAttachment(attachment) }
+
+    #expect(!FileManager.default.fileExists(atPath: configuration.attachmentFolder(for: testEmail).path))
+    #expect(try store.accounts().isEmpty)
+    try? FileManager.default.removeItem(at: configuration.attachmentCacheDirectory)
+}

@@ -18,6 +18,7 @@ extension SelfCheck {
         googleClientText()
         offlineSync()
         muteThenUndo()
+        draftsMailbox()
     }
 
     private var services: AppServices { model.services }

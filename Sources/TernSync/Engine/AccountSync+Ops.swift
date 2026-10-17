@@ -424,6 +424,13 @@ extension AccountSync {
         try writeNow { db in
             if var row = try Draft.fetchOne(db, key: draftId), row.accountId == accountId, row.state != .sent {
                 row.gmailDraftId = saved.id
+                if let messageId = saved.message?.id, let replaced = row.gmailMessageId, replaced != messageId,
+                   try Bool.fetchOne(db, sql: "SELECT 1 FROM message WHERE accountId = ? AND id = ? AND isDraft = 1",
+                                     arguments: [accountId, replaced]) == true {
+                    // Gmail replaced the draft's message with a new one. The old one goes now rather than
+                    // when history says so, so the Drafts list never shows the draft twice meanwhile.
+                    try MailStore.deleteServerMessages(db, accountId: accountId, ids: [replaced])
+                }
                 if let messageId = saved.message?.id { row.gmailMessageId = messageId }
                 row.lastError = nil
                 try row.update(db)
@@ -433,6 +440,10 @@ extension AccountSync {
                 try cleanup.insert(db)
             }
             _ = try PendingOp.deleteOne(db, key: opId)
+            // Gmail has this draft now: earlier saves that failed are superseded.
+            try db.execute(sql: """
+                DELETE FROM pending_op WHERE state = 'failed' AND kind = 'saveDraft' AND json_extract(payload, '$.draftId') = ?
+                """, arguments: [draftId])
         }
     }
 
@@ -548,6 +559,17 @@ extension AccountSync {
             draft.lastError = error
             try draft.update(db)
         }
+    }
+
+    /// After each history poll: drops failed ops whose messages, label or draft are gone, or that
+    /// were done again since (`MailStore.pruneFailedOps`), so the failed count only counts what matters.
+    func pruneFailedOps() async throws {
+        let accountId = self.accountId
+        let any = try await read { db in
+            try PendingOp.filter(Column("accountId") == accountId && Column("state") == PendingOp.State.failed.rawValue).fetchCount(db) > 0
+        }
+        guard any else { return }
+        try await write { db in try MailStore.pruneFailedOps(db, accountId: accountId) }
     }
 
     // MARK: Helpers

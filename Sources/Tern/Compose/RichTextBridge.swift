@@ -61,10 +61,13 @@ enum EditorStyle {
         return attributes
     }
 
-    /// Re-derives font, obliqueness, colour and paragraph style from the semantic attributes.
+    /// Re-derives font, obliqueness, colour and paragraph style from the semantic attributes. An inline
+    /// image keeps its attachment.
     static func normalized(_ attributes: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
         var result = self.attributes(style(of: attributes), link: linkString(attributes[.link]), block: block(of: attributes))
-        if let spelling = attributes[.spellingState] { result[.spellingState] = spelling }
+        for key in [NSAttributedString.Key.spellingState, .attachment, .ternImage] {
+            if let value = attributes[key] { result[key] = value }
+        }
         return result
     }
 
@@ -91,11 +94,17 @@ enum EditorStyle {
 
 /// Converts between `RichText` and the editor's attributed string.
 enum RichTextBridge {
-    static func attributedString(_ text: RichText) -> NSAttributedString {
+    /// `images` draws each inline image from its `src`; nil shows a placeholder.
+    static func attributedString(_ text: RichText, images: (String) -> NSImage? = { _ in nil }) -> NSAttributedString {
         let result = NSMutableAttributedString()
         for (index, block) in text.blocks.enumerated() {
             for run in block.runs {
-                result.append(NSAttributedString(string: run.text, attributes: EditorStyle.attributes(run.style, link: run.link, block: block.kind)))
+                let attributes = EditorStyle.attributes(run.style, link: run.link, block: block.kind)
+                if let source = run.image {
+                    result.append(InlineImages.attachment(source, image: images(source), attributes: attributes))
+                } else {
+                    result.append(NSAttributedString(string: run.text, attributes: attributes))
+                }
             }
             if index < text.blocks.count - 1 {
                 result.append(NSAttributedString(string: "\n", attributes: EditorStyle.attributes(block: block.kind)))
@@ -105,6 +114,7 @@ enum RichTextBridge {
     }
 
     /// Paragraphs split on newlines; each paragraph's kind comes from its first character (or its newline).
+    /// Attachment characters stay only as the inline images they show.
     static func richText(_ attributed: NSAttributedString) -> RichText {
         let string = attributed.string as NSString
         var blocks: [RichText.Block] = []
@@ -119,9 +129,15 @@ enum RichTextBridge {
             var runs: [RichText.Run] = []
             if end > start {
                 attributed.enumerateAttributes(in: NSRange(location: start, length: end - start)) { attributes, range, _ in
-                    let text = string.substring(with: range).replacingOccurrences(of: "\u{FFFC}", with: "")
+                    let substring = string.substring(with: range)
+                    let style = EditorStyle.style(of: attributes), link = EditorStyle.linkString(attributes[.link])
+                    if let source = attributes[.ternImage] as? String {
+                        for character in substring where character == RichText.imageCharacter { runs.append(.image(source, link: link)) }
+                        return
+                    }
+                    let text = substring.replacingOccurrences(of: String(RichText.imageCharacter), with: "")
                     guard !text.isEmpty else { return }
-                    runs.append(RichText.Run(text, style: EditorStyle.style(of: attributes), link: EditorStyle.linkString(attributes[.link])))
+                    runs.append(RichText.Run(text, style: style, link: link))
                 }
             }
             blocks.append(RichText.Block(kind, runs))

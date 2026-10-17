@@ -65,3 +65,32 @@ private typealias Run = RichText.Run
     let font = editor.textView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
     #expect(font?.pointSize == EditorStyle.fontSize)
 }
+
+@MainActor
+@Test func inlineImagesRoundTripThroughTheEditor() throws {
+    let picture = NSImage(size: NSSize(width: 800, height: 400))
+    let text = RichText([
+        Block(.paragraph, [Run("See "), .image("cid:chart"), Run(" and "), .image("cid:missing", link: "https://x.dev")]),
+        Block(.bullet, [.image("cid:chart")]),
+    ])
+    let attributed = RichTextBridge.attributedString(text, images: { $0 == "cid:chart" ? picture : nil })
+    #expect(RichTextBridge.richText(attributed) == text)
+    let chart = try #require(attributed.attribute(.attachment, at: 4, effectiveRange: nil) as? NSTextAttachment)
+    #expect(chart.image === picture && chart.bounds.size == NSSize(width: 360, height: 180), "scaled to fit")
+    let missing = try #require(attributed.attribute(.attachment, at: 10, effectiveRange: nil) as? NSTextAttachment)
+    #expect(missing.image === InlineImages.placeholder)
+
+    let editor = BodyEditorController(insets: NSSize(width: 16, height: 10), minTextHeight: 60)
+    editor.imageSource = { $0 == "cid:chart" ? picture : nil }
+    editor.richText = text
+    editor.textView.setSelectedRange(NSRange(location: 0, length: editor.textView.string.utf16.count))
+    editor.toggle(.bold)
+    editor.setBlock(.quote)
+    #expect(editor.richText.blocks.flatMap(\.runs).compactMap(\.image) == ["cid:chart", "cid:missing", "cid:chart"],
+            "formatting keeps the images")
+
+    editor.imageSource = { _ in picture }
+    editor.reloadImages()
+    let reloaded = try #require(editor.textView.textStorage?.attribute(.attachment, at: 10, effectiveRange: nil) as? NSTextAttachment)
+    #expect(reloaded.image === picture)
+}

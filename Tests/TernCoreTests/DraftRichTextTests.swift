@@ -106,6 +106,24 @@ private typealias Run = RichText.Run
     #expect(content.body.plainText.hasPrefix("Hello"))
 }
 
+@Test func inlineImagesStayInADraftsBody() {
+    let html = #"<div>Before <img src="cid:ii_logo" alt="logo"> after</div><div><a href="https://x.dev"><img src="CID:badge"></a></div><img src="https://x.dev/pixel.gif">"#
+    let kept = RichText(html: html, keepingImages: true)
+    #expect(kept.blocks == [
+        Block(.paragraph, [Run("Before "), .image("cid:ii_logo"), Run(" after")]),
+        Block(.paragraph, [.image("CID:badge", link: "https://x.dev")]),
+    ], "only images the draft carries as files stay")
+    #expect(kept.html == #"<div>Before <img src="cid:ii_logo" alt=""> after</div><div><a href="https://x.dev"><img src="CID:badge" alt=""></a></div>"#)
+    #expect(RichText(html: kept.html, keepingImages: true) == kept)
+    #expect(kept.plainText == "Before  after\n")
+    #expect(!RichText([Block(.paragraph, [.image("cid:x")])]).isEmpty, "an image alone is content")
+    #expect(RichText(html: html).blocks.map(\.text) == ["Before after"], "pasted HTML keeps no images")
+
+    let content = DraftContent(stored: Draft(accountId: "a", bodyHtml: html))
+    #expect(content.body == kept)
+    #expect(content.html.contains(#"<img src="cid:ii_logo" alt="">"#))
+}
+
 @Test func importedLinksKeepOnlyWebMailAndPhoneSchemes() {
     let text = RichText(html: """
         <p><a href="java&#10;script:alert(1)">a</a> <a href="JAVASCRIPT:x">b</a> <a href="data:text/html,x">c</a> \

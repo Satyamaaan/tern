@@ -283,6 +283,7 @@ final class AppModel {
             checked = []
             setCursor(key, open: true)
             recordSearch()
+            openDraft(key)
         }
     }
 
@@ -333,6 +334,7 @@ final class AppModel {
             services.reader.toggleMessage()
             return
         }
+        if openDraft(cursor) { return }
         focus = .reader
         if listOnly { readerExpanded = true }
         markRead([cursor])

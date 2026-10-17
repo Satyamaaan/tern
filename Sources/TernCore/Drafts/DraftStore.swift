@@ -141,6 +141,29 @@ public struct DraftStore: Sendable {
             .fetchOne(db)
     }
 
+    /// The newest DRAFT message stored in a thread, written here or in Gmail; `importDraftMessage`
+    /// opens it.
+    public func draftMessage(inThread key: ThreadKey) throws -> MessageKey? {
+        try database.reader.read { db in try Self.draftMessage(db, inThread: key, linked: true) }
+    }
+
+    /// The Gmail draft r continues in a thread: its newest DRAFT message no local draft is linked to
+    /// (one written in Gmail), unless a reply is already being written here.
+    public func gmailReplyDraft(inThread key: ThreadKey) throws -> MessageKey? {
+        try database.reader.read { db in
+            guard try Self.editingDraft(db, thread: key, kinds: [.reply, .replyAll]) == nil else { return nil }
+            return try Self.draftMessage(db, inThread: key, linked: false)
+        }
+    }
+
+    private static func draftMessage(_ db: Database, inThread key: ThreadKey, linked: Bool) throws -> MessageKey? {
+        let unlinked = linked ? "" : " AND NOT EXISTS (SELECT 1 FROM draft d WHERE d.accountId = m.accountId AND d.gmailMessageId = m.id)"
+        return try String.fetchOne(db, sql: """
+            SELECT m.id FROM message m WHERE m.accountId = ? AND m.threadId = ? AND m.isDraft = 1\(unlinked)
+            ORDER BY m.date DESC LIMIT 1
+            """, arguments: [key.accountId, key.threadId]).map { MessageKey(accountId: key.accountId, messageId: $0) }
+    }
+
     /// Opens a Gmail draft that only exists as a `DRAFT` message (e.g. written in the browser): the
     /// local draft linked to it, or new content carrying its `gmailMessageId` (saved on first edit).
     /// Its files come along as attachments still in Gmail, fetched when it's saved or sent, and inline
@@ -206,6 +229,8 @@ public struct DraftStore: Sendable {
             return fresh
         }
         guard stored.state == .editing || stored.state == .failed else { return nil }
+        // Taken back to edit or send again: an earlier failed send no longer needs a notice.
+        try deleteOps(db, draftId: stored.id, kinds: [.sendDraft], states: [.failed])
         if stored.accountId != draft.accountId {
             // The Gmail draft lives in the old account: remove it there and start again in the new one.
             if let gmailDraftId = stored.gmailDraftId {
@@ -426,11 +451,13 @@ public struct DraftStore: Sendable {
             .fetchAll(db)
     }
 
-    /// Removes ops the engine hasn't started.
-    static func deleteOps(_ db: Database, draftId: String, kinds: [PendingOp.Kind]) throws {
+    /// Removes ops the engine hasn't started, and ones that failed for good (nothing will send them
+    /// again; dropping them clears their "didn't reach Gmail" notice).
+    static func deleteOps(_ db: Database, draftId: String, kinds: [PendingOp.Kind],
+                          states: [PendingOp.State] = [.pending, .failed]) throws {
         _ = try PendingOp
             .filter(kinds.map(\.rawValue).contains(Column("kind")))
-            .filter(Column("state") == PendingOp.State.pending.rawValue)
+            .filter(states.map(\.rawValue).contains(Column("state")))
             .filter(sql: "json_extract(payload, '$.draftId') = ?", arguments: [draftId])
             .deleteAll(db)
     }

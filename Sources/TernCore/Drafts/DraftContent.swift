@@ -30,11 +30,12 @@ public struct DraftContent: Hashable, Sendable {
         self.draft.bodyHtml = html
     }
 
-    /// Splits a stored draft back into body, signature and quote.
+    /// Splits a stored draft back into body, signature and quote. Inline images the draft carries
+    /// stay in the body.
     public init(stored draft: Draft) {
         let parts = Self.split(draft.bodyHtml)
         self.draft = draft
-        self.body = RichText(html: parts.body)
+        self.body = RichText(html: parts.body, keepingImages: true)
         self.signatureHtml = parts.signature
         self.quoteHtml = parts.quote
     }

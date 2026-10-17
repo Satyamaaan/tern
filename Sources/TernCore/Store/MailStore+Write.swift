@@ -40,9 +40,31 @@ extension MailStore {
         try db.execute(sql: "DELETE FROM setting WHERE key IN (\(databaseQuestionMarks(count: keys.count)))",
                        arguments: StatementArguments(keys))
         try db.execute(sql: "DELETE FROM setting WHERE key = ? AND value = ?", arguments: [DraftStore.SettingKey.defaultAccount, id])
+        let account = try Account.fetchOne(db, key: id)
+        let labelIds = try String.fetchAll(db, sql: "SELECT id FROM label WHERE accountId = ?", arguments: [id])
         _ = try Account.deleteOne(db, key: id)
+        try deleteRulesOnlyFor(db, account: account, labelIds: labelIds)
         try rebuildContacts(db)
         return files
+    }
+
+    /// Project rules that can only ever match the removed account: an account rule naming it, a label
+    /// rule naming one of its label ids. Rules naming something another account still has stay, and
+    /// so do the projects.
+    private static func deleteRulesOnlyFor(_ db: Database, account: Account?, labelIds: [String]) throws {
+        let remaining = try Account.fetchAll(db)
+        let remainingNames = Set(remaining.flatMap { [$0.id, $0.email.lowercased(), $0.displayName.lowercased()] })
+        let remainingLabels = Set(try Row.fetchAll(db, sql: "SELECT id, name FROM label").flatMap { row -> [String] in
+            [row["id"], (row["name"] as String).lowercased()]
+        })
+        let names = account.map { Set([$0.id, $0.email.lowercased(), $0.displayName.lowercased()].filter { !$0.isEmpty }) } ?? []
+        for rule in try ProjectRule.filter([ProjectRule.Field.account.rawValue, ProjectRule.Field.label.rawValue].contains(Column("field"))).fetchAll(db) {
+            let value = rule.value.trimmingCharacters(in: .whitespaces)
+            let onlyThatAccount = rule.field == .account
+                ? names.contains(value.lowercased()) && !remainingNames.contains(value.lowercased())
+                : labelIds.contains(value) && !remainingLabels.contains(value) && !remainingLabels.contains(value.lowercased())
+            if onlyThatAccount { try rule.delete(db) }
+        }
     }
 
     /// The `setting` keys kept for one account: its signature, sender name and Muted label.
@@ -276,7 +298,9 @@ extension MailStore {
         "refs", "listUnsubscribe", "listUnsubscribePost", "sizeEstimate", "searchSender", "searchRecipients",
     ]
 
-    private static let bodyColumns: Set<String> = ["bodyText", "bodyHtml", "bodyState"]
+    /// Columns only a full fetch knows (the body, and whether it has files): a metadata-only record
+    /// never overwrites them for a message stored with its body.
+    private static let bodyColumns: Set<String> = ["bodyText", "bodyHtml", "bodyState", "hasAttachments"]
 
     private static let upsertMessageSQL: String = {
         let names = messageColumns.joined(separator: ", ")

@@ -95,6 +95,19 @@ import Testing
             forwardWindow.appearance = appearance
             try render(forwardWindow, "window-forward-\(suffix)")
 
+            // A draft written in Gmail with an image in its body.
+            let chart = services.draftFilesDirectory!.appendingPathComponent("chart.png")
+            try FileManager.default.createDirectory(at: services.draftFilesDirectory!, withIntermediateDirectories: true)
+            try Self.chartPNG().write(to: chart)
+            let imaged = ComposerModel(content: DraftContent(stored: Draft(
+                accountId: northwind, toList: [Participant(name: "Maya Chen", email: "maya@lumen.io")], subject: "Q3 numbers",
+                bodyHtml: #"<div>Here's the chart from the review:</div><div><img src="cid:chart"></div><div>Revenue is up 18% on Q2.</div>"#,
+                attachments: [DraftAttachment(path: chart.path, filename: "chart.png", mimeType: "image/png", size: 1, contentId: "chart")])),
+                services: services, mode: .window)
+            let imagedWindow = Composer.makeWindow(for: imaged)
+            imagedWindow.appearance = appearance
+            try render(imagedWindow, "window-inline-image-\(suffix)")
+
             // Inline: collapsed reply, expanded reply all.
             let inline = try #require(ComposerModel(request: .reply(threads.reply, all: false), services: services, mode: .inline))
             inline.editor.richText = RichText(plainText: "Sounds good — see you Thursday.")
@@ -152,6 +165,20 @@ import Testing
                 """)
             return Threads(reply: reply, replyAll: replyAll, forward: forward)
         }
+    }
+
+    /// A small bar chart, as a PNG.
+    static func chartPNG() throws -> Data {
+        let image = NSImage(size: NSSize(width: 480, height: 220), flipped: false) { rect in
+            NSColor(white: 0.96, alpha: 1).setFill()
+            rect.fill()
+            for (index, height) in [90.0, 130, 110, 170].enumerated() {
+                NSColor(red: 0.25, green: 0.45, blue: 0.85, alpha: 1).setFill()
+                NSBezierPath(roundedRect: CGRect(x: 50 + Double(index) * 105, y: 20, width: 70, height: height), xRadius: 4, yRadius: 4).fill()
+            }
+            return true
+        }
+        return try #require(image.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) })
     }
 
     // MARK: Rendering

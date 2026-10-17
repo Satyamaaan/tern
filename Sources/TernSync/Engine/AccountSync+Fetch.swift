@@ -366,7 +366,8 @@ extension AccountSync {
     /// backfilling, the thread is first checked for messages not stored yet (threads.get metadata,
     /// 40 units), unless it was fetched whole this run.
     public func fetchBodies(_ thread: ThreadKey) async throws {
-        guard thread.accountId == accountId else { return }
+        // A Drafts row for a draft Gmail has no copy of has nothing to fetch.
+        guard thread.accountId == accountId, MailThread.localDraftId(in: thread) == nil else { return }
         let accountId = self.accountId
         let threadId = thread.threadId
         let local = try await read { db in

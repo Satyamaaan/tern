@@ -36,6 +36,8 @@ public actor AccountSync {
 
     var isActive = true
     var paused = false
+    /// The account is being removed (`retire`).
+    private(set) var retired = false
     var prepared = false
     var pollRequested = true
     var nextPollAt = Date.distantPast
@@ -111,6 +113,12 @@ public actor AccountSync {
         } else {
             nextPollAt = min(nextPollAt, clock.now().addingTimeInterval(configuration.inactivePollInterval))
         }
+    }
+
+    /// The account is being removed: a download still in flight throws away what it fetched instead
+    /// of writing it into the account's cache or a draft's folder after they're deleted.
+    public func retire() {
+        retired = true
     }
 
     /// Polls history now.
@@ -203,6 +211,7 @@ public actor AccountSync {
             } catch GmailAPIError.historyExpired {
                 try await fullResync()
             }
+            try await pruneFailedOps()
         }
 
         let more = try await backgroundStep()
@@ -271,7 +280,8 @@ public actor AccountSync {
 
     /// Asks for the bodies of threads next to the selection; fetched when the quota allows.
     public func prefetchAdjacent(_ threads: [ThreadKey]) {
-        adjacentQueue = Array(threads.filter { $0.accountId == accountId }.map(\.threadId).prefix(configuration.adjacentPrefetchLimit))
+        adjacentQueue = Array(threads.filter { $0.accountId == accountId && MailThread.localDraftId(in: $0) == nil }
+            .map(\.threadId).prefix(configuration.adjacentPrefetchLimit))
         if !adjacentQueue.isEmpty { wake() }
     }
 

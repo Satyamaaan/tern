@@ -17,8 +17,11 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     var onImage: (Data, String) -> Void = { _, _ in }
     /// Height of text plus accessory, for editors that grow with their content.
     var onHeightChange: (CGFloat) -> Void = { _ in }
+    /// The picture for an inline image's `src`; nil shows a placeholder until `reloadImages()`.
+    var imageSource: (String) -> NSImage? = { _ in nil }
 
     private let layoutDelegate = EditorLayoutDelegate()
+    private let imageParagraphs = InlineImageParagraphs()
     private var formattingBar: NSHostingView<FormattingBar>?
     private var formattingTimer: Timer?
     private var linkPopover: NSPopover?
@@ -32,6 +35,7 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
         textView.editor = self
         textView.delegate = self
         textView.textLayoutManager?.delegate = layoutDelegate
+        textView.textContentStorage?.delegate = imageParagraphs
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
         textView.textContainerInset = insets
@@ -69,7 +73,7 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     var richText: RichText {
         get { RichTextBridge.richText(textView.attributedString()) }
         set {
-            textView.textStorage?.setAttributedString(RichTextBridge.attributedString(newValue))
+            textView.textStorage?.setAttributedString(RichTextBridge.attributedString(newValue, images: imageSource))
             textView.typingAttributes = EditorStyle.attributes()
             textView.undoManager?.removeAllActions()
             contentDidChange()
@@ -81,11 +85,27 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     /// Replaces the whole body as one undoable edit (AI drafts).
     func replaceBody(with text: RichText) {
         let range = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
-        let replacement = RichTextBridge.attributedString(text)
+        let replacement = RichTextBridge.attributedString(text, images: imageSource)
         guard textView.shouldChangeText(in: range, replacementString: replacement.string) else { return }
         textView.textStorage?.replaceCharacters(in: range, with: replacement)
         textView.didChangeText()
         textView.setSelectedRange(NSRange(location: replacement.length, length: 0))
+    }
+
+    /// Draws the inline images again from `imageSource`, e.g. once their files have arrived. Not an edit.
+    func reloadImages() {
+        guard let storage = textView.textStorage else { return }
+        var images: [(NSRange, NSTextAttachment)] = []
+        storage.enumerateAttribute(.ternImage, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let source = value as? String else { return }
+            images.append((range, InlineImages.textAttachment(imageSource(source))))
+        }
+        guard !images.isEmpty else { return }
+        storage.beginEditing()
+        for (range, attachment) in images { storage.addAttribute(.attachment, value: attachment, range: range) }
+        storage.endEditing()
+        if let manager = textView.textLayoutManager { manager.invalidateLayout(for: manager.documentRange) }
+        document.relayout()
     }
 
     /// Lays the SwiftUI accessory (signature, quote, attachments) under the text.

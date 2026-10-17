@@ -50,6 +50,30 @@ private func makeStore() throws -> MailStore {
     #expect(detail.messages.first?.bodyText == "Full body")
 }
 
+@Test func metadataUpsertKeepsWhatOnlyTheBodyTells() throws {
+    let store = try makeStore()
+    var full = message("m1", thread: "t1", date: 100, labels: ["INBOX"], body: "See attached")
+    full.hasAttachments = true
+    try store.upsertMessages([full], attachments: [
+        MailAttachment(accountId: account.id, messageId: "m1", partId: "1", filename: "a.pdf", mimeType: "application/pdf", size: 10),
+    ])
+    var metadata = message("m1", thread: "t1", date: 100, labels: ["INBOX", "STARRED"], body: "")
+    metadata.bodyText = nil
+    metadata.bodyState = .metadata
+    metadata.hasAttachments = false
+    try store.upsertMessages([metadata])
+    let detail = try #require(try store.threadDetail(ThreadKey(accountId: account.id, threadId: "t1")))
+    #expect(detail.messages.first?.hasAttachments == true)
+    #expect(detail.thread.hasAttachments)
+    #expect(detail.messages.first?.isStarred == true, "labels still come from the metadata")
+
+    // A later full fetch still decides.
+    var refetched = full
+    refetched.hasAttachments = false
+    try store.upsertMessages([refetched])
+    #expect(try store.threadDetail(ThreadKey(accountId: account.id, threadId: "t1"))?.messages.first?.hasAttachments == false)
+}
+
 @Test func archiveAppliesLocallyQueuesAndUndoes() throws {
     let store = try makeStore()
     try store.upsertMessages([

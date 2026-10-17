@@ -135,3 +135,47 @@ private func ops(_ services: AppServices) throws -> [PendingOp] {
     #expect(!press("j", .command)) // AI is off
     #expect(!press("x", .command))
 }
+
+@MainActor
+@Test func aGmailDraftsInlineImageIsShownAndKeptInline() async throws {
+    let (services, _) = try makeServices()
+    let png = try #require(NSImage(size: NSSize(width: 40, height: 20), flipped: false) { rect in
+        NSColor.red.setFill()
+        rect.fill()
+        return true
+    }.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) })
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("tern-inline-\(UUID().uuidString).png")
+    try png.write(to: file)
+    var fetched: [MailAttachment] = []
+    services.loadAttachment = { attachment in
+        fetched.append(attachment)
+        return file
+    }
+    try await services.store.database.writer.write { db in
+        try MailStore.upsertMessages(db, [
+            MailMessage(accountId: "me@example.com", id: "d1", threadId: "t2", date: Date(timeIntervalSince1970: 200),
+                        fromEmail: "me@example.com", toList: [Participant(email: "maya@lumen.io")], subject: "Chart",
+                        bodyText: "Here", bodyHtml: #"<div>Here<img src="cid:ii_chart"></div>"#, bodyState: .full, labelIds: ["DRAFT"]),
+        ], attachments: [
+            MailAttachment(accountId: "me@example.com", messageId: "d1", partId: "1", attachmentId: "att-1",
+                           filename: "chart.png", mimeType: "image/png", size: png.count, contentId: "ii_chart", isInline: true),
+        ])
+    }
+
+    let model = try #require(ComposerModel(draftMessage: MessageKey(accountId: "me@example.com", messageId: "d1"),
+                                           services: services, mode: .window))
+    let storage = try #require(model.editor.textView.textStorage)
+    #expect((storage.attribute(.attachment, at: 4, effectiveRange: nil) as? NSTextAttachment)?.image === InlineImages.placeholder)
+    for _ in 0..<50 where model.fetchedImages.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(fetched.map(\.partId) == ["1"])
+    let shown = try #require(storage.attribute(.attachment, at: 4, effectiveRange: nil) as? NSTextAttachment)
+    #expect(shown.image !== InlineImages.placeholder && shown.bounds.size == NSSize(width: 40, height: 20))
+
+    model.editor.textView.setSelectedRange(NSRange(location: storage.length, length: 0))
+    model.editor.textView.insertText(" — thoughts?", replacementRange: model.editor.textView.selectedRange())
+    model.persist()
+    await model.waitForWrites()
+    let saved = try #require(try services.drafts.draft(id: model.id))
+    #expect(saved.bodyHtml == #"<div>Here<img src="cid:ii_chart" alt=""> — thoughts?</div>"#)
+    #expect(saved.attachments.map(\.contentId) == ["ii_chart"])
+}
