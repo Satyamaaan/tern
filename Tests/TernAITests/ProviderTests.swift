@@ -65,17 +65,15 @@ private func directoryIsEmpty(_ path: String) -> Bool {
     let arguments = CodexCLIProvider.arguments(
         model: "quick-model", effort: .fast, workDirectory: "/tmp/x/work", schemaPath: "/tmp/x/schema.json",
         answerPath: "/tmp/x/answer.txt", flags: CLIBackend.flags(in: codexHelp))
-    #expect(arguments == [
+    var expected: [String] = [
         "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
         "--sandbox", "read-only", "--color", "never", "--cd", "/tmp/x/work", "--model", "quick-model",
         "-c", #"model_reasoning_effort="low""#, "-c", #"approval_policy="never""#, "-c", #"web_search="disabled""#,
-        "-c", "tools.web_search=false",
-        "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", "features.apps=false",
-        "-c", "features.plugins=false", "-c", "features.hooks=false", "-c", "features.image_generation=false",
-        "-c", "features.browser_use=false", "-c", "features.computer_use=false", "-c", "features.view_image=false",
-        "-c", "features.memories=false", "-c", "features.web_search_request=false",
-        "--output-schema", "/tmp/x/schema.json", "--output-last-message", "/tmp/x/answer.txt", "-",
-    ])
+        "-c", "tools.web_search=false", "-c", "tools.view_image=false",
+    ]
+    for feature in CodexCLIProvider.disabledFeatures { expected += ["-c", "features.\(feature)=false"] }
+    expected += ["--output-schema", "/tmp/x/schema.json", "--output-last-message", "/tmp/x/answer.txt", "-"]
+    #expect(arguments == expected)
     // An older version without the optional flags still gets the sandbox and stdin prompt.
     let old = CodexCLIProvider.arguments(
         model: nil, effort: .careful, workDirectory: "/w", schemaPath: nil, answerPath: "/a",
@@ -85,6 +83,43 @@ private func directoryIsEmpty(_ path: String) -> Bool {
     #expect(old.last == "-")
 }
 
+private let codexFeatures = """
+    apps                                     stable             true
+    api_key_model_discovery                  stable             true
+    brand_new_agent_tool                     stable             true
+    code_mode_host                           stable             true
+    enable_request_compression               stable             true
+    goals                                    stable             true
+    memories                                 stable             false
+    multi_agent                              stable             true
+    sqlite                                   removed            true
+    shiny_preview_tool                       under development  true
+    some.odd=name                            stable             true
+    """
+
+@Test func codexSwitchesOffEveryEnabledFeatureOutsideTheAllowList() {
+    let enabled = CodexCLIProvider.enabledFeatures(inList: codexFeatures)
+    #expect(enabled == ["apps", "api_key_model_discovery", "brand_new_agent_tool", "code_mode_host",
+                        "enable_request_compression", "goals", "multi_agent", "shiny_preview_tool"])
+    let arguments = CodexCLIProvider.arguments(
+        model: nil, effort: .fast, workDirectory: "/w", schemaPath: nil, answerPath: "/a",
+        flags: CLIBackend.flags(in: codexHelp), enabledFeatures: enabled)
+    let disabled = Set(stride(from: 0, to: arguments.count - 1, by: 1).compactMap { index -> String? in
+        guard arguments[index] == "-c", arguments[index + 1].hasPrefix("features."), arguments[index + 1].hasSuffix("=false") else { return nil }
+        return String(arguments[index + 1].dropFirst("features.".count).dropLast("=false".count))
+    })
+    for name in ["brand_new_agent_tool", "shiny_preview_tool", "code_mode_host", "multi_agent", "goals", "apps"] {
+        #expect(disabled.contains(name), "\(name) stays on")
+    }
+    #expect(!disabled.contains("api_key_model_discovery") && !disabled.contains("enable_request_compression"))
+    #expect(!disabled.contains("sqlite"), "removed features do nothing")
+    #expect(!arguments.contains { $0.contains("some.odd") })
+    #expect(disabled.isSuperset(of: CodexCLIProvider.disabledFeatures), "the static list is a floor")
+    #expect(CodexCLIProvider.arguments(
+        model: nil, effort: .fast, workDirectory: "/w", schemaPath: nil, answerPath: "/a", flags: [], enabledFeatures: enabled
+    ).filter { $0.hasPrefix("features.") }.count == disabled.count, "same list whatever the help text says")
+}
+
 @Test func codexCallRunsInEmptyDirectoryWithPromptOnStdin() async throws {
     let runner = FakeRunner { invocation in
         switch invocation.arguments.first {
@@ -92,6 +127,8 @@ private func directoryIsEmpty(_ path: String) -> Bool {
             return ProcessResult(exitCode: 0, stdout: codexHelp)
         case "debug":
             return ProcessResult(exitCode: 0, stdout: catalog)
+        case "features":
+            return ProcessResult(exitCode: 0, stdout: codexFeatures)
         default:
             let arguments = invocation.arguments
             #expect(directoryIsEmpty(try #require(invocation.currentDirectory)))
@@ -110,6 +147,7 @@ private func directoryIsEmpty(_ path: String) -> Bool {
     let call = try #require(runner.invocations.last)
     #expect(call.executable == "/opt/homebrew/bin/codex")
     #expect(call.arguments.contains("quick-model"))
+    #expect(call.arguments.contains("features.brand_new_agent_tool=false"), "features the installed version reports are switched off")
     #expect(!call.arguments.joined(separator: " ").contains("SECRET"))
     #expect(String(decoding: try #require(call.stdin), as: UTF8.self) == "Classify.\n\nSECRET MAIL BODY")
     #expect(runner.timeouts.last == 42)

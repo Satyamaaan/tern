@@ -1,4 +1,5 @@
 import AppKit
+import os
 import Quartz
 import TernCore
 import WebKit
@@ -16,8 +17,9 @@ protocol ReaderWebDelegate: AnyObject {
 /// The one long-lived web view every reader shares. Created and loaded once (call `prewarm()` at
 /// launch), its background is transparent before the first paint, and threads are shown by injecting
 /// content into the loaded page, never by navigating. Mail can't run script (page CSP plus
-/// `allowsContentJavaScript = false`), can't navigate, and can't load remote content unless the
-/// current thread's sender is trusted (`WKContentRuleList`).
+/// `allowsContentJavaScript = false`), can't navigate, and can't load anything over http(s): the CSP
+/// and a `WKContentRuleList` both refuse it. Images of trusted messages arrive through signed
+/// `tern-remote:` URLs (`ReaderRemoteImages`) instead, so trust applies per message.
 @MainActor
 final class ReaderWebEngine: NSObject {
     static let shared = ReaderWebEngine()
@@ -25,12 +27,15 @@ final class ReaderWebEngine: NSObject {
     let webView: ReaderWebView
     let world = WKContentWorld.world(name: "tern-reader")
     weak var delegate: ReaderWebDelegate?
-    private(set) var isReady = false
+    /// The page has loaded and the content blocker has been installed (or failed to compile).
+    var isReady: Bool { pageReady && rulesSettled }
+    /// False when the content blocker couldn't be installed; then no message may load remote images.
+    private(set) var blocksRemoteLoads = false
+    private var pageReady = false
+    private var rulesSettled = false
     private var queued: [() -> Void] = []
-    private var blockAll: WKContentRuleList?
-    private var allowImages: WKContentRuleList?
-    private var remoteImagesAllowed = false
     private let schemes = ReaderSchemeHandler()
+    private static let log = Logger(subsystem: "dev.tern.mail", category: "Reader")
 
     /// Creates the shared web view and starts loading the reader page.
     static func prewarm() { _ = shared }
@@ -44,6 +49,7 @@ final class ReaderWebEngine: NSObject {
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.setURLSchemeHandler(schemes, forURLScheme: "tern-app")
         configuration.setURLSchemeHandler(schemes, forURLScheme: MailSanitizer.contentIdScheme)
+        configuration.setURLSchemeHandler(schemes, forURLScheme: ReaderRemoteImages.scheme)
         webView = ReaderWebView(frame: NSRect(x: 0, y: 0, width: 700, height: 800), configuration: configuration)
         super.init()
         schemes.engine = self
@@ -60,7 +66,7 @@ final class ReaderWebEngine: NSObject {
     }
 
     private func loadPage() {
-        isReady = false
+        pageReady = false
         webView.loadHTMLString(ReaderResources.page(), baseURL: URL(string: "tern-app://reader/"))
     }
 
@@ -84,40 +90,35 @@ final class ReaderWebEngine: NSObject {
     }
     func clear() { run("Tern.clear()") }
 
-    /// Swaps the content blocker; remote images load only for trusted senders.
-    func setRemoteImages(allowed: Bool) {
-        guard allowed != remoteImagesAllowed else { return }
-        remoteImagesAllowed = allowed
-        applyRuleList()
-    }
-
-    private func applyRuleList() {
-        let controller = webView.configuration.userContentController
-        controller.removeAllContentRuleLists()
-        if let list = remoteImagesAllowed ? allowImages : blockAll { controller.add(list) }
-    }
-
+    /// Installs the content blocker that refuses every http(s) load. Mail isn't shown until it settles;
+    /// if it can't be compiled, `blocksRemoteLoads` stays false and the reader loads no remote images.
     private func compileRuleLists() {
-        guard let store = WKContentRuleListStore.default() else { return }
         let block = #"[{"trigger":{"url-filter":"^[hH][tT][tT][pP][sS]?:"},"action":{"type":"block"}}]"#
-        let trackers = MailHTMLPolicyBridge.trackerPatterns.map {
-            #"{"trigger":{"url-filter":"\#($0)"},"action":{"type":"block"}}"#
-        }.joined(separator: ",")
-        let images = #"[{"trigger":{"url-filter":"^[hH][tT][tT][pP][sS]?:"},"action":{"type":"block"}},"#
-            + #"{"trigger":{"url-filter":"^[hH][tT][tT][pP][sS]?:","resource-type":["image"]},"action":{"type":"ignore-previous-rules"}},"#
-            + trackers + "]"
-        store.compileContentRuleList(forIdentifier: "tern-reader-block-1", encodedContentRuleList: block) { [weak self] list, _ in
-            MainActor.assumeIsolated {
-                self?.blockAll = list
-                self?.applyRuleList()
-            }
+        guard let store = WKContentRuleListStore.default() else {
+            rulesSettled(nil, error: nil)
+            return
         }
-        store.compileContentRuleList(forIdentifier: "tern-reader-images-1", encodedContentRuleList: images) { [weak self] list, _ in
-            MainActor.assumeIsolated {
-                self?.allowImages = list
-                self?.applyRuleList()
-            }
+        store.compileContentRuleList(forIdentifier: "tern-reader-block-1", encodedContentRuleList: block) { [weak self] list, error in
+            MainActor.assumeIsolated { self?.rulesSettled(list, error: error) }
         }
+    }
+
+    private func rulesSettled(_ list: WKContentRuleList?, error: (any Error)?) {
+        if let list {
+            webView.configuration.userContentController.add(list)
+            blocksRemoteLoads = true
+        } else {
+            Self.log.error("Reader content blocker unavailable, remote images stay off: \(error.map { "\($0)" } ?? "no rule list store", privacy: .public)")
+        }
+        rulesSettled = true
+        flushIfReady()
+    }
+
+    private func flushIfReady() {
+        guard isReady else { return }
+        let pending = queued
+        queued = []
+        pending.forEach { $0() }
     }
 
     // MARK: Events
@@ -141,10 +142,8 @@ final class ReaderWebEngine: NSObject {
         webView.callAsyncJavaScript(warmup, arguments: ["p": ReaderResources.warmupPayload], in: nil, in: world) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.isReady = true
-                let pending = self.queued
-                self.queued = []
-                pending.forEach { $0() }
+                self.pageReady = true
+                self.flushIfReady()
             }
         }
         Task.detached(priority: .utility) {
@@ -198,10 +197,12 @@ private final class MessageProxy: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Serves the bundled fonts (`tern-app://fonts/…`) and inline mail images (`tern-cid://…`).
+/// Serves the bundled fonts (`tern-app://fonts/…`), inline mail images (`tern-cid://…`) and the
+/// remote images of trusted messages (`tern-remote://…`).
 private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
     weak var engine: ReaderWebEngine?
     private var stopped = Set<ObjectIdentifier>()
+    private var remote: [ObjectIdentifier: Task<Void, Never>] = [:]
 
     func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
         guard let url = task.request.url else { return }
@@ -214,6 +215,18 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
         let id = ObjectIdentifier(task)
+        if url.scheme == ReaderRemoteImages.scheme {
+            remote[id] = Task { @MainActor [weak self] in
+                let result = try? await ReaderRemoteImages.load(url)
+                guard let self, self.remote.removeValue(forKey: id) != nil, !Task.isCancelled else { return }
+                if let result {
+                    self.respond(task, data: result.0, mimeType: result.1)
+                } else {
+                    task.didFailWithError(URLError(.resourceUnavailable))
+                }
+            }
+            return
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result: (Data, String)
@@ -231,7 +244,12 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {
-        stopped.insert(ObjectIdentifier(task))
+        let id = ObjectIdentifier(task)
+        if let load = remote.removeValue(forKey: id) {
+            load.cancel()
+            return
+        }
+        stopped.insert(id)
     }
 
     private func respond(_ task: any WKURLSchemeTask, data: Data, mimeType: String) {
@@ -311,11 +329,3 @@ final class ReaderQuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelD
     }
 }
 
-/// Tracker hosts the "images allowed" content blocker still refuses, as rule-list URL filters.
-enum MailHTMLPolicyBridge {
-    static let trackerPatterns = [
-        "mailtrack\\\\.io", "t\\\\.yesware\\\\.com", "mailstat\\\\.us", "track\\\\.hubspot\\\\.com",
-        "list-manage\\\\.com/track/open", "sendgrid\\\\.net/wf/open", "mandrillapp\\\\.com/track/open",
-        "emltrk\\\\.com", "getnotify\\\\.com", "pixel\\\\.wp\\\\.com",
-    ]
-}

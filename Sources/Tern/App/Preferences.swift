@@ -14,6 +14,14 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
         case .dark: NSAppearance(named: .darkAqua)
         }
     }
+
+    /// True when the app is showing dark right now, whichever mode picked it.
+    @MainActor static var showsDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
+    /// The opposite of what is showing now: what ⇧⌘L and the sidebar's sun/moon switch to.
+    @MainActor static var flipped: AppearanceMode { showsDark ? .light : .dark }
 }
 
 /// List row layout. Auto picks one line when the list is at least 560 px wide.

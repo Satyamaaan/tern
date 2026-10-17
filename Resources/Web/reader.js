@@ -83,12 +83,28 @@
       `<dl class="details" hidden>${details}</dl>`;
   }
 
-  function imageNoteHTML(m) {
-    const blocked = m.body && m.body.blocked;
+  function imageNoteHTML(m, body) {
+    if (m.imagesOnce && m.email) {
+      return `<div class="imgnote"><span>Images shown for this message</span><span>·</span>` +
+        `<span class="load" data-act="always-images" role="button">Always load from ${esc(m.email)}</span></div>`;
+    }
+    const blocked = body && body.blocked;
     if (!blocked || m.imagesAllowed) return '';
-    const who = m.email ? ` from ${esc(m.email)}` : '';
     return `<div class="imgnote"><span>Images hidden</span><span>·</span>` +
-      `<span class="load" data-act="images" role="button">Load images${who}</span></div>`;
+      `<span class="load" data-act="images" role="button">Load images</span></div>`;
+  }
+
+  /// Bodies sanitized after the first paint report their blocked images only then.
+  function refreshImageNote(id) {
+    const element = messageElement(id);
+    if (!element) return;
+    const html = imageNoteHTML(state.messages.get(id), state.bodies.get(id));
+    const note = element.querySelector('.imgnote');
+    if (note) {
+      if (note.outerHTML !== html) note.outerHTML = html;
+    } else if (html) {
+      element.querySelector('.mbody').insertAdjacentHTML('beforebegin', html);
+    }
   }
 
   function attachmentsHTML(m) {
@@ -107,7 +123,7 @@
     if (m.unread) classes.push('unread');
     if (extraClass) classes.push(extraClass);
     return `<article class="${classes.join(' ')}" data-id="${esc(m.id)}">${lineHTML(m)}${headHTML(m)}` +
-      `${imageNoteHTML(m)}<div class="mbody" data-mode="${esc(m.body ? m.body.mode : 'plain')}"></div>${attachmentsHTML(m)}</article>`;
+      `${imageNoteHTML(m, m.body)}<div class="mbody" data-mode="${esc(m.body ? m.body.mode : 'plain')}"></div>${attachmentsHTML(m)}</article>`;
   }
 
   /// Long runs of collapsed messages show the first one, a "N more" row, then the last two.
@@ -189,12 +205,15 @@
     if (host.shadowRoot) return true;
     const body = state.bodies.get(id);
     if (!body) {
-      host.innerHTML = `<span class="pending">${esc(state.messages.get(id).snippet || '')}</span>`;
-      post({ type: 'needBody', id });
+      const m = state.messages.get(id);
+      host.innerHTML = `<span class="pending">${esc(m.snippet || '')}</span>`;
+      // A large body is being sanitized in the background and arrives through setBodies.
+      if (!m.bodyLoading) post({ type: 'needBody', id });
       return false;
     }
     host.textContent = '';
     host.dataset.mode = body.mode;
+    refreshImageNote(id);
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.adoptedStyleSheets = [sheet()];
     if (body.css) {
@@ -202,11 +221,15 @@
       style.textContent = body.css;
       shadow.append(style);
     }
+    // `.tern-root` stands in for the mail's <html>, `.tern-body` for its <body>; mail CSS can't reach the host.
+    const outer = document.createElement('div');
+    outer.className = 'tern-root';
     const wrapper = document.createElement('div');
     wrapper.className = 'tern-body';
     if (body.bodyStyle) wrapper.setAttribute('style', body.bodyStyle);
     wrapper.innerHTML = body.html;
-    shadow.append(wrapper);
+    outer.append(wrapper);
+    shadow.append(outer);
     shadow.addEventListener('load', () => queueFit(), true);
     shadow.querySelectorAll('.tern-quote-toggle').forEach((toggle, index) => {
       if (state.openQuotes.has(`${id}#${index}`)) setQuote(toggle, true);
@@ -375,7 +398,10 @@
         action.remove();
         break;
       case 'images':
-        post({ type: 'loadImages', id, sender: state.messages.get(id).email });
+        post({ type: 'loadImages', id });
+        break;
+      case 'always-images':
+        post({ type: 'alwaysImages', id, sender: state.messages.get(id).email });
         break;
       case 'summary':
         post({ type: 'summary' });

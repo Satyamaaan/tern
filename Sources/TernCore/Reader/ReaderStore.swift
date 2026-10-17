@@ -26,10 +26,12 @@ public final class ThreadDetailObserver {
     private var cancellable: AnyDatabaseCancellable?
 
     /// The first value arrives synchronously, before `init` returns, so a cached thread draws in the same frame.
+    /// A failed read is logged and the observation starts again (`startRestarting`).
+    @MainActor
     public init(store: MailStore, key: ThreadKey, onChange: @escaping (ThreadDetail?) -> Void) {
-        cancellable = store.observeThreadDetail(key).start(
+        cancellable = store.observeThreadDetail(key).startRestarting(
             in: store.database.reader, scheduling: .immediate,
-            onError: { _ in }, onChange: onChange)
+            onError: { NSLog("Tern: thread observation failed, restarting it: \($0)") }, onChange: onChange)
     }
 
     public func cancel() {

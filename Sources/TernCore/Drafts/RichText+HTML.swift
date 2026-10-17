@@ -222,6 +222,14 @@ private struct HTMLBuilder {
         "track", "wbr",
     ]
 
+    /// Absolute http(s), mailto and tel links; anything else (javascript:, data:, file:, relative) stays text.
+    /// Whitespace and control characters inside are removed first, so `java\nscript:` can't slip by.
+    static func allowedLink(_ raw: String) -> String? {
+        let href = String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.value > 0x20 && $0.value != 0x7F }))
+        guard let colon = href.firstIndex(of: ":") else { return nil }
+        return ["http", "https", "mailto", "tel"].contains(href[..<colon].lowercased()) ? href : nil
+    }
+
     private var style: RichText.Style { inline.reduce([]) { $0.union($1.style) } }
     private var link: String? { inline.last(where: { $0.link != nil })?.link }
 
@@ -301,10 +309,7 @@ private struct HTMLBuilder {
         case "i", "em", "cite", "var", "dfn": element.style.insert(.italic)
         case "u", "ins": element.style.insert(.underline)
         case "a":
-            if let href = attributes["href"]?.trimmingCharacters(in: .whitespacesAndNewlines), !href.isEmpty,
-               !href.lowercased().hasPrefix("javascript:") {
-                element.link = href
-            }
+            element.link = attributes["href"].flatMap(Self.allowedLink)
         default: break
         }
         if let css = attributes["style"]?.lowercased() {

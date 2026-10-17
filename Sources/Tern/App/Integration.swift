@@ -219,9 +219,9 @@ final class Integration {
 
         // AI helpers exist only while AI is switched on in Settings.
         let observation = ValueObservation.tracking { db in try AISettings.read(db).enabled }.removeDuplicates()
-        settingsObservation = observation.start(
+        settingsObservation = observation.startRestarting(
             in: services.store.database.reader, scheduling: .async(onQueue: .main),
-            onError: { error in NSLog("Tern: AI settings observation failed: \(error)") },
+            onError: { error in NSLog("Tern: AI settings observation failed, restarting it: \(error)") },
             onChange: { [weak self] enabled in
                 MainActor.assumeIsolated {
                     self?.services.ai = enabled ? actions : nil

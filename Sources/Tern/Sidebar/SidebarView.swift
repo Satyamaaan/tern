@@ -249,12 +249,27 @@ private struct ProjectRow: View {
 /// sync", or a "Sign in again" link.
 struct SyncStatusLine: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 7) {
             content
             Spacer(minLength: 0)
+            // Light/dark switch, shown on hover only so the footer stays one quiet line.
+            Button { model.prefs.appearance = AppearanceMode.flipped } label: {
+                Image(systemName: colorScheme == .dark ? "sun.max" : "moon")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(Theme.text3))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(colorScheme == .dark ? "Switch to Light Appearance (⇧⌘L)" : "Switch to Dark Appearance (⇧⌘L)")
+            .opacity(hovering ? 1 : 0)
+            .allowsHitTesting(hovering)
         }
+        .onHover { hovering = $0 }
         .font(.ui(12))
         .padding(.horizontal, 18)
         .frame(height: 44)
@@ -275,8 +290,16 @@ struct SyncStatusLine: View {
             Text("Offline — changes will sync").foregroundStyle(Color(Theme.text3))
         } else if let line = services.syncLine {
             Dot(color: line.tone == .attention ? Theme.accent : Theme.text3, size: 6)
-            Text(line.text).foregroundStyle(Color(Theme.text3)).lineLimit(1).truncationMode(.tail)
+            if let url = line.url {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Text(line.text).underline().foregroundStyle(Color(Theme.text2)).lineLimit(1).truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
                 .help(line.detail ?? line.text)
+            } else {
+                Text(line.text).foregroundStyle(Color(Theme.text3)).lineLimit(1).truncationMode(.tail)
+                    .help(line.detail ?? line.text)
+            }
         } else if let progress = services.syncProgress {
             Dot(color: Theme.text3, size: 6)
             Text("Syncing \(progress.done.formatted()) of \(progress.total.formatted())").foregroundStyle(Color(Theme.text3))

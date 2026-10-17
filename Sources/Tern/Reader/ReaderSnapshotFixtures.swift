@@ -51,6 +51,17 @@ enum ReaderSnapshotFixtures {
         ai.append(ThreadAI(accountId: account.id, threadId: "fx-evil", category: .security, messageCount: 1))
         fixtures.append(Fixture(name: "hostile", key: key("fx-evil")))
 
+        // A newsletter far over the inline sanitize limit: the header paints first, the body follows.
+        message("fx-big", thread: "fx-big", from: Participant(name: "The Long Read", email: "digest@longread.example"),
+                to: [me], subject: "Everything that happened this month", minutesAgo: 40, html: bigNewsletter, unread: true,
+                labels: ["INBOX", "CATEGORY_UPDATES"])
+        fixtures.append(Fixture(name: "big-newsletter", key: key("fx-big")))
+
+        // Mail that tries to draw over the reader's own header with offsets, margins and transforms.
+        message("fx-overlay", thread: "fx-overlay", from: Participant(name: "Account Team", email: "team@overlay.example"),
+                to: [me], subject: "Your statement is ready", minutesAgo: 35, html: overlay, unread: true)
+        fixtures.append(Fixture(name: "overlay", key: key("fx-overlay")))
+
         // A reply chain: Gmail, Outlook and Apple Mail quoting each other.
         message("fx-chain-1", thread: "fx-chain", from: maya, to: [me, jonas], subject: "Contract for the Lumen redesign", minutesAgo: 4_400,
                 html: "<div dir=\"ltr\">Hi Alex,<div><br></div><div>Attaching the first draft of the statement of work for the redesign. The big open question is the payment schedule.</div><div><br></div><div>Maya</div></div>")
@@ -186,6 +197,30 @@ enum ReaderSnapshotFixtures {
         <p style="font:12px/1.5 Helvetica,Arial,sans-serif;color:#8a8f98;margin:16px 0 0">You're receiving this because you subscribed at weeklybuild.example. <a href="https://weeklybuild.example/unsubscribe" style="color:#8a8f98">Unsubscribe</a></p>
         <img src="https://t.weeklybuild.example/open?id=8812" width="1" height="1" alt="">
         </td></tr></table></body></html>
+        """
+
+    static let bigNewsletter: String = {
+        var html = "<html><body><table width=\"600\" style=\"font:14px/20px Helvetica,Arial,sans-serif;color:#333\">"
+        var index = 0
+        while html.utf8.count < 800_000 {
+            html += "<tr><td style=\"padding:8px 0;border-bottom:1px solid #eee\"><a href=\"https://longread.example/\(index)\" style=\"color:#5b4bdb\">Story \(index + 1): a headline that runs a little long</a>"
+                + "<p style=\"margin:4px 0 0\">A two-line summary of the story, long enough to wrap in the reader column.</p></td></tr>"
+            index += 1
+        }
+        return html + "</table></body></html>"
+    }()
+
+    static let overlay = """
+        <html><head><style>
+        html { margin-top: -260px !important } :host { margin-top: -400px !important; position: absolute; top: 0 }
+        .cover { position: absolute; top: -170px; left: -60px; width: 900px; height: 150px; background: #c00; color: #fff;
+          font: 600 28px Helvetica, sans-serif; padding: 40px; z-index: 2147483647 }
+        .lift { transform: translateY(-220px); background: #0a6; color: #fff; padding: 20px; margin-left: -80px }
+        </style></head><body>
+        <div class="cover">Fake header: “Signed in as you — verify now”</div>
+        <p style="margin-top: 300px">The statement body sits here, below what tried to cover the header.</p>
+        <div class="lift">This box tried to lift itself over the subject.</div>
+        </body></html>
         """
 
     static let hostile = """

@@ -126,6 +126,9 @@ enum SyncSummary {
         if let until = statuses.compactMap(\.rateLimitedUntil).filter({ $0 > now }).min() {
             return SyncLine(text: "Waiting for Gmail (\(wait(until.timeIntervalSince(now))))", tone: .quiet)
         }
+        if let error = statuses.compactMap(\.lastError).first {
+            return problem(error)
+        }
         let failed = statuses.reduce(0) { $0 + $1.failedOps }
         if failed > 0 {
             return SyncLine(text: failed == 1 ? "1 change didn't reach Gmail" : "\(failed) changes didn't reach Gmail", tone: .attention)
@@ -146,6 +149,22 @@ enum SyncSummary {
                             detail: (backfill.background ?? "Older mail syncing in the background") + percent)
         }
         return nil
+    }
+
+    /// A sync error as one short line. Gmail's own words go in the tooltip; an API that is switched
+    /// off in the user's Google Cloud project links to the page that turns it on.
+    static func problem(_ error: String) -> SyncLine {
+        if error.contains("has not been used in project") || error.contains("SERVICE_DISABLED")
+            || error.contains("accessNotConfigured") {
+            let project = error.firstMatch(of: #/project (\d+)/#).map { String($0.1) }
+            var link = URLComponents(string: "https://console.cloud.google.com/apis/library/gmail.googleapis.com")
+            if let project { link?.queryItems = [URLQueryItem(name: "project", value: project)] }
+            return SyncLine(text: "Turn on the Gmail API to sync", tone: .attention,
+                            detail: "The Gmail API is off in your Google Cloud project. Click to open the page that "
+                                + "turns it on, press Enable, then wait a minute. Tern retries by itself.\n\n" + error,
+                            url: link?.url)
+        }
+        return SyncLine(text: "Couldn't sync — retrying", tone: .attention, detail: error)
     }
 
     /// Fetched and expected for accounts on their first sync; nil when none is.

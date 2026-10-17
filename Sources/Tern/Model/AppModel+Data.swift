@@ -10,13 +10,13 @@ extension AppModel {
         accountsObservation = ValueObservation
             .tracking { db in try Account.order(Column("sortOrder"), Column("createdAt")).fetchAll(db) }
             .removeDuplicates()
-            .start(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] accounts in
+            .startRestarting(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] accounts in
                 self?.receive(accounts: accounts)
             }
         projectsObservation = ValueObservation
             .tracking { db in try Project.order(Column("sortOrder"), Column("name")).fetchAll(db) }
             .removeDuplicates()
-            .start(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] projects in
+            .startRestarting(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] projects in
                 guard let self else { return }
                 self.projects = projects
                 self.services.projects = projects
@@ -32,7 +32,7 @@ extension AppModel {
         countsObservation = ValueObservation
             .tracking { db in try MailStore.fetchScopeCounts(db, accountId: accountId) }
             .removeDuplicates()
-            .start(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
+            .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
                 guard let self else { return }
                 self.counts = counts
                 let badge = counts.allAccountsInboxUnread
@@ -51,7 +51,7 @@ extension AppModel {
                     .fetchAll(db)
             }
             .removeDuplicates()
-            .start(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] labels in
+            .startRestarting(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] labels in
                 self?.labels = labels
             }
     }
@@ -104,8 +104,8 @@ extension AppModel {
         }
         let reader = store.database.reader
         rowsObservation = immediate
-            ? observation.start(in: reader, scheduling: .immediate, onError: Self.log, onChange: receive)
-            : observation.start(in: reader, scheduling: .async(onQueue: .main), onError: Self.log, onChange: receive)
+            ? observation.startRestarting(in: reader, scheduling: .immediate, onError: Self.log, onChange: receive)
+            : observation.startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log, onChange: receive)
     }
 
     /// Recomputes what the list shows from the latest rows, keeping hidden (just triaged) threads out
@@ -156,6 +156,6 @@ extension AppModel {
     }
 
     nonisolated static func log(_ error: Error) {
-        NSLog("Tern: database observation failed: \(error)")
+        NSLog("Tern: database observation failed, restarting it: \(error)")
     }
 }

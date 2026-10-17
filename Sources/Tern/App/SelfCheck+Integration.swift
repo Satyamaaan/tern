@@ -345,5 +345,11 @@ extension SelfCheck {
         }
         coordinator.stop()
         check("rate limits read as minutes", SyncSummary.wait(95) == "2 min" && SyncSummary.wait(12) == "12 s")
+        let disabled = SyncSummary.problem("Gmail error 403: Gmail API has not been used in project 1234567 before or it is disabled.")
+        check("a switched-off Gmail API says so and links to turning it on",
+              disabled.tone == .attention && disabled.text.contains("Gmail API")
+                && disabled.url?.absoluteString.contains("gmail.googleapis.com") == true
+                && disabled.url?.absoluteString.contains("project=1234567") == true)
+        check("other sync errors show instead of \"Syncing…\"", SyncSummary.problem("Gmail error 500: boom").tone == .attention)
     }
 }

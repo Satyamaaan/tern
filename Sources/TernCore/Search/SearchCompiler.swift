@@ -88,9 +88,22 @@ final class SearchCompiler {
         var positives: [String] = []
         var negatives: [String] = []
         var accountIds: Set<String>? = options.accountId.map { [$0] }
+        // Gmail tests operators per message: in `from:alice newer_than:7d` Alice's message must be new,
+        // not just the thread's last reply. Dates then apply to the message the other conditions match.
+        let datesPerMessage = root.conjuncts.contains { !isThreadLevel($0) }
 
         for conjunct in root.conjuncts {
-            if isThreadLevel(conjunct) {
+            if datesPerMessage, let bound = dateBound(of: conjunct) {
+                compiled.messageConds.append(try messageSQL(conjunct))
+                // Cheap thread tests the walks can apply first. A message on or after the bound means the thread's
+                // last date is too; a message before it means the thread ended before it or has several messages.
+                if bound.isLower != bound.negated {
+                    compiled.threadConds.append(SQLFragment("t.lastDate >= ?", [bound.value]))
+                    tighten(&compiled, min: bound.value)
+                } else {
+                    compiled.threadConds.append(SQLFragment("(t.lastDate < ? OR t.messageCount > 1)", [bound.value]))
+                }
+            } else if isThreadLevel(conjunct) {
                 compiled.threadConds.append(try threadSQL(conjunct, "t"))
                 try noteAccessPaths(of: conjunct, in: &compiled, accountIds: &accountIds)
             } else if let expression = try fts(conjunct) {
@@ -175,14 +188,37 @@ final class SearchCompiler {
                 compiled.drivers.append(.set(SQLFragment(
                     "SELECT DISTINCT accountId AS a, threadId AS i FROM thread_project WHERE projectId IN \(list.sql)", list.arguments)))
             }
-        case .before(let day): tighten(&compiled, max: day.startOfDay(in: options.timeZone).timeIntervalSince1970)
-        case .after(let day): tighten(&compiled, min: day.startOfDay(in: options.timeZone).timeIntervalSince1970)
-        case .olderThan(let duration): tighten(&compiled, max: options.now.timeIntervalSince1970 - duration.seconds)
-        case .newerThan(let duration): tighten(&compiled, min: options.now.timeIntervalSince1970 - duration.seconds)
+        case .before, .after, .olderThan, .newerThan:
+            if let bound = dateBound(filter) {
+                if bound.isLower { tighten(&compiled, min: bound.value) } else { tighten(&compiled, max: bound.value) }
+            }
         case .account(let value):
             let ids = Set(try matchingAccountIds(value))
             accountIds = accountIds.map { $0.intersection(ids) } ?? ids
         case .read, .hasAttachment, .larger, .smaller: break
+        }
+    }
+
+    /// The time a date filter (`before:`, `after:`, `older_than:`, `newer_than:`, or its negation) compares
+    /// against, and whether it is a lower bound.
+    private func dateBound(of expr: SearchExpr) -> (value: Double, isLower: Bool, negated: Bool)? {
+        switch expr {
+        case .filter(let filter):
+            return dateBound(filter).map { ($0.value, $0.isLower, false) }
+        case .not(.filter(let filter)):
+            return dateBound(filter).map { ($0.value, $0.isLower, true) }
+        default:
+            return nil
+        }
+    }
+
+    private func dateBound(_ filter: SearchFilter) -> (value: Double, isLower: Bool)? {
+        switch filter {
+        case .before(let day): (day.startOfDay(in: options.timeZone).timeIntervalSince1970, false)
+        case .after(let day): (day.startOfDay(in: options.timeZone).timeIntervalSince1970, true)
+        case .olderThan(let duration): (options.now.timeIntervalSince1970 - duration.seconds, false)
+        case .newerThan(let duration): (options.now.timeIntervalSince1970 - duration.seconds, true)
+        default: nil
         }
     }
 
@@ -337,6 +373,9 @@ final class SearchCompiler {
                 return .always
             }
         case .filter(let filter):
+            if let bound = dateBound(filter) {
+                return SQLFragment(bound.isLower ? "m.date >= ?" : "m.date < ?", [bound.value])
+            }
             switch filter {
             case .hasAttachment: return SQLFragment("m.hasAttachments = 1")
             case .larger(let bytes): return SQLFragment("m.sizeEstimate > ?", [bytes])
@@ -400,14 +439,9 @@ final class SearchCompiler {
             }
         case .label(let name):
             return try labelPredicate(name, t)
-        case .before(let day):
-            return SQLFragment("\(t).lastDate < ?", [day.startOfDay(in: options.timeZone).timeIntervalSince1970])
-        case .after(let day):
-            return SQLFragment("\(t).lastDate >= ?", [day.startOfDay(in: options.timeZone).timeIntervalSince1970])
-        case .olderThan(let duration):
-            return SQLFragment("\(t).lastDate < ?", [options.now.timeIntervalSince1970 - duration.seconds])
-        case .newerThan(let duration):
-            return SQLFragment("\(t).lastDate >= ?", [options.now.timeIntervalSince1970 - duration.seconds])
+        case .before, .after, .olderThan, .newerThan:
+            guard let bound = dateBound(filter) else { return .always }
+            return SQLFragment(bound.isLower ? "\(t).lastDate >= ?" : "\(t).lastDate < ?", [bound.value])
         case .category(let category):
             return SQLFragment("""
                 EXISTS (SELECT 1 FROM thread_ai ai WHERE ai.accountId = \(t).accountId AND ai.threadId = \(t).id \
