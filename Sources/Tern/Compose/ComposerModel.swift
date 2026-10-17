@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 import TernCore
 
 /// State and actions behind one composer, windowed or inline. Edits autosave locally after a short
@@ -172,12 +173,12 @@ final class ComposerModel: Identifiable {
         changed()
     }
 
+    /// Switches the From account; the signature follows unless the user removed or changed it.
     func setAccount(_ id: String) {
         guard id != accountId else { return }
+        let previousSignature = try? drafts.signature(accountId: accountId)
         accountId = id
-        if let previous = signatureHtml, previous == (try? drafts.signature(accountId: base.accountId)) {
-            signatureHtml = try? drafts.signature(accountId: id)
-        }
+        if signatureHtml == previousSignature { signatureHtml = try? drafts.signature(accountId: id) }
         changed()
     }
 
@@ -282,6 +283,11 @@ final class ComposerModel: Identifiable {
         enqueue { [drafts] in try await drafts.save(draft) }
     }
 
+    /// Waits for every write asked for so far (tests, prewarm).
+    func waitForWrites() async {
+        await writes?.value
+    }
+
     /// Runs database writes one after another, in the order they were asked for.
     @discardableResult
     private func enqueue(_ work: @escaping @Sendable () async throws -> Void) -> Task<Void, Never> {
@@ -338,6 +344,13 @@ final class ComposerModel: Identifiable {
         if aiInstruction != nil { aiInstruction = nil; focus(.body); return }
         if confirmingDiscard { confirmingDiscard = false; return }
         if mode == .inline { close() }
+    }
+
+    /// Breaks the editor → accessory → model reference once the composer is gone.
+    func tearDown() {
+        editor.hideFormattingBar()
+        editor.setAccessory(EmptyView())
+        for field in tokenFields.values { field.view?.hideSuggestions() }
     }
 
     // MARK: Sending

@@ -46,6 +46,18 @@ enum Composer {
     static func makeWindow(for model: ComposerModel) -> NSWindow {
         ComposerWindowController(model: model, offset: 0).window!
     }
+
+    /// Builds and lays out one composer offscreen so the first `c` doesn't pay for loading TextKit 2,
+    /// the spell checker and the SwiftUI views (≈120 ms cold, ≈25 ms warm). Writes nothing. Call once
+    /// when the app is idle after launch.
+    static func prewarm(services: AppServices) {
+        guard let model = ComposerModel(request: .new(accountId: nil), services: services, mode: .window) else { return }
+        let window = makeWindow(for: model)
+        model.editor.richText = RichText(plainText: "Warm up")
+        window.contentView?.layoutSubtreeIfNeeded()
+        model.discard()
+        window.close()
+    }
 }
 
 /// The composer window: our own chrome on a `raised` surface, traffic lights kept.
@@ -109,6 +121,7 @@ final class ComposerWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         model.saveOrDrop()
+        model.tearDown()
         onClosed()
     }
 
@@ -159,10 +172,14 @@ struct InlineComposerView: View {
         .onAppear(perform: start)
         .onChange(of: request) {
             model?.saveOrDrop()
+            model?.tearDown()
             model = nil
             start()
         }
-        .onDisappear { model?.saveOrDrop() }
+        .onDisappear {
+            model?.saveOrDrop()
+            model?.tearDown()
+        }
     }
 
     private func start() {

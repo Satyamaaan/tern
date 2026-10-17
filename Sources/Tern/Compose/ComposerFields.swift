@@ -184,6 +184,7 @@ struct ComposerTextField: NSViewRepresentable {
         view.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [.font: font, .foregroundColor: Theme.text3])
         view.setAccessibilityLabel(placeholder)
         view.delegate = context.coordinator
+        context.coordinator.parent = self
         model.register(view, for: field)
         return view
     }

@@ -35,10 +35,11 @@ enum SendToast {
 
         if state.undo != nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // z or ⌘Z, unless a text field has focus (there ⌘Z undoes typing).
                 let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-                let typing = (NSApp.keyWindow?.firstResponder as? NSTextView) != nil
-                guard event.charactersIgnoringModifiers?.lowercased() == "z",
-                      modifiers == .command && !typing || modifiers.isEmpty && !typing else { return event }
+                let typing = NSApp.keyWindow?.firstResponder is NSTextView
+                guard !typing, event.charactersIgnoringModifiers?.lowercased() == "z",
+                      modifiers.isEmpty || modifiers == .command else { return event }
                 state.performUndo()
                 dismiss()
                 return nil

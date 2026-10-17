@@ -621,7 +621,7 @@ final class EditorDocumentView: NSView {
         let textHeight = max(textView.contentHeight, minTextHeight)
         textView.frame = CGRect(x: 0, y: 0, width: width, height: textHeight)
         accessory?.view.frame = CGRect(x: 0, y: textHeight, width: width, height: accessoryHeight)
-        let natural = max(textView.contentHeight, minTextHeight) + accessoryHeight
+        let natural = textHeight + accessoryHeight
         setFrameSize(NSSize(width: width, height: max(textHeight + accessoryHeight, clipHeight)))
         if natural != lastHeight {
             lastHeight = natural

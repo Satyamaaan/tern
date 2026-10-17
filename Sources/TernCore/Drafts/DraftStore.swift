@@ -63,7 +63,9 @@ public struct DraftStore: Sendable {
 
         switch intent {
         case .existing(let id):
-            return try Draft.fetchOne(db, key: id).map(DraftContent.init(stored:))
+            // A draft the engine is sending (or has sent) can't be edited any more.
+            guard let draft = try Draft.fetchOne(db, key: id), draft.state != .sending, draft.state != .sent else { return nil }
+            return DraftContent(stored: draft)
 
         case .new(let accountId, let to):
             let preferred = try accountId ?? Setting.fetchOne(db, key: SettingKey.defaultAccount)?.value
