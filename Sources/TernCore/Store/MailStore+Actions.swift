@@ -109,6 +109,30 @@ extension MailStore {
             previousSnoozes: previousSnoozes)
     }
 
+    /// Applies a different action to each group of threads (e.g. a label whose id differs per account)
+    /// in one transaction, with one undo for all of it, named after the first action.
+    @discardableResult
+    public func perform(_ actions: [(action: MailAction, threads: [ThreadKey])]) throws -> UndoToken {
+        try database.writer.write { db in try Self.perform(db, actions) }
+    }
+
+    public static func perform(_ db: Database, _ actions: [(action: MailAction, threads: [ThreadKey])]) throws -> UndoToken {
+        guard let first = actions.first else { return try perform(db, .archive, on: []) }
+        var threads: [ThreadKey] = []
+        var opIds: [Int64] = []
+        var previousLabels: [MessageKey: [String]] = [:]
+        var previousSnoozes: [ThreadKey: Date?] = [:]
+        for item in actions {
+            let token = try perform(db, item.action, on: item.threads)
+            threads += token.threads
+            opIds += token.opIds
+            previousLabels.merge(token.previousLabels) { earlier, _ in earlier }
+            previousSnoozes.merge(token.previousSnoozes) { earlier, _ in earlier }
+        }
+        return UndoToken(action: first.action, threads: threads, opIds: opIds, previousLabels: previousLabels,
+                         previousSnoozes: previousSnoozes)
+    }
+
     /// Puts threads back. If Gmail hasn't seen the action yet, the queued op is simply dropped.
     public func undo(_ token: UndoToken) throws {
         try database.writer.write { db in

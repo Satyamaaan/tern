@@ -226,6 +226,40 @@ public final class SyncCoordinator {
         return try await sync.serverSearch(query: query, limit: limit)
     }
 
+    // MARK: Mute
+
+    /// Mutes threads: archives them and labels them "Muted" (a user label Tern creates in each account
+    /// the first time, one Gmail request), through `MailStore.perform`, so it's instant and undoable.
+    /// New mail in a muted thread is archived again as it arrives. Returns the undo.
+    @discardableResult
+    public func mute(_ keys: [ThreadKey]) async throws -> UndoToken {
+        var actions: [(action: MailAction, threads: [ThreadKey])] = []
+        for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
+            guard let sync = syncs[accountId] else { throw SyncError.unknownAccount(accountId) }
+            actions.append((.moveToLabel(try await sync.muteLabelId()), threads))
+        }
+        let store = self.store
+        let planned = actions
+        return try await Task.detached(priority: .userInitiated) { try store.perform(planned) }.value
+    }
+
+    /// Unmutes threads: removes the "Muted" label (they stay where they are, like Gmail's unmute).
+    /// No network wait. Returns the undo.
+    @discardableResult
+    public func unmute(_ keys: [ThreadKey]) async throws -> UndoToken {
+        let store = self.store
+        return try await Task.detached(priority: .userInitiated) {
+            try store.database.writer.write { db in
+                var actions: [(action: MailAction, threads: [ThreadKey])] = []
+                for (accountId, threads) in Dictionary(grouping: keys, by: \.accountId).sorted(by: { $0.key < $1.key }) {
+                    guard let label = try Setting.fetchOne(db, key: SyncSettingKey.muteLabel(accountId))?.value else { continue }
+                    actions.append((.removeLabel(label), threads))
+                }
+                return try MailStore.perform(db, actions)
+            }
+        }.value
+    }
+
     // MARK: Internals
 
     @discardableResult

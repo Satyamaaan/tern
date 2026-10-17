@@ -121,6 +121,7 @@ public actor FakeGmail: GmailAPI {
     /// Calls refused because they would have gone over the per-minute quota.
     public private(set) var quotaViolations = 0
     private var counter = 0
+    private var labelCounter = 0
 
     /// - Parameters:
     ///   - historyRetention: Keep at most this many history records; older start points throw `.historyExpired`.
@@ -259,7 +260,11 @@ public actor FakeGmail: GmailAPI {
 
     public func createLabel(name: String) async throws -> GmailLabel {
         try await begin(.createLabel, units: GmailQuota().changeLabel)
-        let label = GmailLabel(id: "Label_\(labelList.count + 1)", name: name, type: "user")
+        if labelList.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            throw GmailAPIError.server(status: 409, message: "Label name exists or conflicts")
+        }
+        labelCounter += 1
+        let label = GmailLabel(id: "Label_\(labelCounter)", name: name, type: "user")
         labelList.append(label)
         return label
     }
