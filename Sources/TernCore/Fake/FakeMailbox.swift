@@ -318,7 +318,7 @@ private struct Generator {
             accountIndex = person.account
             let me = Participant(name: FakeMailbox.me, email: FakeMailbox.accounts[accountIndex].email)
             let them = Participant(name: person.name, email: person.email)
-            let cc = chance(0.25) ? [Participant(name: pick(Self.people).name, email: pick(Self.people).email)] : []
+            let cc = chance(0.25) ? [pick(Self.people)].map { Participant(name: $0.name, email: $0.email) } : []
             let subject = pick(Self.peopleSubjects)
             let count = [1, 1, 2, 2, 3, 3, 4, 5, 6, 8][int(0...9)]
             var date = start
