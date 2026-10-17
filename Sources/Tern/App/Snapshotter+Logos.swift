@@ -1,0 +1,40 @@
+import AppKit
+
+extension Snapshotter {
+    /// Stand-in site icons for the demo mailbox's companies, drawn here (nothing is downloaded), so the
+    /// shots show logo avatars next to initials. Personal senders keep their initials, as in real use.
+    static func installDemoLogos() {
+        let marks: [(domain: String, background: UInt32, glyph: String, foreground: UInt32)] = [
+            ("figma.com", 0x1E1E1E, "F", 0xFFFFFF), ("linear.app", 0x5E6AD2, "L", 0xFFFFFF),
+            ("github.com", 0x181717, "G", 0xFFFFFF), ("sentry.io", 0x362D59, "S", 0xFFFFFF),
+            ("slack.com", 0x4A154B, "S", 0xFFFFFF), ("vercel.com", 0x000000, "▲", 0xFFFFFF),
+            ("stripe.com", 0x635BFF, "S", 0xFFFFFF), ("google.com", 0xFFFFFF, "G", 0x4285F4),
+            ("apple.com", 0x111111, "A", 0xFFFFFF), ("makenotion.com", 0xFFFFFF, "N", 0x111111),
+            ("raycast.com", 0xFF6363, "R", 0xFFFFFF), ("substack.com", 0xFF6719, "S", 0xFFFFFF),
+            ("loomwear.com", 0xD8CBB4, "L", 0x3B3226), ("airbnb.com", 0xFF5A5F, "A", 0xFFFFFF),
+            ("uber.com", 0x000000, "U", 0xFFFFFF), ("amazon.com", 0x232F3E, "a", 0xFF9900),
+            ("tldrnewsletter.com", 0x0B0B0B, "T", 0xFFFFFF), ("stratechery.com", 0xF3EFE6, "S", 0x1F3A5F),
+        ]
+        for mark in marks {
+            guard let png = drawMark(mark.glyph, background: mark.background, foreground: mark.foreground) else { continue }
+            SenderLogos.shared.install(png, forDomain: mark.domain)
+        }
+    }
+
+    /// A 64 px square icon with one glyph, as a PNG.
+    private static func drawMark(_ glyph: String, background: UInt32, foreground: UInt32) -> Data? {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        Theme.rgb(background).setFill()
+        NSRect(x: 0, y: 0, width: 64, height: 64).fill()
+        let font = Theme.display(34)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Theme.rgb(foreground)]
+        let size = (glyph as NSString).size(withAttributes: attributes)
+        (glyph as NSString).draw(at: NSPoint(x: (64 - size.width) / 2, y: 32 - font.capHeight / 2 + font.descender), withAttributes: attributes)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])
+    }
+}

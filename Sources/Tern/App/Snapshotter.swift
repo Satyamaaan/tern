@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// `--snapshot <dir>`: renders the main window at 1320×840 (light, dark, the ⌘K palette, the reader with
-/// a thread, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
+/// `--snapshot <dir>`: renders the main window at 1320×840 (the list in light and dark, the ⌘K palette, the
+/// reader over the list, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
 /// and quits. WebKit only paints into a window on screen, so after the launch and j/k measurements the
 /// window is ordered in at 1 % opacity and click-through, without activating the app: nothing shows.
 @MainActor
@@ -13,6 +13,7 @@ struct Snapshotter {
 
     func run(into directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        Self.installDemoLogos()
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
         // Launch time: first layout and a full render of the window with its rows.

@@ -318,7 +318,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     }
 
     func updateHoverFromMouse() {
-        guard let window = table.window, window.isVisible else { return }
+        // A click-through window (offscreen renders) has no pointer over it.
+        guard let window = table.window, window.isVisible, !window.ignoresMouseEvents else { return }
         let point = table.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         let row = scrollView.contentView.bounds.contains(table.convert(point, to: scrollView.contentView)) ? table.row(at: point) : -1
         setHovered(row >= 0 && items.indices.contains(row) && items[row].threadKey != nil ? row : nil)

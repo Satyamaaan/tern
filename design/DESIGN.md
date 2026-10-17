@@ -139,13 +139,13 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 ### Title bar (52 px)
 - Traffic lights at (16, 18), then the **tabs**, left-aligned after an 84 px gutter.
 - Tabs: `All` · `Needs reply` · the category tabs `Important · People · Notifications · Newsletters · Other`
-  (split inbox; off in `⋯` → Category Tabs) · pinned tabs (projects, labels of the account in scope, saved
+  (split inbox; off in `⋯` → Split Inbox or Settings) · pinned tabs (projects, labels of the account in scope, saved
   searches). Each: 14 px icon (hue per the table), title, count (unread; Needs reply counts waiting
   threads) in tabular `text3`. 28 px tall, radius 6; active = `selected` fill and Medium text; hover = `hover`.
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
   pinned shows as a temporary tab at the end while it is open.
 - `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
-  fits), then Unpin, Mark All as Read, Select All, Density, Category Tabs, Reading Pane. Right-click a tab to
+  fits), then Unpin, Mark All as Read, Select All, Density, Split Inbox, Reading Pane. Right-click a tab to
   pin or unpin it.
 - Keys: Tab / ⇧Tab cycle the tabs; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 the category tabs.
 - Right side: the **account stack** (up to three 20 px letter avatars in account hues, overlapping by 6 px with

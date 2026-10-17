@@ -281,7 +281,7 @@ private struct MoreTabsButton: View {
         let densityItem = NSMenuItem(title: "Density", action: nil, keyEquivalent: "")
         densityItem.submenu = density
         menu.addItem(densityItem)
-        let split = ClosureMenuItem("Category Tabs") { model.setSplitInbox(!model.prefs.splitInbox) }
+        let split = ClosureMenuItem("Split Inbox") { model.setSplitInbox(!model.prefs.splitInbox) }
         split.state = model.prefs.splitInbox ? .on : .off
         menu.addItem(split)
         let pane = ClosureMenuItem("Reading Pane", key: "\\", modifiers: .command) { model.toggleReadingPane() }
