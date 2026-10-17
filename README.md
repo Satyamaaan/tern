@@ -1,19 +1,49 @@
 # Tern
 
-A fast, keyboard-first Gmail client for macOS. Several accounts, one unified inbox, projects across
-accounts, instant local search, and AI triage through your own Codex or Claude Code CLI.
+A fast, native Gmail client for macOS. Tern keeps your mail in a local SQLite database, so opening,
+moving between, searching and labelling mail never waits on the network. Sync with Gmail runs in the
+background.
 
-Everything you see is read from a local SQLite database; sync with Gmail happens in the background, so
-opening, searching and archiving never wait on the network.
+- **Several accounts in one inbox.** Personal Gmail and Google Workspace side by side, or one at a time.
+- **Projects across accounts.** Group conversations by project with rules (sender, domain, label,
+  subject) or by hand, whichever account they arrived in.
+- **Instant search.** Gmail's search syntax (`from:` `to:` `has:attachment` `before:` `label:` …) over a
+  local full-text index, with Gmail's own search for mail that isn't stored yet.
+- **Keyboard first.** `j`/`k`, `e`, `#`, `s`, `z` to undo, ⌘K for every command.
+- **AI on your own subscription.** Triage, summaries and reply drafts through the Codex CLI or Claude
+  Code you already use. No API keys, nothing sent anywhere else.
+- **Private by design.** No Tern server. Remote images are blocked until you allow them, and your Google
+  client and tokens stay in the macOS Keychain.
 
-Status: under construction.
+## Requirements
 
-## Build
+- macOS 15 or later
+- Swift 6 toolchain (Xcode 16 or later, or the Command Line Tools)
+- A Google Cloud OAuth client of type **Desktop app**. Tern ships without one; you create your own in
+  about ten minutes: [docs/google-setup.md](docs/google-setup.md).
+- Optional, for AI: the `codex` or `claude` CLI, signed in.
 
-Requires macOS 15 and Xcode 16 or newer.
+## Build and run
 
+```sh
+./build.sh --install          # builds, signs and installs ~/Applications/Tern.app, then opens it
 ```
-./build.sh --install
+
+On first launch Tern asks for your OAuth client ID and secret (or the JSON file Google gives you),
+then signs in each account in your browser.
+
+## Development
+
+```sh
+swift build                           # everything
+TERN_SKIP_PERF=1 swift test           # all tests
+swift run tern-seed                   # writes a 50,000-message fake mailbox
+open build/Tern.app --args --fake     # run against it (build with ./build.sh --debug first)
 ```
 
-Try it without a Google account: `swift run tern-seed && open build/Tern.app --args --fake`.
+`CLAUDE.md` describes the architecture and the rules the code follows. The visual spec is
+`design/DESIGN.md`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
