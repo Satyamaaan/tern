@@ -98,7 +98,10 @@ extension AppModel {
     }
 
     func committed(_ keys: [ThreadKey]) {
-        for key in keys where hidden[key] == .writing { hidden[key] = .committed }
+        // A row the list no longer reads needs no hiding; dropping the mark now means a later undo
+        // from outside the shell (a cancelled send-and-archive) shows the row again.
+        let listed = Set((isSearching ? searchRows : rawRows).map(\.id))
+        for key in keys where hidden[key] == .writing { hidden[key] = listed.contains(key) ? .committed : nil }
         // Search results are a one-off read; read them again so stars, read state and flags update.
         if isSearching { refreshSearch() }
         // If the write left a thread in this list after all (no change reached the observation),

@@ -171,6 +171,8 @@ final class KeyRouter {
     /// The text view receiving typing in the window, if any (field editors included).
     static func textInput(in window: NSWindow?) -> NSTextView? {
         guard let responder = window?.firstResponder as? NSTextView, responder.isEditable else { return nil }
+        // A field editor left behind by a text field that has gone (the closed palette) isn't typing.
+        if responder.isFieldEditor, let field = responder.delegate as? NSView, field.window == nil { return nil }
         return responder
     }
 }

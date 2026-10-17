@@ -89,7 +89,7 @@ final class AppModel {
 
     // MARK: Overlays
 
-    var palette: PaletteMode?
+    var palette: PaletteMode? { didSet { if oldValue != nil, palette == nil { paletteClosed() } } }
     var showsShortcuts = false
     /// Pending `g` chord, shown in a small HUD.
     var chordHUD: String?
@@ -348,6 +348,17 @@ final class AppModel {
         if readerExpanded { readerExpanded = false; focusList(); return }
         if focus == .reader { focusList(); return }
         clearSelection()
+    }
+
+    /// Once the palette closes, the keyboard goes back to the list or the open thread, unless the
+    /// command it ran moved it somewhere (the search pill).
+    private func paletteClosed() {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.palette == nil, !self.searchFieldFocused, self.projectEditor == nil else { return }
+                if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
+            }
+        }
     }
 
     /// Gives the list the keyboard again.
