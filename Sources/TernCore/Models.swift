@@ -458,18 +458,49 @@ public struct Snooze: TernRecord, Hashable {
 
 // MARK: - Drafts, contacts, pending operations
 
+/// Points at an attachment that still lives in Gmail, e.g. one carried over by a forward. The sender
+/// fetches it (or uses the cached `MailAttachment.localPath`) before encoding the message.
+public struct RemoteAttachmentRef: Codable, Hashable, Sendable {
+    /// The account that owns the original message; may differ from the draft's account.
+    public var accountId: String
+    public var messageId: String
+    public var partId: String
+    /// Gmail attachment id. Nil when the data was inline in the message payload.
+    public var attachmentId: String?
+
+    public init(accountId: String, messageId: String, partId: String, attachmentId: String? = nil) {
+        self.accountId = accountId
+        self.messageId = messageId
+        self.partId = partId
+        self.attachmentId = attachmentId
+    }
+}
+
 public struct DraftAttachment: Codable, Hashable, Sendable {
+    /// Local file. Empty while `remote` has not been fetched yet.
     public var path: String
     public var filename: String
     public var mimeType: String
     public var size: Int
+    /// Set for attachments that must be fetched from Gmail before sending (forwarded files).
+    public var remote: RemoteAttachmentRef?
+    /// Content-ID without angle brackets for inline images the body references as `cid:`.
+    public var contentId: String?
 
-    public init(path: String, filename: String, mimeType: String, size: Int) {
+    public init(
+        path: String, filename: String, mimeType: String, size: Int,
+        remote: RemoteAttachmentRef? = nil, contentId: String? = nil
+    ) {
         self.path = path
         self.filename = filename
         self.mimeType = mimeType
         self.size = size
+        self.remote = remote
+        self.contentId = contentId
     }
+
+    /// True when the file has to be downloaded from Gmail first.
+    public var needsFetch: Bool { path.isEmpty && remote != nil }
 }
 
 public struct Draft: TernRecord, Hashable, Identifiable {
@@ -629,9 +660,12 @@ public struct LabelOpPayload: Codable, Hashable, Sendable {
 
 public struct DraftOpPayload: Codable, Hashable, Sendable {
     public var draftId: String
+    /// Set on `deleteDraft`: the local row is already gone when the op runs.
+    public var gmailDraftId: String?
 
-    public init(draftId: String) {
+    public init(draftId: String, gmailDraftId: String? = nil) {
         self.draftId = draftId
+        self.gmailDraftId = gmailDraftId
     }
 }
 

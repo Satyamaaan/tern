@@ -27,6 +27,8 @@ let package = Package(
         .testTarget(name: "TernCoreTests", dependencies: ["TernCore"]),
         .testTarget(name: "TernSyncTests", dependencies: ["TernSync"]),
         .testTarget(name: "TernAITests", dependencies: ["TernAI"]),
+        // Composer editor tests and offscreen snapshots (TERN_SHOTS=1); needs the app module.
+        .testTarget(name: "TernComposeTests", dependencies: ["Tern", "TernCore"]),
     ],
     swiftLanguageModes: [.v5]
 )
