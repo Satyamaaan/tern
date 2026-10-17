@@ -276,7 +276,9 @@ final class ReaderModel {
             hoverLink = ReaderHoverLink(destination: String(href.dropFirst("mailto:".count)).components(separatedBy: "?")[0].removingPercentEncoding ?? href)
         case "http", "https", "tel":
             let warning = LinkSafety.mismatch(text: text, href: href).map { "Opens \($0.actual), not \($0.shown)" }
-            hoverLink = ReaderHoverLink(destination: href, warning: warning)
+            // Through a known redirector (Google, Safe Links, Proofpoint…) the pill shows where it leads.
+            let destination = url.scheme?.lowercased() == "tel" ? href : LinkSafety.destination(of: url).absoluteString
+            hoverLink = ReaderHoverLink(destination: destination, warning: warning)
         default:
             hoverLink = nil
         }
