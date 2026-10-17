@@ -34,6 +34,9 @@ final class SelfCheck {
         timeQueries()
         triage()
         multiSelect()
+        clicks()
+        paging()
+        dropOnProject()
         needsReply()
         search()
         splits()
@@ -89,6 +92,47 @@ final class SelfCheck {
         check("undo restores the selection's threads", targets.allSatisfy { model.snapshot.rows[$0] != nil })
     }
 
+    private func clicks() {
+        model.showSplit(.people)
+        wait(0.2)
+        let order = model.snapshot.order
+        guard order.count > 5 else { return check("click rows", false) }
+        model.click(order[1], command: false, shift: false)
+        check("click opens the row", model.cursor == order[1] && model.checked.isEmpty)
+        model.click(order[3], command: true, shift: false)
+        check("⌘-click adds to the selection", model.checked == [order[1], order[3]])
+        model.click(order[5], command: false, shift: true)
+        check("⇧-click selects the range from the anchor", model.checked == Set(order[3...5]))
+        model.clearSelection()
+    }
+
+    private func paging() {
+        model.show(.allMail)
+        wait(0.2)
+        let first = model.snapshot.order.count
+        model.loadMore()
+        poll(0.8) {}
+        check("scrolling near the end loads the next page", first == AppModel.pageSize && model.snapshot.order.count == 2 * AppModel.pageSize)
+        model.show(.inbox)
+        wait(0.2)
+    }
+
+    private func dropOnProject() {
+        guard let project = model.projects.first else { return check("projects", false) }
+        model.showSplit(.people)
+        wait(0.2)
+        guard let key = model.snapshot.order.first(where: { !(model.row($0)?.projectIds.contains(project.id) ?? true) }) else {
+            return check("drop candidate", false)
+        }
+        model.draggedKeys = [key]
+        model.dropDragged(onProject: project.id)
+        poll(0.6) {}
+        check("dropping a row on a project files it", model.row(key)?.projectIds.contains(project.id) == true)
+        model.undoLast()
+        poll(0.6) {}
+        check("undo takes it out again", model.row(key)?.projectIds.contains(project.id) == false)
+    }
+
     private func needsReply() {
         model.showSplit(.people)
         wait(0.2)
@@ -107,6 +151,9 @@ final class SelfCheck {
     }
 
     private func search() {
+        let cold = Timing.begin("search-cold")
+        _ = try? model.services.search.search("receipt", accountId: nil, limit: 200)
+        print(String(format: "  search: %.1f ms for a first (cold) query", Timing.end(cold)))
         let started = DispatchTime.now().uptimeNanoseconds
         model.searchText = "invoice"
         var elapsed = 0.0
