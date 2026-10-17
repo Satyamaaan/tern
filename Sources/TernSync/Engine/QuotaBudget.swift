@@ -65,25 +65,36 @@ public actor QuotaBudget {
     public nonisolated let unitsPerMinute: Int
     private let reserves: [QuotaPriority: Int]
     private let paceWindow: Double
+    private let bulkPaceWindow: Double
     private let clock: any SyncClock
     private var spent: [(at: Date, units: Int)] = []
     public private(set) var pausedUntil: Date?
     /// Every unit charged since the budget was created.
     public private(set) var totalUnits = 0
 
-    /// - Parameter paceWindow: Seconds over which bulk and background spending is smoothed; 0 lets
-    ///   them use their share of the minute in one burst.
-    public init(unitsPerMinute: Int, bulkReserve: Int, backgroundReserve: Int, paceWindow: Double = 0, clock: any SyncClock) {
+    /// - Parameters:
+    ///   - paceWindow: Seconds over which bulk and background spending is smoothed; 0 lets them use
+    ///     their share of the minute in one burst.
+    ///   - bulkPaceWindow: A separate, usually longer window for bulk work, so the first screen of mail
+    ///     arrives in one burst; nil uses `paceWindow`.
+    public init(unitsPerMinute: Int, bulkReserve: Int, backgroundReserve: Int, paceWindow: Double = 0,
+                bulkPaceWindow: Double? = nil, clock: any SyncClock) {
         self.unitsPerMinute = unitsPerMinute
         self.reserves = [.interactive: 0, .bulk: bulkReserve, .background: max(bulkReserve, backgroundReserve)]
         self.paceWindow = min(60, max(0, paceWindow))
+        self.bulkPaceWindow = min(60, max(0, bulkPaceWindow ?? paceWindow))
         self.clock = clock
+    }
+
+    private nonisolated func window(_ priority: QuotaPriority) -> Double {
+        priority == .bulk ? bulkPaceWindow : paceWindow
     }
 
     /// Most units `priority` may spend in one `paceWindow`; nil when it isn't paced.
     public nonisolated func paceAllowance(_ priority: QuotaPriority) -> Int? {
-        guard priority != .interactive, paceWindow > 0 else { return nil }
-        return max(1, Int(Double(ceiling(priority)) * paceWindow / 60))
+        let window = window(priority)
+        guard priority != .interactive, window > 0 else { return nil }
+        return max(1, Int(Double(ceiling(priority)) * window / 60))
     }
 
     private nonisolated func ceiling(_ priority: QuotaPriority) -> Int {
@@ -140,9 +151,10 @@ public actor QuotaBudget {
         prune(now)
         let minute = Self.delay(for: units, limit: ceiling(priority), window: 60, entries: spent[...], now: now)
         guard let allowance = paceAllowance(priority) else { return minute }
-        let cutoff = now.addingTimeInterval(-paceWindow)
+        let window = window(priority)
+        let cutoff = now.addingTimeInterval(-window)
         let recent = spent[(spent.firstIndex { $0.at > cutoff } ?? spent.endIndex)...]
-        return max(minute, Self.delay(for: units, limit: allowance, window: paceWindow, entries: recent, now: now))
+        return max(minute, Self.delay(for: units, limit: allowance, window: window, entries: recent, now: now))
     }
 
     /// Seconds until `units` more fit under `limit` in a rolling `window` holding `entries`.

@@ -44,8 +44,8 @@ enum GmailQuotaCost {
 /// The engine's `QuotaBudget` is the real scheduler: it keeps each account inside Gmail's per-user
 /// quota (6,000 units a minute for projects created since 2026-05-01) and decides what goes first.
 /// This bucket only catches traffic that bypasses it, so it refills at the full per-minute rate and
-/// holds `burst` units (default: a third of a minute, enough for a history poll's 30 new messages
-/// in full), and budgeted traffic passes without waiting. Callers reserve units up front and wait for the refill,
+/// holds `burst` units (default: half a minute, room for the engine's first-sync burst plus its
+/// largest interactive request), and budgeted traffic passes without waiting. Callers reserve units up front and wait for the refill,
 /// so concurrent callers are served in arrival order. After a rate-limit response, `pause(for:)`
 /// holds everyone back.
 public actor GmailRateLimiter {
@@ -58,10 +58,10 @@ public actor GmailRateLimiter {
 
     /// - Parameters:
     ///   - unitsPerMinute: The refill rate.
-    ///   - burst: Units the bucket holds; nil for a third of `unitsPerMinute`.
+    ///   - burst: Units the bucket holds; nil for half of `unitsPerMinute`.
     public init(unitsPerMinute: Double = 6000, burst: Double? = nil, clock: GoogleClock = .live) {
         self.unitsPerSecond = unitsPerMinute / 60
-        self.capacity = max(1, burst ?? unitsPerMinute / 3)
+        self.capacity = max(1, burst ?? unitsPerMinute / 2)
         self.clock = clock
         self.tokens = capacity
         self.lastRefill = clock.now()

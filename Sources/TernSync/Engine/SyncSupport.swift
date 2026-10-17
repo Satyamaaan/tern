@@ -40,6 +40,10 @@ public struct SyncConfiguration: Sendable {
     /// spend at most their per-minute share for that long (540 and 450 units by default), so they
     /// never burst and interactive calls don't queue behind them in the HTTP client's limiter.
     public var paceWindow: Double = 6
+    /// Bulk work (the first inbox and recent mail) is smoothed over a longer window: its 1,350-unit share
+    /// lets about 22 full messages land at once. With background's 450 that leaves room in the HTTP
+    /// client's 3,000-unit burst for the largest interactive request (a 960-unit history poll).
+    public var bulkPaceWindow: Double = 15
     /// Most units one bulk step may spend before the loop checks for polls and actions again.
     /// Half a pace window: two steps use the whole share, and one runs even after an opened thread.
     public var bulkStepUnits: Int = 270

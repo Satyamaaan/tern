@@ -294,8 +294,8 @@ import Testing
 
     @Test func rateLimiterPacesSpending() async throws {
         let clock = TestClock()
-        let limiter = GmailRateLimiter(unitsPerMinute: 6000, clock: clock.clock)
-        // A safety net: the bucket holds 2,000 units and refills at the full 100 a second.
+        let limiter = GmailRateLimiter(unitsPerMinute: 6000, burst: 2000, clock: clock.clock)
+        // A safety net: this bucket holds 2,000 units and refills at the full 100 a second.
         try await limiter.acquire(2000)
         #expect(clock.sleeps.isEmpty)
         #expect(await limiter.delay(for: 200) == 2)
@@ -319,7 +319,7 @@ import Testing
                 await limiter.pause(for: 30)
             }
         }, random: { 0.5 })
-        limiter.set(GmailRateLimiter(unitsPerMinute: 6000, clock: clock))
+        limiter.set(GmailRateLimiter(unitsPerMinute: 6000, burst: 2000, clock: clock))
         try await limiter.value!.acquire(2100)  // 100 units of debt: 1 s
         #expect(virtual.sleeps.count == 2)
         #expect(virtual.sleeps[0] == 1)

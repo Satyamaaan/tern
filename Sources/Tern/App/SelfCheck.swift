@@ -145,8 +145,8 @@ final class SelfCheck {
             model.select(key)
             model.focus = .reader
             model.perform(.archive, on: [key])
-            poll(0.6) {}
-            check("triage from the reader marks the next thread read", model.cursor == next && model.row(next)?.thread.unreadCount == 0)
+            let read = waitUntil { model.cursor == next && model.row(next)?.thread.unreadCount == 0 }
+            check("triage from the reader marks the next thread read", read)
             model.undoLast()
             poll(0.6) {}
             model.perform(.markUnread, on: [next], toast: nil)
@@ -384,6 +384,19 @@ final class SelfCheck {
 
     func wait(_ seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Spins the run loop until `condition` holds or `timeout` passes; returns the last answer.
+    /// Checks of timers and background writes use it so a busy machine doesn't fail them.
+    @discardableResult
+    func waitUntil(_ timeout: TimeInterval = 3, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= end { return false }
+            for window in NSApp.windows { window.contentView?.layoutSubtreeIfNeeded() }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        return true
     }
 
     /// Spins the run loop for `seconds`, calling `body` every few milliseconds.

@@ -37,6 +37,7 @@ extension SyncConfiguration {
         configuration.prefetchBatchSize = 15
         // Loops that call syncOnce without moving the clock expect bulk work to run back to back.
         configuration.paceWindow = 0
+        configuration.bulkPaceWindow = 0
         configuration.attachmentCacheDirectory = cache
         configuration.draftFilesDirectory = cache.appendingPathComponent("Draft Files", isDirectory: true)
         configuration.observeSystemWake = false

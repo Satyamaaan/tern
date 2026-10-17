@@ -142,7 +142,9 @@ enum SyncSummary {
         }
         if let backfill = statuses.first(where: { $0.state == .backfilling }) {
             // The sidebar has room for one short line; the engine's own wording goes in the tooltip.
-            let percent = backfill.backfillProgress.map { " · \(Int(($0 * 100).rounded(.down)))%" } ?? ""
+            // A finished count with the backfill still open means it is wrapping up; no "100%".
+            let done = backfill.backfillProgress.map { Int(($0 * 100).rounded(.down)) }.flatMap { $0 < 100 ? $0 : nil }
+            let percent = done.map { " · \($0)%" } ?? ""
             return SyncLine(text: "Older mail syncing" + percent, tone: .quiet,
                             detail: (backfill.background ?? "Older mail syncing in the background") + percent)
         }

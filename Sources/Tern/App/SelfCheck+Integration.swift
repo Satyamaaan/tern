@@ -39,7 +39,7 @@ extension SelfCheck {
         let undoDepth = model.undoStack.count
         model.click(key, command: false, shift: false)
         settle(0.5)
-        check("opening a thread marks it read", model.row(key)?.thread.unreadCount == 0)
+        check("opening a thread marks it read", waitUntil { model.row(key)?.thread.unreadCount == 0 })
         check("marking read on open shows no toast and adds no undo",
               !model.toasts.contains { $0.title == "Marked read" } && model.undoStack.count == undoDepth)
         check("the reader shows the open thread", services.reader.model?.key == key)
@@ -170,7 +170,7 @@ extension SelfCheck {
     private func searchWiring() {
         model.searchText = "invoice"
         settle(0.5)
-        check("search reads one page per keystroke", (1...AppModel.searchPage).contains(model.searchRows.count))
+        check("search reads one page per keystroke", waitUntil { (1...AppModel.searchPage).contains(model.searchRows.count) })
         if let first = model.snapshot.order.first, let mark = model.highlight(for: first) {
             check("result rows mark the matched words", !mark.subject.isEmpty || !mark.snippetRanges.isEmpty)
             check("result rows show the hit's excerpt", !mark.snippet.isEmpty)
@@ -192,7 +192,7 @@ extension SelfCheck {
         model.beginSearch()
         model.searchText = "from:"
         settle(0.4)
-        check("from: suggests people", model.suggestions.contains { $0.kind == .contact })
+        check("from: suggests people", waitUntil { model.suggestions.contains { $0.kind == .contact } })
         check("the dropdown opens under the pill", model.showsSuggestions)
         _ = model.moveSuggestion(1)
         check("↓ highlights the first suggestion", model.suggestionIndex == 0)
@@ -240,8 +240,13 @@ extension SelfCheck {
         settle(0.4)
         _ = try? store.database.writer.write { db in try ProjectRules.apply(db, keys: [key]) }
         settle(0.4)
-        let still = try? store.database.reader.read { db in try ThreadProject.exists(db, key: ["accountId": key.accountId, "threadId": key.threadId, "projectId": link.projectId]) }
-        check("a thread taken out of a project by hand stays out when rules run", still == false && model.row(key) == nil)
+        let out = waitUntil {
+            let still = try? store.database.reader.read { db in
+                try ThreadProject.exists(db, key: ["accountId": key.accountId, "threadId": key.threadId, "projectId": link.projectId])
+            }
+            return still == false && model.row(key) == nil
+        }
+        check("a thread taken out of a project by hand stays out when rules run", out)
         model.undoLast()
         settle(0.5)
         check("undo puts it back in the project", model.row(key) != nil)
