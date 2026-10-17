@@ -45,6 +45,8 @@ final class Preferences {
     var density: Density { didSet { save("density", density.rawValue) } }
     /// Fades read mail older than a month.
     var dimReadByAge: Bool { didSet { save("dimReadByAge", dimReadByAge) } }
+    /// Shows each sender's site icon (fetched once, cached on this Mac) instead of initials.
+    var showSenderLogos: Bool { didSet { save("showSenderLogos", showSenderLogos) } }
     var notificationsEnabled: Bool { didSet { save("notifications", notificationsEnabled) } }
     var notifyOnlyImportant: Bool { didSet { save("notifyOnlyImportant", notifyOnlyImportant) } }
     var splitInbox: Bool { didSet { save("splitInbox", splitInbox) } }
@@ -58,6 +60,7 @@ final class Preferences {
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .auto
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
+        showSenderLogos = defaults.object(forKey: "showSenderLogos") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         notifyOnlyImportant = defaults.object(forKey: "notifyOnlyImportant") as? Bool ?? true
         splitInbox = defaults.object(forKey: "splitInbox") as? Bool ?? true
