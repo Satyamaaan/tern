@@ -51,14 +51,21 @@ final class Integration {
 
     private func wireGoogle() {
         services.hasGoogleClient = { (try? GoogleClientConfigStore().load()) != nil }
+        services.googleClientId = { (try? GoogleClientConfigStore().load())?.clientId }
 
         services.saveGoogleClient = { [weak self] clientId, clientSecret in
             let config = GoogleClientConfig(
                 clientId: clientId.trimmingCharacters(in: .whitespacesAndNewlines),
                 clientSecret: clientSecret.trimmingCharacters(in: .whitespacesAndNewlines))
-            try config.validate()
-            try GoogleClientConfigStore().save(config)
-            self?.google = GoogleAccounts(config: config)
+            try self?.useGoogleClient(config)
+        }
+
+        services.importGoogleClient = { [weak self] data in
+            let config: GoogleClientConfig
+            do { config = try GoogleClientConfig(downloadedJSON: data) } catch let error as GoogleClientConfigError {
+                throw ClientProblem(error)
+            }
+            try self?.useGoogleClient(config)
         }
 
         services.connectAccount = { [weak self] in
@@ -82,6 +89,32 @@ final class Integration {
                     account.syncError = nil
                 }
             }.value
+        }
+    }
+
+    /// Validates and stores the user's OAuth client; accounts sign in through it from now on.
+    private func useGoogleClient(_ config: GoogleClientConfig) throws {
+        do {
+            try config.validate()
+            try GoogleClientConfigStore().save(config)
+        } catch let error as GoogleClientConfigError {
+            throw ClientProblem(error)
+        }
+        google = GoogleAccounts(config: config)
+    }
+
+    /// What went wrong with an entered or imported OAuth client, in words for the person entering it.
+    struct ClientProblem: LocalizedError {
+        let error: GoogleClientConfigError
+        init(_ error: GoogleClientConfigError) { self.error = error }
+
+        var errorDescription: String? {
+            switch error {
+            case .invalidClientId: "That client ID doesn't look right. It ends in .apps.googleusercontent.com."
+            case .invalidClientSecret: "Add the client secret too (it starts with GOCSPX-)."
+            case .notDesktopClient: "That file is for a Web application client. Tern needs a Desktop app client."
+            case .unreadableFile: "That isn't the JSON file Google offers when you create an OAuth client."
+            }
         }
     }
 

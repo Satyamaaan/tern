@@ -62,6 +62,8 @@ final class SettingsState {
     var aiModel: String
     var autoProjects: Bool
     var indexStatus: String?
+    /// Opens the Google client editor at once (snapshots).
+    var editsGoogleClient = false
 
     init(model: AppModel, shell: ShellActions?) {
         self.model = model
@@ -262,6 +264,9 @@ private struct AccountsSettings: View {
                 if let message { Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
             }
             .padding(.top, 16)
+            .padding(.bottom, 28)
+            Hairline()
+            GoogleClientSection(startEditing: state.editsGoogleClient)
         }
     }
 

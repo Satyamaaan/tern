@@ -45,6 +45,10 @@ final class AppServices {
     }
     /// Whether a Google OAuth client is stored.
     var hasGoogleClient: () -> Bool = { false }
+    /// The stored client's ID, for Settings to show masked.
+    var googleClientId: () -> String? = { nil }
+    /// Stores the client from the JSON file Google offers when it is created (`client_secret_….json`).
+    var importGoogleClient: (Data) async throws -> Void = { _ in throw ShellError.notAvailable }
     /// Live sync progress, set by the sync engine. Nil shows the state stored on the accounts.
     var syncProgress: SyncProgress?
     /// True while the network is unreachable.
