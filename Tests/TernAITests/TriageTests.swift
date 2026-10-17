@@ -186,6 +186,8 @@ private func queue(_ database: AppDatabase, _ provider: FakeProvider, batchSize:
         toList: [Participant(email: me.email)], subject: "New", snippet: "Free tomorrow?", bodyText: "Free tomorrow?",
         bodyState: .full, labelIds: [SystemLabel.inbox])])
     try await waitUntil { (try? aiRows(database).count) == 2 }
+    // The pass writes its rows before it reports idle; wait for the report rather than racing it.
+    for _ in 0..<200 where await triage.currentStatus.state != .idle { try await Task.sleep(for: .milliseconds(10)) }
     await triage.stop()
     #expect(provider.requests.count == 2)
     #expect(await triage.currentStatus.state == .idle)

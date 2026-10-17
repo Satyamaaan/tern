@@ -5,7 +5,7 @@ import TernCore
 @testable import TernSync
 
 /// A clock whose sleeps return at once and move time forward, so backoff and timers cost nothing.
-final class TestClock: SyncClock, @unchecked Sendable {
+final class EngineTestClock: SyncClock, @unchecked Sendable {
     private let lock = NSLock()
     private var current: Date
 
@@ -57,13 +57,13 @@ struct Harness {
     let store: MailStore
     let fake: FakeGmail
     let sync: AccountSync
-    let clock: TestClock
+    let clock: EngineTestClock
     let configuration: SyncConfiguration
     var accountId: String { testEmail }
 
     init(configuration: SyncConfiguration = .test(), fake: FakeGmail? = nil, store: MailStore? = nil) throws {
         self.store = try store ?? MailStore(AppDatabase.inMemory())
-        let clock = TestClock()
+        let clock = EngineTestClock()
         self.clock = clock
         self.fake = fake ?? FakeGmail(email: testEmail, sleep: { _ in })
         self.configuration = configuration

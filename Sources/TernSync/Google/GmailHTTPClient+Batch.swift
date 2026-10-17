@@ -42,7 +42,7 @@ extension GmailHTTPClient {
         var found: [GmailMessage] = []
         var retries = 0
         var refreshedAuth = false
-        let cost = GmailQuota.messagesGet(format)
+        let cost = GmailQuotaCost.messagesGet(format)
 
         while !pending.isEmpty {
             let paths = pending.map { "/gmail/v1/users/me/messages/\(Self.escape($0))?format=\(format.rawValue)" }

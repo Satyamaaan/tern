@@ -20,8 +20,8 @@ public struct GmailQuota: Sendable, Hashable {
     public var profile = 1
     public var labels = 1
     public var changeLabel = 5
-    public var attachment = 5
-    public var trashThread = 10
+    public var attachment = 20
+    public var trashThread = 20
     public var sendAs = 1
 
     public init() {}

@@ -211,7 +211,7 @@ import TernCore
     let fake = FakeGmail(email: testEmail, sleep: { _ in })
     await seed(fake, count: 80, spacing: 12 * 3600)
     let sync = AccountSync(account: Account(email: testEmail), store: store, api: fake, encodeDraft: testEncoder,
-                           configuration: .test(), clock: TestClock(), statusSink: { phases.append($0) })
+                           configuration: .test(), clock: EngineTestClock(), statusSink: { phases.append($0) })
     try await sync.initialSync()
     while try await sync.backfillStep() {}
     let seen = phases.snapshots
@@ -269,7 +269,7 @@ final class PhaseLog: @unchecked Sendable {
 }
 
 @Test func quotaBudgetKeepsReservesForInteractiveWork() async throws {
-    let clock = TestClock()
+    let clock = EngineTestClock()
     let budget = QuotaBudget(unitsPerMinute: 600, bulkReserve: 100, backgroundReserve: 200, clock: clock)
     try await budget.acquire(400, priority: .background)
     #expect(await budget.delay(for: 50, priority: .background) == 60)

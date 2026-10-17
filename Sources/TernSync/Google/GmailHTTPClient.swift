@@ -51,12 +51,12 @@ public final class GmailHTTPClient: GmailAPI {
     // MARK: - Profile and labels
 
     public func profile() async throws -> GmailProfile {
-        try await get("users/me/profile", cost: GmailQuota.getProfile)
+        try await get("users/me/profile", cost: GmailQuotaCost.getProfile)
     }
 
     public func labels() async throws -> [GmailLabel] {
         struct List: Decodable { var labels: [GmailLabel]? }
-        let list: List = try await get("users/me/labels", cost: GmailQuota.labelsList)
+        let list: List = try await get("users/me/labels", cost: GmailQuotaCost.labelsList)
         return list.labels ?? []
     }
 
@@ -66,12 +66,12 @@ public final class GmailHTTPClient: GmailAPI {
             var labelListVisibility = "labelShow"
             var messageListVisibility = "show"
         }
-        return try await send("POST", "users/me/labels", json: Body(name: name), cost: GmailQuota.labelsCreate,
+        return try await send("POST", "users/me/labels", json: Body(name: name), cost: GmailQuotaCost.labelsCreate,
                               idempotent: false)
     }
 
     public func deleteLabel(id: String) async throws {
-        _ = try await perform(request("DELETE", "users/me/labels/\(Self.escape(id))"), cost: GmailQuota.labelsDelete)
+        _ = try await perform(request("DELETE", "users/me/labels/\(Self.escape(id))"), cost: GmailQuotaCost.labelsDelete)
     }
 
     // MARK: - Messages and history
@@ -83,14 +83,14 @@ public final class GmailHTTPClient: GmailAPI {
         if let pageToken { items.append(("pageToken", pageToken)) }
         items.append(("maxResults", String(min(max(1, maxResults), 500))))
         if labelIds.contains(where: { $0 == "SPAM" || $0 == "TRASH" }) { items.append(("includeSpamTrash", "true")) }
-        return try await get("users/me/messages", query: items, cost: GmailQuota.messagesList)
+        return try await get("users/me/messages", query: items, cost: GmailQuotaCost.messagesList)
     }
 
     public func history(startHistoryId: String, pageToken: String?) async throws -> GmailHistoryPage {
         var items = [("startHistoryId", startHistoryId), ("maxResults", "500")]
         if let pageToken { items.append(("pageToken", pageToken)) }
         do {
-            return try await get("users/me/history", query: items, cost: GmailQuota.historyList)
+            return try await get("users/me/history", query: items, cost: GmailQuotaCost.historyList)
         } catch GmailAPIError.notFound {
             throw GmailAPIError.historyExpired
         }
@@ -109,23 +109,23 @@ public final class GmailHTTPClient: GmailAPI {
             var request = try request("POST", "users/me/messages/batchModify")
             request.httpBody = try JSONEncoder().encode(Body(ids: ids, addLabelIds: add, removeLabelIds: remove))
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            _ = try await perform(request, cost: GmailQuota.messagesBatchModify)
+            _ = try await perform(request, cost: GmailQuotaCost.messagesBatchModify)
         }
     }
 
     public func trashThread(id: String) async throws {
-        _ = try await perform(request("POST", "users/me/threads/\(Self.escape(id))/trash"), cost: GmailQuota.threadsTrash)
+        _ = try await perform(request("POST", "users/me/threads/\(Self.escape(id))/trash"), cost: GmailQuotaCost.threadsTrash)
     }
 
     public func untrashThread(id: String) async throws {
-        _ = try await perform(request("POST", "users/me/threads/\(Self.escape(id))/untrash"), cost: GmailQuota.threadsUntrash)
+        _ = try await perform(request("POST", "users/me/threads/\(Self.escape(id))/untrash"), cost: GmailQuotaCost.threadsUntrash)
     }
 
     public func attachment(messageId: String, attachmentId: String) async throws -> Data {
         struct Body: Decodable { var data: String? }
         let body: Body = try await get(
             "users/me/messages/\(Self.escape(messageId))/attachments/\(Self.escape(attachmentId))",
-            cost: GmailQuota.attachmentsGet)
+            cost: GmailQuotaCost.attachmentsGet)
         guard let encoded = body.data else { return Data() }
         guard let data = Data(base64URLEncoded: encoded) else {
             throw GmailAPIError.server(status: 200, message: "Attachment data is not base64url")
@@ -139,44 +139,44 @@ public final class GmailHTTPClient: GmailAPI {
         if raw.count > options.uploadThreshold {
             let metadata = threadId.map { ["threadId": $0] }
             return try await upload("POST", "users/me/messages/send", raw: raw, metadata: metadata,
-                                    cost: GmailQuota.messagesSend, idempotent: false)
+                                    cost: GmailQuotaCost.messagesSend, idempotent: false)
         }
         return try await send("POST", "users/me/messages/send", json: MessageBody(raw: raw, threadId: threadId),
-                              cost: GmailQuota.messagesSend, idempotent: false)
+                              cost: GmailQuotaCost.messagesSend, idempotent: false)
     }
 
     public func createDraft(raw: Data, threadId: String?) async throws -> GmailDraft {
         if raw.count > options.uploadThreshold {
             let metadata = threadId.map { DraftMetadata(id: nil, message: ["threadId": $0]) }
-            return try await upload("POST", "users/me/drafts", raw: raw, metadata: metadata, cost: GmailQuota.draftsCreate,
+            return try await upload("POST", "users/me/drafts", raw: raw, metadata: metadata, cost: GmailQuotaCost.draftsCreate,
                                     idempotent: false)
         }
         return try await send("POST", "users/me/drafts",
                               json: DraftBody(id: nil, message: MessageBody(raw: raw, threadId: threadId)),
-                              cost: GmailQuota.draftsCreate, idempotent: false)
+                              cost: GmailQuotaCost.draftsCreate, idempotent: false)
     }
 
     public func updateDraft(id: String, raw: Data, threadId: String?) async throws -> GmailDraft {
         let path = "users/me/drafts/\(Self.escape(id))"
         if raw.count > options.uploadThreshold {
             let metadata = DraftMetadata(id: id, message: threadId.map { ["threadId": $0] })
-            return try await upload("PUT", path, raw: raw, metadata: metadata, cost: GmailQuota.draftsUpdate, idempotent: true)
+            return try await upload("PUT", path, raw: raw, metadata: metadata, cost: GmailQuotaCost.draftsUpdate, idempotent: true)
         }
         return try await send("PUT", path, json: DraftBody(id: id, message: MessageBody(raw: raw, threadId: threadId)),
-                              cost: GmailQuota.draftsUpdate)
+                              cost: GmailQuotaCost.draftsUpdate)
     }
 
     public func deleteDraft(id: String) async throws {
-        _ = try await perform(request("DELETE", "users/me/drafts/\(Self.escape(id))"), cost: GmailQuota.draftsDelete)
+        _ = try await perform(request("DELETE", "users/me/drafts/\(Self.escape(id))"), cost: GmailQuotaCost.draftsDelete)
     }
 
     public func sendDraft(id: String) async throws -> GmailMessageRef {
-        try await send("POST", "users/me/drafts/send", json: ["id": id], cost: GmailQuota.draftsSend, idempotent: false)
+        try await send("POST", "users/me/drafts/send", json: ["id": id], cost: GmailQuotaCost.draftsSend, idempotent: false)
     }
 
     public func sendAs() async throws -> [GmailSendAs] {
         struct List: Decodable { var sendAs: [GmailSendAs]? }
-        let list: List = try await get("users/me/settings/sendAs", cost: GmailQuota.sendAsList)
+        let list: List = try await get("users/me/settings/sendAs", cost: GmailQuotaCost.sendAsList)
         return list.sendAs ?? []
     }
 

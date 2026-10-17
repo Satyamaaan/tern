@@ -3,7 +3,7 @@ import Foundation
 /// Gmail quota cost of each call, in quota units, under the model Google applies to Cloud projects
 /// created on or after 2026-05-01 (every Tern user's own project).
 /// Source: developers.google.com/workspace/gmail/api/reference/quota
-enum GmailQuota {
+enum GmailQuotaCost {
     static let getProfile = 1
     static let labelsList = 1
     static let labelsCreate = 5
