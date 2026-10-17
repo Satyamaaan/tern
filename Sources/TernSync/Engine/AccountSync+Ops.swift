@@ -527,7 +527,7 @@ extension AccountSync {
                 var labels: [String: [String]] = [:]
                 for message in fetched { labels[message.id] = message.labelIds ?? [] }
                 let update = labels
-                _ = try? await write { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
+                _ = try? await writeServer { db in try MailStore.applyServerLabels(db, accountId: accountId, update) }
             }
         case .sendDraft:
             try? await restoreDraftState(op, state: .failed, error: error)

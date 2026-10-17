@@ -218,6 +218,19 @@ public final class SyncStatus: Identifiable {
     }
 }
 
+/// Counts the transactions that wrote Gmail's state for one account (history, resyncs, fetched
+/// messages). Each bumps it from inside its transaction, so a fetch can compare, inside its own write
+/// transaction, against the value it saw before it went to Gmail: a change means something newer
+/// may already be stored.
+final class ServerWriteCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func bump() { lock.withLock { count += 1 } }
+}
+
 extension Array {
     /// Consecutive slices of at most `size` elements.
     func syncChunks(_ size: Int) -> [[Element]] {

@@ -113,6 +113,34 @@ extension MailStore {
         try applyRules(db, keys: touched)
     }
 
+    /// For messages fetched before something newer was stored (a history poll landed meanwhile):
+    /// stores their bodies and attachments, keeping the labels they have now; headers never change.
+    /// Messages that aren't stored are skipped and returned, since history may have deleted them.
+    public static func upsertServerBodies(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment]) throws -> [String] {
+        var keep: [MailMessage] = []
+        var skipped: [String] = []
+        for (accountId, items) in Dictionary(grouping: messages, by: \.accountId) {
+            var stored: [String: [String]] = [:]
+            for chunk in chunked(items.map(\.id), 500) {
+                stored.merge(try messageLabels(db, accountId: accountId, messageIds: chunk)) { $1 }
+            }
+            for var message in items {
+                guard let labels = stored[message.id] else {
+                    skipped.append(message.id)
+                    continue
+                }
+                message.labelIds = labels
+                message.syncFlagsFromLabels()
+                keep.append(message)
+            }
+        }
+        let kept = Set(keep.map(\.key))
+        try upsertServerMessages(db, keep, attachments: attachments.filter {
+            kept.contains(MessageKey(accountId: $0.accountId, messageId: $0.messageId))
+        })
+        return skipped
+    }
+
     /// Sets Gmail's current labels on stored messages, then replays unconfirmed local changes.
     /// Messages that aren't stored are ignored; unchanged ones are not rewritten. Rules run for the
     /// threads that changed (`applyRules`).

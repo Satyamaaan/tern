@@ -44,8 +44,8 @@ public actor AccountSync {
     /// When the earliest deferred op becomes due.
     var nextOpAt: Date?
     var consecutiveFailures = 0
-    /// Bumped whenever history changes are applied, so a fetch that overlapped one can tell.
-    var historyGeneration = 0
+    /// Bumped inside every write of Gmail's state (`writeServer`), so a fetch that overlapped one can tell.
+    nonisolated let serverWrites = ServerWriteCounter()
     /// When bulk or background work can next afford a step.
     var nextBackgroundAt: Date?
     var nextTrickleAt = Date.distantPast
@@ -412,6 +412,16 @@ public actor AccountSync {
 
     func write<T: Sendable>(_ updates: @escaping @Sendable (Database) throws -> T) async throws -> T {
         try await store.database.writer.write(updates)
+    }
+
+    /// A write of Gmail's state (messages, labels, deletions it reported): bumps `serverWrites` in
+    /// the same transaction.
+    func writeServer<T: Sendable>(_ updates: @escaping @Sendable (Database) throws -> T) async throws -> T {
+        let counter = serverWrites
+        return try await write { db in
+            counter.bump()
+            return try updates(db)
+        }
     }
 
     /// A short synchronous write for op bookkeeping that must land even while the task is being
