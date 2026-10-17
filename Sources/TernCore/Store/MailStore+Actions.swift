@@ -52,9 +52,23 @@ public enum MailAction: Codable, Hashable, Sendable {
 public struct UndoToken: Sendable, Hashable {
     public let action: MailAction
     public let threads: [ThreadKey]
-    let opIds: [Int64]
-    let previousLabels: [MessageKey: [String]]
+    /// The ops the action queued, oldest first.
+    let ops: [QueuedChanges]
     let previousSnoozes: [ThreadKey: Date?]
+}
+
+/// One op an action queued: its exact per-message changes, and each changed message's labels right
+/// after it, so undo can tell whether anything changed those messages since.
+struct QueuedChanges: Sendable, Hashable {
+    let opId: Int64
+    let accountId: String
+    let changes: [LabelChange]
+    let labelsAfter: [String: [String]]
+}
+
+extension LabelChange {
+    /// The change that takes this one back.
+    var reversed: LabelChange { LabelChange(messageId: messageId, add: remove, remove: add) }
 }
 
 extension MailStore {
@@ -65,9 +79,8 @@ extension MailStore {
     }
 
     public static func perform(_ db: Database, _ action: MailAction, on threads: [ThreadKey]) throws -> UndoToken {
-        var previousLabels: [MessageKey: [String]] = [:]
         var previousSnoozes: [ThreadKey: Date?] = [:]
-        var opIds: [Int64] = []
+        var ops: [QueuedChanges] = []
 
         for (accountId, keys) in Dictionary(grouping: threads, by: \.accountId) {
             let threadIds = keys.map(\.threadId)
@@ -86,7 +99,6 @@ extension MailStore {
                         add: change.add.filter { !message.labelIds.contains($0) },
                         remove: change.remove.filter { message.labelIds.contains($0) })
                     guard !effective.add.isEmpty || !effective.remove.isEmpty else { continue }
-                    previousLabels[MessageKey(accountId: accountId, messageId: message.id)] = message.labelIds
                     newLabels[message.id] = labels.sorted()
                     changes.append(effective)
                 }
@@ -108,15 +120,13 @@ extension MailStore {
                 let payload = LabelOpPayload(action: action.name, threadIds: threadIds, changes: changes)
                 let op = PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload))
                 try op.insert(db)
-                opIds.append(db.lastInsertedRowID)
+                ops.append(QueuedChanges(opId: db.lastInsertedRowID, accountId: accountId, changes: changes, labelsAfter: newLabels))
             }
         }
 
         // Gmail echoes the change back unchanged, so sync won't re-run label-based project rules.
         if action.changesUserLabels { try ProjectRules.apply(db, keys: Set(threads)) }
-        return UndoToken(
-            action: action, threads: threads, opIds: opIds, previousLabels: previousLabels,
-            previousSnoozes: previousSnoozes)
+        return UndoToken(action: action, threads: threads, ops: ops, previousSnoozes: previousSnoozes)
     }
 
     /// Applies a different action to each group of threads (e.g. a label whose id differs per account)
@@ -129,51 +139,49 @@ extension MailStore {
     public static func perform(_ db: Database, _ actions: [(action: MailAction, threads: [ThreadKey])]) throws -> UndoToken {
         guard let first = actions.first else { return try perform(db, .archive, on: []) }
         var threads: [ThreadKey] = []
-        var opIds: [Int64] = []
-        var previousLabels: [MessageKey: [String]] = [:]
+        var ops: [QueuedChanges] = []
         var previousSnoozes: [ThreadKey: Date?] = [:]
         for item in actions {
             let token = try perform(db, item.action, on: item.threads)
             threads += token.threads
-            opIds += token.opIds
-            previousLabels.merge(token.previousLabels) { earlier, _ in earlier }
+            ops += token.ops
             previousSnoozes.merge(token.previousSnoozes) { earlier, _ in earlier }
         }
-        return UndoToken(action: first.action, threads: threads, opIds: opIds, previousLabels: previousLabels,
-                         previousSnoozes: previousSnoozes)
+        return UndoToken(action: first.action, threads: threads, ops: ops, previousSnoozes: previousSnoozes)
     }
 
-    /// Puts threads back. If Gmail hasn't seen the action yet, the queued op is simply dropped.
+    /// Puts threads back by taking each message's exact change back from its current labels, so changes
+    /// made since (another action, sync) survive. A queued op is dropped only when Gmail can't have
+    /// seen it (it was never dispatched) and nothing has changed its messages since; otherwise the
+    /// exact reverse goes to Gmail after it, as one op per account.
     public func undo(_ token: UndoToken) throws {
         try database.writer.write { db in
-            let stillQueued = try PendingOp
-                .filter(token.opIds.contains(Column("id")) && Column("state") == PendingOp.State.pending.rawValue)
-                .fetchAll(db)
-            let canDrop = stillQueued.count == token.opIds.count
-            if canDrop {
-                _ = try PendingOp.deleteAll(db, keys: token.opIds)
+            var reverse: [String: [LabelChange]] = [:]
+            // Newest first, so each op is checked against the labels it left behind.
+            for queued in token.ops.reversed() {
+                let current = try Self.messageLabels(db, accountId: queued.accountId, messageIds: Array(queued.labelsAfter.keys))
+                let untouched = queued.labelsAfter.allSatisfy { id, after in current[id].map(Set.init) == Set(after) }
+                if untouched, let op = try PendingOp.fetchOne(db, key: queued.opId), op.state == .pending, !op.dispatched {
+                    try op.delete(db)
+                } else {
+                    reverse[queued.accountId, default: []] += queued.changes.map(\.reversed)
+                }
+                var restore: [String: [String]] = [:]
+                for change in queued.changes {
+                    guard var labels = current[change.messageId].map(Set.init) else { continue }
+                    labels.subtract(change.add)
+                    labels.formUnion(change.remove)
+                    restore[change.messageId] = labels.sorted()
+                }
+                try Self.setLabels(db, accountId: queued.accountId, restore)
             }
 
-            for (accountId, entries) in Dictionary(grouping: token.previousLabels, by: \.key.accountId) {
-                var restore: [String: [String]] = [:]
-                var changes: [LabelChange] = []
-                let current = try Self.messageLabels(db, accountId: accountId, messageIds: entries.map(\.key.messageId))
-                for (key, previous) in entries {
-                    restore[key.messageId] = previous
-                    let now = current[key.messageId] ?? []
-                    let change = LabelChange(
-                        messageId: key.messageId,
-                        add: previous.filter { !now.contains($0) },
-                        remove: now.filter { !previous.contains($0) })
-                    if !change.add.isEmpty || !change.remove.isEmpty { changes.append(change) }
-                }
-                try Self.setLabels(db, accountId: accountId, restore)
-                if !canDrop, !changes.isEmpty {
-                    let threadIds = token.threads.filter { $0.accountId == accountId }.map(\.threadId)
-                    let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: changes)
-                    let op = PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload))
-                    try op.insert(db)
-                }
+            for (accountId, changes) in reverse {
+                let net = Self.netChanges(changes)
+                guard !net.isEmpty else { continue }
+                let threadIds = token.threads.filter { $0.accountId == accountId }.map(\.threadId)
+                let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: net)
+                try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
             }
 
             if token.action.changesUserLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
@@ -209,6 +217,32 @@ extension MailStore {
             } else {
                 try ProjectRules.removeByHand(db, threads, from: projectId)
             }
+        }
+    }
+
+    /// One change per message with the combined effect of `changes` applied in order.
+    static func netChanges(_ changes: [LabelChange]) -> [LabelChange] {
+        var order: [String] = []
+        var add: [String: Set<String>] = [:]
+        var remove: [String: Set<String>] = [:]
+        for change in changes {
+            if add[change.messageId] == nil {
+                order.append(change.messageId)
+                add[change.messageId] = []
+                remove[change.messageId] = []
+            }
+            for label in change.remove {
+                add[change.messageId]?.remove(label)
+                remove[change.messageId]?.insert(label)
+            }
+            for label in change.add {
+                remove[change.messageId]?.remove(label)
+                add[change.messageId]?.insert(label)
+            }
+        }
+        return order.compactMap { id in
+            let change = LabelChange(messageId: id, add: (add[id] ?? []).sorted(), remove: (remove[id] ?? []).sorted())
+            return change.add.isEmpty && change.remove.isEmpty ? nil : change
         }
     }
 

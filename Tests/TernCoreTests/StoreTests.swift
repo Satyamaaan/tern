@@ -83,6 +83,55 @@ private func makeStore() throws -> MailStore {
     #expect(inverse.changes == [LabelChange(messageId: "m1", add: ["UNREAD"], remove: [])])
 }
 
+/// Gmail's labels for `id` once every queued label op has gone out, starting from `gmail`.
+private func labelsAfterQueue(_ store: MailStore, _ id: String, from gmail: [String]) throws -> Set<String> {
+    var labels = Set(gmail)
+    for op in try store.database.reader.read({ db in try PendingOp.order(Column("id")).fetchAll(db) }) {
+        let payload = try JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8))
+        for change in payload.changes where change.messageId == id {
+            labels.subtract(change.remove)
+            labels.formUnion(change.add)
+        }
+    }
+    return labels
+}
+
+@Test func undoKeepsChangesMadeSince() throws {
+    let store = try makeStore()
+    try store.upsertMessages([message("m1", thread: "t1", date: 100, labels: ["INBOX", "UNREAD"])])
+    let key = ThreadKey(accountId: account.id, threadId: "t1")
+    // Star, then the reader marks it read, then z undoes the star.
+    let star = try store.perform(.star, on: [key])
+    try store.perform(.markRead, on: [key])
+    try store.undo(star)
+
+    let local = try #require(try store.threadDetail(key)?.messages.first)
+    #expect(Set(local.labelIds) == ["INBOX"], "unstarred and still read")
+    #expect(try labelsAfterQueue(store, "m1", from: ["INBOX", "UNREAD"]) == ["INBOX"], "Gmail ends up the same")
+    let ops = try store.database.reader.read { db in try PendingOp.order(Column("id")).fetchAll(db) }
+    #expect(ops.count == 3, "star and read stay queued; the star is taken back after them")
+    let inverse = try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[2].payload.utf8))
+    #expect(inverse.changes == [LabelChange(messageId: "m1", add: [], remove: ["STARRED"])])
+}
+
+@Test func undoOfAnOpThatMayHaveReachedGmailQueuesTheReverse() throws {
+    let store = try makeStore()
+    try store.upsertMessages([message("m1", thread: "t1", date: 100, labels: ["INBOX"])])
+    let key = ThreadKey(accountId: account.id, threadId: "t1")
+    let token = try store.perform(.archive, on: [key])
+    // Sent, its response lost: back in the queue, but Gmail may have archived it.
+    try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET dispatched = 1, attempts = 1") }
+    try store.undo(token)
+
+    #expect(try store.threadRows(in: .unifiedInbox).count == 1)
+    let ops = try store.database.reader.read { db in try PendingOp.order(Column("id")).fetchAll(db) }
+    #expect(ops.count == 2)
+    let inverse = try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[1].payload.utf8))
+    #expect(inverse.action == "undo-archive")
+    #expect(inverse.changes == [LabelChange(messageId: "m1", add: ["INBOX"], remove: [])])
+    #expect(try labelsAfterQueue(store, "m1", from: ["INBOX"]) == ["INBOX"])
+}
+
 @Test func snoozeLeavesInboxAndWakesUnread() throws {
     let store = try makeStore()
     try store.upsertMessages([message("m1", thread: "t1", date: 100, labels: ["INBOX"])])

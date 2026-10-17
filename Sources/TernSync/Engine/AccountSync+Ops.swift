@@ -69,7 +69,9 @@ extension AccountSync {
         nextOpAt = min(nextOpAt ?? date, date)
     }
 
-    private func execute(_ op: PendingOp, now: Date) async throws -> OpOutcome {
+    /// Sends one op read from the queue. Every kind claims its row first, so an op undo or discard
+    /// removed after the queue was read is never sent.
+    func execute(_ op: PendingOp, now: Date) async throws -> OpOutcome {
         do {
             switch op.kind {
             case .modifyLabels: try await sendLabelChanges(op)
@@ -87,12 +89,11 @@ extension AccountSync {
 
     /// One batchModify per distinct (add, remove) pair, at most `maxBatchModifyIds` ids each.
     private func sendLabelChanges(_ op: PendingOp) async throws {
-        guard let opId = op.id else { return }
-        guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else {
-            try await deleteOp(opId)
+        guard let opId = op.id, let claimed = try claimOp(opId) else { return }
+        guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(claimed.payload.utf8)) else {
+            try deleteOpNow(opId)
             return
         }
-        try await setOpState(opId, .inflight)
         // Messages Gmail has deleted since (history removed them here) would fail the whole call.
         let accountId = self.accountId
         let ids = payload.changes.map(\.messageId)
@@ -273,6 +274,7 @@ extension AccountSync {
             // Undone in the meantime?
             guard var fresh = try PendingOp.fetchOne(db, key: opId), fresh.state == .pending else { return .gone }
             fresh.state = .inflight
+            fresh.dispatched = true
             try fresh.update(db)
             draft.state = .sending
             draft.lastError = nil
@@ -409,6 +411,7 @@ extension AccountSync {
                 return .gone
             }
             fresh.state = .inflight
+            fresh.dispatched = true
             try fresh.update(db)
             return .ready(draft, account)
         }
@@ -447,7 +450,7 @@ extension AccountSync {
                 try Draft.fetchOne(db, key: payload.draftId).flatMap { $0.accountId == accountId ? $0.gmailDraftId : nil }
             }
         }
-        try await setOpState(opId, .inflight)
+        guard try claimOp(opId) != nil else { return }
         if let gmailDraftId {
             do {
                 try await api.deleteDraft(id: gmailDraftId)
@@ -557,8 +560,17 @@ extension AccountSync {
         op.kind == .sendDraft && (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.sendingDraftId != nil
     }
 
-    private func setOpState(_ id: Int64, _ state: PendingOp.State) async throws {
-        try await updateOp(id) { $0.state = state }
+    /// Claims a queued op for sending in one write: pending → inflight, and `dispatched`, since a
+    /// request for it may reach Gmail from now on. Nil when undo removed it or it isn't pending any
+    /// more; it must not be sent then.
+    private func claimOp(_ id: Int64) throws -> PendingOp? {
+        try writeNow { db in
+            try db.execute(sql: """
+                UPDATE pending_op SET state = 'inflight', dispatched = 1 WHERE id = ? AND state = 'pending'
+                """, arguments: [id])
+            guard db.changesCount > 0 else { return nil }
+            return try PendingOp.fetchOne(db, key: id)
+        }
     }
 
     private func deleteOp(_ id: Int64) async throws {

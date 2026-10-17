@@ -624,10 +624,14 @@ public struct PendingOp: TernRecord, Hashable, Identifiable {
     public var attempts: Int
     public var lastError: String?
     public var state: State
+    /// Set when the sync engine claims the op to send it: from then on a request for it may have
+    /// reached Gmail (even if it's pending again after a failure), so undo can't simply drop it.
+    public var dispatched: Bool
 
     public init(
         id: Int64? = nil, accountId: String, kind: Kind, payload: String, createdAt: Date = Date(),
-        notBefore: Date? = nil, attempts: Int = 0, lastError: String? = nil, state: State = .pending
+        notBefore: Date? = nil, attempts: Int = 0, lastError: String? = nil, state: State = .pending,
+        dispatched: Bool = false
     ) {
         self.id = id
         self.accountId = accountId
@@ -638,6 +642,7 @@ public struct PendingOp: TernRecord, Hashable, Identifiable {
         self.attempts = attempts
         self.lastError = lastError
         self.state = state
+        self.dispatched = dispatched
     }
 
     public mutating func didInsert(_ inserted: InsertionSuccess) {

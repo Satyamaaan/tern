@@ -202,6 +202,45 @@ import TernCore
     try await h.expectMirrorsGmail()
 }
 
+@Test func undoAfterALostResponseStillPutsTheThreadBackInGmail() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 4)
+    try await h.syncFully()
+    let thread = h.thread(seeded[0].threadId)
+    await h.fake.loseNextResponse(on: .batchModify)
+    let token = try h.store.perform(.archive, on: [thread])
+    try await h.sync.drainOps()
+    #expect(await h.fake.labels(of: seeded[0].id)?.contains(SystemLabel.inbox) == false, "Gmail archived it")
+    #expect(try h.ops().first?.state == .pending, "but the answer was lost")
+
+    try h.store.undo(token)
+    #expect(try h.inboxThreadIds().contains(thread.threadId))
+    h.clock.advance(60)
+    try await h.sync.drainOps()
+    try await h.sync.pollHistory()
+    #expect(await h.fake.labels(of: seeded[0].id)?.contains(SystemLabel.inbox) == true)
+    #expect(try h.inboxThreadIds().contains(thread.threadId), "history doesn't archive it again")
+    #expect(try h.ops().isEmpty)
+    try await h.expectMirrorsGmail()
+}
+
+@Test func anOpUndoneAfterTheQueueWasReadIsNeverSent() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 4)
+    try await h.syncFully()
+    let token = try h.store.perform(.trash, on: [h.thread(seeded[0].threadId)])
+    // The drain has read the queue; undo lands before the op goes out.
+    let read = try #require(try h.ops().first)
+    try h.store.undo(token)
+    _ = try await h.sync.execute(read, now: h.clock.now())
+
+    #expect(await h.fake.callCount(.batchModify) == 0)
+    #expect(try h.ops().isEmpty)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
+    #expect(try h.inboxThreadIds().contains(seeded[0].threadId))
+}
+
 @Test func labelOpsSkipMessagesGmailDeletedMeanwhile() async throws {
     let h = try Harness()
     let first = await h.fake.deliver(FakeEmail(subject: "Thread", date: Date(timeIntervalSince1970: 1_700_000_000)))
