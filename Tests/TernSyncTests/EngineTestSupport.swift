@@ -32,7 +32,8 @@ extension SyncConfiguration {
         configuration.listPageSize = 25
         configuration.fetchBatchSize = 10
         configuration.writeBatchSize = 20
-        configuration.recentCount = 30
+        configuration.backfillBatchSize = 10
+        configuration.bulkStepUnits = 600
         configuration.prefetchBatchSize = 15
         configuration.attachmentCacheDirectory = cache
         configuration.observeSystemWake = false
@@ -109,16 +110,48 @@ struct Harness {
     }
 }
 
-/// Seeds `count` messages, oldest first, one minute apart; every `inboxEvery`th stays in the inbox.
+/// The test clock's starting time; seeded mail ends just before it.
+let testNow = Date(timeIntervalSince1970: 1_800_000_000)
+
+/// Seeds `count` messages, oldest first, `spacing` apart, the newest a minute before `testNow`;
+/// every `inboxEvery`th stays in the inbox. With 12-hour spacing, messages 60+ back are older than
+/// the 30 days the initial sync fetches in full.
 @discardableResult
-func seed(_ fake: FakeGmail, count: Int, inboxEvery: Int = 4, start: Date = Date(timeIntervalSince1970: 1_700_000_000)) async -> [GmailMessage] {
+func seed(_ fake: FakeGmail, count: Int, inboxEvery: Int = 4, spacing: TimeInterval = 3600) async -> [GmailMessage] {
     var messages: [GmailMessage] = []
+    let newest = testNow.addingTimeInterval(-60)
     for index in 0..<count {
         let inInbox = index % inboxEvery == 0
         let labels = inInbox ? [SystemLabel.inbox, SystemLabel.unread] : [SystemLabel.categoryUpdates]
         messages.append(await fake.deliver(FakeEmail(
             subject: "Message \(index)", text: "Body of message \(index)",
-            date: start.addingTimeInterval(Double(index) * 60), labels: labels)))
+            date: newest.addingTimeInterval(-Double(count - 1 - index) * spacing), labels: labels)))
     }
     return messages
+}
+
+/// Older than the 30-day window, so backfilled as metadata.
+func isOld(_ message: GmailMessage) -> Bool {
+    (Double(message.internalDate ?? "0") ?? 0) / 1000 <= testNow.timeIntervalSince1970 - 30 * 86_400
+}
+
+extension Harness {
+    func syncFully() async throws {
+        try await sync.initialSync()
+        while try await sync.backfillStep() {}
+    }
+
+    /// Drives `syncOnce` like the run loop, jumping the clock to the next wake-up when idle.
+    func runLoop(until done: () async throws -> Bool, limit: Int = 20_000,
+                 sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        for _ in 0..<limit {
+            if try await done() { return }
+            if try await !sync.syncOnce() {
+                let wakes = await [sync.nextBackgroundAt, sync.nextPollAt, sync.nextOpAt].compactMap { $0 }
+                let next = wakes.min().map { $0.timeIntervalSince(clock.now()) } ?? 1
+                clock.advance(max(0.25, next))
+            }
+        }
+        Issue.record("the loop didn't finish", sourceLocation: sourceLocation)
+    }
 }

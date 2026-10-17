@@ -8,7 +8,10 @@ import AppKit
 
 /// Runs sync for every account. The app creates one, calls `start()`, keeps it for the life of
 /// the app, and reads `statuses` for progress. Sync work runs off the main thread in one
-/// `AccountSync` actor per account.
+/// `AccountSync` actor per account; accounts have separate Gmail quotas and sync in parallel.
+///
+/// The reader calls `fetchBodies(for:)` when a thread opens (older mail is stored without bodies)
+/// and `prefetchBodies(adjacentTo:)` with the threads around the selection.
 ///
 /// Queued actions are noticed automatically: the coordinator observes `pending_op` and wakes the
 /// account's queue whenever an op is added, so `MailStore.perform` needs no extra call (`kick()`
@@ -177,6 +180,22 @@ public final class SyncCoordinator {
 
     // MARK: Requests
 
+    /// Makes sure every message of the thread is stored with its body (call when it opens).
+    /// Interactive priority: it never waits behind the backfill. Returns at once when nothing's missing.
+    public func fetchBodies(for thread: ThreadKey) async throws {
+        guard let sync = syncs[thread.accountId] else { throw SyncError.unknownAccount(thread.accountId) }
+        try await sync.fetchBodies(thread)
+    }
+
+    /// Prefetches bodies of the threads around the selection, when the quota allows. Replaces the
+    /// previous request; returns at once.
+    public func prefetchBodies(adjacentTo threads: [ThreadKey]) {
+        for (accountId, keys) in Dictionary(grouping: threads, by: \.accountId) {
+            guard let sync = syncs[accountId] else { continue }
+            Task { await sync.prefetchAdjacent(keys) }
+        }
+    }
+
     /// A local file for the attachment, downloaded and cached on first use.
     public func downloadAttachment(_ attachment: MailAttachment) async throws -> URL {
         guard let sync = syncs[attachment.accountId] else { throw SyncError.unknownAccount(attachment.accountId) }
@@ -198,7 +217,7 @@ public final class SyncCoordinator {
             account: account, store: store, api: apiProvider(account.id), encodeDraft: encodeDraft,
             configuration: configuration, clock: clock, statusSink: { relay.yield($0) })
         syncs[account.id] = sync
-        let status = SyncStatus(accountId: account.id)
+        let status = SyncStatus(accountId: account.id, quotaLimit: configuration.quota.unitsPerMinute)
         status.apply(SyncStatusSnapshot(accountId: account.id, state: account.syncState,
                                         lastSyncAt: account.lastSyncAt, lastError: account.syncError))
         statuses[account.id] = status

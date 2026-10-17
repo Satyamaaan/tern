@@ -149,6 +149,35 @@ extension AccountSync {
         var sendingDraftId: String?
     }
 
+    /// The Message-ID every copy of a draft goes out with. Derived from the draft id, so it's the
+    /// same on every attempt without storing anything, and a retry can look for a send that went
+    /// through (`rfc822msgid:` in Sent). The engine sets it on whatever `encodeDraft` returns, so
+    /// the MIME builder needn't, but may use it.
+    public static func messageId(for draft: Draft, account: Account) -> String {
+        let local = draft.id.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == ".") }
+        let domain = account.email.split(separator: "@").last.map(String.init) ?? "tern.local"
+        // FNV-1a keeps odd ids stable across launches (Swift's hashValue isn't).
+        let name = local.isEmpty
+            ? String(draft.id.utf8.reduce(UInt64(0xcbf2_9ce4_8422_2325)) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }, radix: 36)
+            : local
+        return "<tern.\(name)@\(domain)>"
+    }
+
+    /// The draft as RFC 822, with its stable Message-ID.
+    private func encoded(_ draft: Draft, _ account: Account) throws -> Data {
+        MailParsing.settingHeader("Message-ID", to: AccountSync.messageId(for: draft, account: account),
+                                  in: try encodeDraft(draft, account))
+    }
+
+    /// The sent message with this Message-ID, if Gmail has one (5 units).
+    private func findSent(messageId: String) async throws -> GmailMessageRef? {
+        let bare = messageId.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
+        let page = try await withRetry { [api] in
+            try await api.messageIds(query: "rfc822msgid:\(bare) in:sent", labelIds: [], pageToken: nil, maxResults: 5)
+        }
+        return page.messages?.first
+    }
+
     /// Sends the draft once its undo window (`notBefore`) and `scheduledAt` have passed: saves it
     /// as a Gmail draft, sends that, then removes it locally and stores the sent message so it
     /// shows in the thread at once.
@@ -184,15 +213,19 @@ extension AccountSync {
         }
 
         var draftMessageIds = draft.gmailMessageId.map { [$0] } ?? []
-        let ref: GmailMessageRef?
-        if let staged = progress.sendingDraftId {
+        var ref: GmailMessageRef?
+        // A retry after a 5xx, a network error or a quit: Gmail may already have sent it.
+        let isRetry = progress.sendingDraftId != nil || op.attempts > 0 || op.lastError != nil
+        if isRetry, let sent = try await findSent(messageId: AccountSync.messageId(for: draft, account: account)) {
+            ref = sent
+        } else if let staged = progress.sendingDraftId {
             do {
                 ref = try await api.sendDraft(id: staged)
             } catch GmailAPIError.notFound {
                 ref = nil
             }
         } else {
-            let saved = try await saveGmailDraft(draft, raw: try encodeDraft(draft, account))
+            let saved = try await saveGmailDraft(draft, raw: try encoded(draft, account))
             if let messageId = saved.message?.id { draftMessageIds.append(messageId) }
             let payload = String(decoding: try JSONEncoder().encode(SendProgress(draftId: draftId, sendingDraftId: saved.id)), as: UTF8.self)
             try writeNow { db in
@@ -263,7 +296,7 @@ extension AccountSync {
         }
         guard case .ready(let draft, let account) = claim else { return }
 
-        let saved = try await saveGmailDraft(draft, raw: try encodeDraft(draft, account))
+        let saved = try await saveGmailDraft(draft, raw: try encoded(draft, account))
         try writeNow { db in
             if var row = try Draft.fetchOne(db, key: draftId) {
                 row.gmailDraftId = saved.id

@@ -109,3 +109,48 @@ import TernCore
     #expect(try h.message("n1").map { !$0.hasAttachments } == true)
     #expect(try h.message("n2")?.bodyState == .metadata, "a body that can't be fetched is left for the prefetch")
 }
+
+@Test func openingAThreadFetchesItsBodiesOnDemand() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 90, spacing: 12 * 3600)
+    try await h.syncFully()
+    let old = seeded[1]
+    #expect(try h.message(old.id)?.bodyState == .metadata)
+
+    await h.fake.resetCallLog()
+    try await h.sync.fetchBodies(h.thread(old.threadId))
+    #expect(try h.message(old.id)?.bodyText == "Body of message 1")
+    #expect(await h.fake.fetchCalls == [FakeGmail.FetchCall(ids: [old.id], format: .full)])
+
+    // Opening it again costs nothing.
+    try await h.sync.fetchBodies(h.thread(old.threadId))
+    #expect(await h.fake.unitsSpent == 60)
+}
+
+@Test func openingAThreadDuringTheBackfillFindsItsMissingMessages() async throws {
+    let h = try Harness()
+    let root = await h.fake.deliver(FakeEmail(subject: "Old plan", date: testNow.addingTimeInterval(-90 * 86_400), labels: []))
+    let reply = await h.fake.deliver(FakeEmail(subject: "Re: Old plan", date: testNow.addingTimeInterval(-60),
+                                               threadId: root.threadId))
+    try await h.sync.initialSync()
+    #expect(try h.message(root.id) == nil, "the old message isn't backfilled yet")
+    #expect(try h.message(reply.id)?.bodyState == .full)
+
+    try await h.sync.fetchBodies(h.thread(root.threadId))
+    let detail = try #require(try h.store.threadDetail(h.thread(root.threadId)))
+    #expect(detail.messages.map(\.id) == [root.id, reply.id])
+    #expect(detail.messages.allSatisfy { $0.bodyState == .full })
+    #expect(await h.fake.threadCalls.last == FakeGmail.FetchCall(ids: [root.threadId], format: .metadata))
+}
+
+@Test func threadsNextToTheSelectionArePrefetched() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 90, spacing: 12 * 3600)
+    try await h.syncFully()
+    let neighbours = [seeded[1], seeded[2]].map { h.thread($0.threadId) }
+
+    await h.sync.prefetchAdjacent(neighbours + [ThreadKey(accountId: "other@example.com", threadId: "x")])
+    while try await h.sync.syncOnce() {}
+    #expect(try h.message(seeded[1].id)?.bodyState == .full)
+    #expect(try h.message(seeded[2].id)?.bodyState == .full)
+}

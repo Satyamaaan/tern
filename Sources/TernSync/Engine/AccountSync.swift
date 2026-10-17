@@ -2,16 +2,27 @@ import Foundation
 import GRDB
 import TernCore
 
-/// Syncs one Gmail account into the local store: initial sync and resumable backfill, history
-/// polling, the pending-op queue (labels, drafts, sending), body prefetch, attachments and server
-/// search. `SyncCoordinator` owns one per account and calls `run()`; every step is also callable
-/// on its own, which is how the tests drive it.
+/// Syncs one Gmail account into the local store within its Gmail quota (6,000 units per minute):
+///
+/// 1. The inbox in full, using threads.get for threads with several messages to fetch.
+/// 2. The last `recentDays` of All Mail in full, newest first.
+/// 3. Older mail as metadata only, newest first, resumable, in the background. Bodies of older
+///    mail come when a thread is opened (`fetchBodies`), for threads next to the selection, and
+///    by a slow trickle while the quota is otherwise idle.
+///
+/// Every call is charged to the account's `QuotaBudget`. History polls, queued actions, sends and
+/// opened threads are interactive and always come first; bulk and background work run in small
+/// steps between them and only spend what they leave over. `SyncCoordinator` owns one actor per
+/// account (accounts have separate quotas and sync in parallel) and calls `run()`; every step is
+/// also callable on its own, which is how the tests drive it.
 ///
 /// Network calls never happen inside a write transaction: each step fetches first, then writes.
 public actor AccountSync {
     public nonisolated let accountId: String
     let store: MailStore
+    /// The Gmail client, charged to `budget`.
     var api: any GmailAPI
+    public nonisolated let budget: QuotaBudget
     let encodeDraft: @Sendable (Draft, Account) throws -> Data
     let configuration: SyncConfiguration
     let clock: any SyncClock
@@ -34,6 +45,19 @@ public actor AccountSync {
     var consecutiveFailures = 0
     /// Bumped whenever history changes are applied, so a fetch that overlapped one can tell.
     var historyGeneration = 0
+    /// When bulk or background work can next afford a step.
+    var nextBackgroundAt: Date?
+    var nextTrickleAt = Date.distantPast
+    /// Inbox and recent-mail fetches still to do, while `syncState == .new`.
+    var initialPlan: InitialPlan?
+    /// The backfill page in progress (unstored ids still to fetch, and the token after it).
+    var backfillPage: BackfillPage?
+    /// Threads fetched whole this run; opening them doesn't need a completeness check.
+    var completeThreads = Set<String>()
+    /// Threads next to the selection, waiting for their bodies.
+    var adjacentQueue: [String] = []
+    /// The client has no threads.get; fall back to messages.get.
+    var threadsUnsupported = false
     private var wakeRequested = false
     private var wakeContinuation: CheckedContinuation<Void, Never>?
 
@@ -46,7 +70,10 @@ public actor AccountSync {
                 statusSink: @escaping @Sendable (SyncStatusSnapshot) -> Void = { _ in }) {
         self.accountId = account.id
         self.store = store
-        self.api = api
+        let budget = QuotaBudget(unitsPerMinute: configuration.quota.unitsPerMinute, bulkReserve: configuration.bulkReserve,
+                                 backgroundReserve: configuration.backgroundReserve, clock: clock)
+        self.budget = budget
+        self.api = BudgetedGmail(base: api, budget: budget, quota: configuration.quota)
         self.encodeDraft = encodeDraft
         self.configuration = configuration
         self.clock = clock
@@ -82,7 +109,7 @@ public actor AccountSync {
 
     /// After the account signs in again (`syncState == .needsAuth`), continues with a fresh client.
     public func resume(api: (any GmailAPI)? = nil) async {
-        if let api { self.api = api }
+        if let api { self.api = BudgetedGmail(base: api, budget: budget, quota: configuration.quota) }
         guard paused || account.syncState == .needsAuth else { return }
         paused = false
         _ = try? await updateAccount { $0.syncState = AccountSync.resumedState($0); $0.syncError = nil }
@@ -112,24 +139,29 @@ public actor AccountSync {
             } catch {
                 if Task.isCancelled { break }
                 await handle(error)
-                if !paused { await idle(seconds: backoff(consecutiveFailures + 1)) }
+                if paused { continue }
+                if case GmailAPIError.rateLimited = error, let until = await budget.pausedUntil {
+                    await idle(until: until)
+                } else {
+                    await idle(seconds: backoff(consecutiveFailures + 1))
+                }
                 continue
             }
             if more || wakeRequested {
                 await Task.yield()
                 continue
             }
-            await idle(until: [nextPollAt, nextOpAt].compactMap { $0 }.min() ?? nextPollAt)
+            await idle(until: [nextPollAt, nextOpAt, nextBackgroundAt].compactMap { $0 }.min() ?? nextPollAt)
         }
     }
 
-    /// One pass: initial sync if needed, queued ops, a history poll when due (with a full resync if
-    /// history expired), then one backfill page or one body-prefetch batch.
-    /// Returns true when more background work is waiting.
+    /// One pass: queued ops, a history poll when due (with a full resync if history expired),
+    /// then one step of bulk or background work if the quota allows.
+    /// Returns true when more background work can run right away.
     @discardableResult
     public func syncOnce() async throws -> Bool {
         try await prepare()
-        if account.historyId == nil || account.syncState == .new { try await initialSync() }
+        if account.historyId == nil { try await startInitialSync() }
         try await drainOps()
 
         let now = clock.now()
@@ -143,8 +175,66 @@ public actor AccountSync {
             }
         }
 
-        if !account.backfillDone, try await backfillStep() { return true }
-        return try await prefetchBodies() > 0
+        let more = try await backgroundStep()
+        await publishQuota()
+        return more
+    }
+
+    /// The next slice of non-interactive work, by priority: bodies of threads next to the
+    /// selection, the initial inbox and recent mail, the older-mail backfill, the body trickle.
+    /// Runs only when the budget can afford it now; otherwise records when it can.
+    func backgroundStep() async throws -> Bool {
+        nextBackgroundAt = nil
+        let quota = configuration.quota
+        if let threadId = adjacentQueue.first {
+            return try await whenAffordable(quota.getThreadFull + 2 * quota.getMessageFull, .bulk) {
+                adjacentQueue.removeAll { $0 == threadId }
+                do {
+                    try await fetchBodies(ThreadKey(accountId: accountId, threadId: threadId))
+                } catch let error as GmailAPIError where error != .notFound {
+                    throw error
+                } catch {
+                    // The thread is gone or can't be read; nothing to prefetch.
+                }
+                return true
+            }
+        }
+        if account.syncState == .new {
+            return try await whenAffordable(configuration.bulkStepUnits, .bulk) { try await initialStep() }
+        }
+        if !account.backfillDone {
+            return try await whenAffordable(configuration.backfillBatchSize * quota.getMessage + quota.list, .background) {
+                try await backfillStep()
+            }
+        }
+        let now = clock.now()
+        guard now >= nextTrickleAt else {
+            nextBackgroundAt = nextTrickleAt
+            return false
+        }
+        let batchCost = configuration.prefetchBatchSize * quota.getMessageFull
+        return try await whenAffordable(batchCost, .background) {
+            let count = try await prefetchBodies()
+            let pace = Double(count * quota.getMessageFull) / Double(max(1, configuration.trickleUnitsPerMinute)) * 60
+            nextTrickleAt = clock.now().addingTimeInterval(pace)
+            return false
+        }
+    }
+
+    /// Runs `step` at `priority` when `units` fit in the budget now; otherwise notes when they will.
+    private func whenAffordable(_ units: Int, _ priority: QuotaPriority, _ step: () async throws -> Bool) async throws -> Bool {
+        let wait = await budget.delay(for: units, priority: priority)
+        guard wait <= 0 else {
+            nextBackgroundAt = clock.now().addingTimeInterval(wait)
+            return false
+        }
+        return try await QuotaPriority.$current.withValue(priority) { try await step() }
+    }
+
+    /// Asks for the bodies of threads next to the selection; fetched when the quota allows.
+    public func prefetchAdjacent(_ threads: [ThreadKey]) {
+        adjacentQueue = Array(threads.filter { $0.accountId == accountId }.map(\.threadId).prefix(configuration.adjacentPrefetchLimit))
+        if !adjacentQueue.isEmpty { wake() }
     }
 
     /// Loads the account (inserting it when the store doesn't have it yet), recovers ops a quit left
@@ -169,6 +259,7 @@ public actor AccountSync {
     }
 
     /// The state an account continues in: `.new` until the inbox and recent mail are in.
+    /// An empty `backfillPageToken` means the backfill starts at the top of All Mail.
     static func resumedState(_ account: Account) -> SyncState {
         if account.historyId == nil || (!account.backfillDone && account.backfillPageToken == nil) { return .new }
         return account.backfillDone ? .live : .backfilling
@@ -222,6 +313,11 @@ public actor AccountSync {
             await markNeedsAuth()
             return
         }
+        if case GmailAPIError.rateLimited = error {
+            // Not a failure: the whole account waits, then carries on.
+            await publishQuota()
+            return
+        }
         consecutiveFailures += 1
         let message = AccountSync.describe(error)
         _ = try? await updateAccount { $0.syncError = message }
@@ -255,7 +351,8 @@ public actor AccountSync {
         }
     }
 
-    /// Retries rate limits, 5xx and network errors with backoff (on the injected clock) a few times.
+    /// Retries 5xx and network errors with backoff (on the injected clock) a few times. Rate limits
+    /// aren't retried here: the budget pauses the whole account instead.
     func withRetry<T>(_ request: () async throws -> T) async throws -> T {
         var attempt = 0
         while true {
@@ -271,7 +368,6 @@ public actor AccountSync {
 
     func retryDelay(for error: GmailAPIError, attempt: Int) -> Double? {
         switch error {
-        case .rateLimited(let retryAfter): return retryAfter ?? backoff(attempt)
         case .network: return backoff(attempt)
         case .server(let status, _) where status >= 500: return backoff(attempt)
         default: return nil
@@ -325,6 +421,16 @@ public actor AccountSync {
         let before = status
         change(&status)
         if status != before { statusSink(status) }
+    }
+
+    func publishQuota() async {
+        let used = await budget.unitsLastMinute
+        let paused = await budget.pausedUntil
+        let now = clock.now()
+        publish {
+            $0.quotaUsed = used
+            $0.rateLimitedUntil = paused.flatMap { $0 > now ? $0 : nil }
+        }
     }
 
     /// Copies state, last sync and error from the account row into the status.

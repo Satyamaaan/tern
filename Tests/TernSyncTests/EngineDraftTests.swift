@@ -45,6 +45,9 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     #expect(await h.fake.draftIds.isEmpty)
     let raw = String(decoding: try #require(await h.fake.draftRaw.last), as: UTF8.self)
     #expect(raw.contains("Subject: Re: Hello"))
+    let account = try h.account()
+    #expect(raw.hasPrefix("Message-ID: \(AccountSync.messageId(for: draft, account: account))\r\n"))
+    #expect(AccountSync.messageId(for: draft, account: account) == "<tern.\(draft.id.lowercased())@example.com>")
     let detail = try #require(try h.store.threadDetail(h.thread(original.threadId)))
     #expect(detail.messages.count == 2)
     let sent = try #require(detail.messages.last)
@@ -142,8 +145,10 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     h.clock.advance(60)
     try await h.sync.drainOps()
 
-    #expect(await h.fake.callCount(.sendDraft) == 2)
+    #expect(await h.fake.callCount(.sendDraft) == 1, "the retry found it in Sent by its Message-ID")
     #expect(await h.fake.allMessageIds.count == 3, "two received messages and exactly one sent")
+    let detail = try #require(try h.store.threadDetail(h.thread(seeded[0].threadId)))
+    #expect(detail.messages.last?.labelIds == [SystemLabel.sent], "the sent message is stored at once")
     #expect(try draftRow(h, draft.id) == nil)
     #expect(try h.ops().isEmpty)
     try await h.sync.pollHistory()
@@ -174,7 +179,7 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     try await relaunched.prepare()
     h.clock.advance(60)
     try await relaunched.drainOps()
-    #expect(await h.fake.callCount(.sendDraft) == 3)
+    #expect(await h.fake.callCount(.sendDraft) == 2)
     #expect(try draftRow(h, late.id) == nil)
     #expect(try h.ops().isEmpty)
     try await relaunched.pollHistory()
@@ -200,4 +205,32 @@ private func draftRow(_ h: Harness, _ id: String) throws -> Draft? {
     #expect(await h.fake.callCount(.sendDraft) == 8)
     #expect(try draftRow(h, draft.id)?.state == .failed)
     #expect(try h.ops().first?.state == .failed)
+}
+
+@Test func aSendHiddenFromALaggingSearchIndexIsStillNotResent() async throws {
+    let h = try Harness()
+    let seeded = await seed(h.fake, count: 2)
+    try await h.syncFully()
+    await h.fake.stallSearchIndex()
+    await h.fake.loseNextResponse(on: .sendDraft)
+    let draft = reply(to: seeded[0])
+    try h.store.queueSend(draft, notBefore: nil)
+
+    try await h.sync.drainOps()
+    h.clock.advance(60)
+    try await h.sync.drainOps()
+
+    // Search missed it, so drafts.send was tried again; the draft was gone, so it was already sent.
+    #expect(await h.fake.callCount(.sendDraft) == 2)
+    #expect(await h.fake.allMessageIds.count == 3)
+    #expect(try draftRow(h, draft.id) == nil)
+    #expect(try h.ops().isEmpty)
+}
+
+@Test func theStableMessageIdReplacesTheEncodersOwn() {
+    let raw = Data("From: a@x\r\nMessage-ID: <random@x>\r\nX-Folded: one\r\n two\r\nmessage-id:\r\n <again@x>\r\n\r\nBody\r\n".utf8)
+    let result = String(decoding: MailParsing.settingHeader("Message-ID", to: "<stable@x>", in: raw), as: UTF8.self)
+    #expect(result == "Message-ID: <stable@x>\r\nFrom: a@x\r\nX-Folded: one\r\n two\r\n\r\nBody\r\n")
+    let bare = String(decoding: MailParsing.settingHeader("Message-ID", to: "<s@x>", in: Data("Subject: Hi\n\nText".utf8)), as: UTF8.self)
+    #expect(bare == "Message-ID: <s@x>\r\nSubject: Hi\r\n\r\nText")
 }

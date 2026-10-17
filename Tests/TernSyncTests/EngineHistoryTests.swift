@@ -67,7 +67,7 @@ import TernCore
 
 @Test func labelChangeOnAnUnfetchedMessageInTheInboxFetchesIt() async throws {
     let h = try Harness()
-    let seeded = await seed(h.fake, count: 100)
+    let seeded = await seed(h.fake, count: 100, spacing: 12 * 3600)
     try await h.sync.initialSync()
     let old = seeded[1]
     #expect(try h.message(old.id) == nil, "older archived mail isn't stored before the backfill")
@@ -99,7 +99,9 @@ import TernCore
     try await h.expectMirrorsGmail()
     let fetches = await h.fake.fetchCalls
     #expect(Set(fetches.filter { $0.format == .full }.flatMap(\.ids)) == [fresh.id])
-    #expect(fetches.filter { $0.format == .metadata }.flatMap(\.ids).count == 59, "every stored message refreshes its labels")
+    #expect(fetches.filter { $0.format == .metadata }.isEmpty, "labels come from per-label lists, not a get per message")
+    #expect(fetches.filter { $0.format == .minimal }.flatMap(\.ids) == [seeded[7].id], "only Trash and Spam are read directly")
+    #expect(await h.fake.unitsSpent < 400, "a resync of 60 messages costs a few hundred units, not 60 × 20")
     #expect(try h.message(seeded[5].id)?.bodyText == "Body of message 5", "stored bodies are kept")
     #expect(try h.message(fresh.id)?.bodyText == "Missed by history")
     #expect(try h.message(seeded[7].id)?.labelIds.contains(SystemLabel.trash) == true)
@@ -120,4 +122,19 @@ import TernCore
     await #expect(throws: GmailAPIError.historyExpired) { try await fake.history(startHistoryId: start, pageToken: nil) }
     let recent = try await fake.history(startHistoryId: String(await fake.currentHistoryId - 3), pageToken: nil)
     #expect(recent.history?.count == 3)
+}
+
+@Test func aLongGapFetchesOnlyTheNewestMailInFull() async throws {
+    var configuration = SyncConfiguration.test()
+    configuration.historyFullFetchLimit = 2
+    let h = try Harness(configuration: configuration)
+    await seed(h.fake, count: 4)
+    try await h.syncFully()
+    var fresh: [GmailMessage] = []
+    for index in 0..<5 { fresh.append(await h.fake.deliver(FakeEmail(subject: "New \(index)", date: testNow.addingTimeInterval(Double(index))))) }
+
+    try await h.sync.pollHistory()
+    let states = try fresh.map { try h.message($0.id)?.bodyState }
+    #expect(states == [.metadata, .metadata, .metadata, .full, .full])
+    try await h.expectMirrorsGmail()
 }

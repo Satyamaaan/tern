@@ -87,7 +87,12 @@ extension AccountSync {
         let labelUpdates = labels
         let deletions = Array(deleted)
         let now = clock.now()
-        try await fetchAndStore(fetchOrder, format: .full) { db, missing in
+        // New mail comes in full; after a long gap, all but the newest arrive as metadata and get
+        // their bodies on demand, so one poll can't spend minutes of quota.
+        let fullCount = min(fetchOrder.count, configuration.historyFullFetchLimit)
+        let older = try await fetchAndStore(Array(fetchOrder.dropLast(fullCount)), format: .metadata)
+        try await fetchAndStore(Array(fetchOrder.suffix(fullCount)), format: .full) { db, missing in
+            let missing = missing + older
             try MailStore.applyServerLabels(db, accountId: accountId, labelUpdates)
             try MailStore.deleteMessages(db, accountId: accountId, ids: deletions + missing)
             _ = try AccountSync.updateAccountRow(db, accountId) { account in

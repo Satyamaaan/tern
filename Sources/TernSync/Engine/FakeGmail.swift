@@ -56,7 +56,7 @@ public struct FakeAttachment: Sendable {
 /// latency and injected failures. Helpers simulate new mail and changes made from another client.
 public actor FakeGmail: GmailAPI {
     public enum Operation: String, Sendable, CaseIterable {
-        case profile, labels, createLabel, deleteLabel, messageIds, messages, history, batchModify
+        case profile, labels, createLabel, deleteLabel, messageIds, messages, threads, history, batchModify
         case trashThread, untrashThread, attachment, send, createDraft, updateDraft, deleteDraft, sendDraft, sendAs
     }
 
@@ -89,6 +89,7 @@ public actor FakeGmail: GmailAPI {
     public private(set) var callCounts: [Operation: Int] = [:]
     public private(set) var listCalls: [ListCall] = []
     public private(set) var fetchCalls: [FetchCall] = []
+    public private(set) var threadCalls: [FetchCall] = []
     public private(set) var modifyCalls: [ModifyCall] = []
     /// Raw messages passed to send, createDraft and updateDraft.
     public private(set) var sentRaw: [Data] = []
@@ -109,6 +110,15 @@ public actor FakeGmail: GmailAPI {
     private var failures: [Failure] = []
     private var lostResponses: [Operation: Int] = [:]
     private var rejectsUnknownIds = false
+    /// Ids the search index knows while it's stalled; nil when search is current.
+    private var indexedIds: Set<String>?
+    private var quota: GmailQuota?
+    private var quotaClock: (any SyncClock)?
+    private var quotaLedger: [(at: Date, units: Int)] = []
+    /// Quota units charged for every call, as Gmail would.
+    public private(set) var unitsSpent = 0
+    /// Calls refused because they would have gone over the per-minute quota.
+    public private(set) var quotaViolations = 0
     private var counter = 0
 
     /// - Parameters:
@@ -166,13 +176,26 @@ public actor FakeGmail: GmailAPI {
     /// batchModify rejects the whole call with `.notFound` when any id doesn't exist.
     public func setRejectsUnknownIds(_ rejects: Bool) { rejectsUnknownIds = rejects }
 
+    /// Enforces the per-user quota on `clock`: a call that would go over it fails with `.rateLimited`
+    /// and counts in `quotaViolations`.
+    public func enforceQuota(_ quota: GmailQuota, clock: any SyncClock) {
+        self.quota = quota
+        quotaClock = clock
+    }
+
+    /// Search (queries) stops seeing new messages, like Gmail's index lagging behind a send.
+    public func stallSearchIndex() { indexedIds = Set(store.keys) }
+    public func resumeSearchIndex() { indexedIds = nil }
+
     public func callCount(_ operation: Operation) -> Int { callCounts[operation] ?? 0 }
 
     public func resetCallLog() {
         callCounts = [:]
         listCalls = []
         fetchCalls = []
+        threadCalls = []
         modifyCalls = []
+        unitsSpent = 0
     }
 
     // MARK: Simulated mail and other clients
@@ -223,32 +246,32 @@ public actor FakeGmail: GmailAPI {
     // MARK: GmailAPI
 
     public func profile() async throws -> GmailProfile {
-        try await begin(.profile)
+        try await begin(.profile, units: GmailQuota().profile)
         return GmailProfile(emailAddress: email, messagesTotal: store.count,
                             threadsTotal: Set(store.values.map(\.threadId)).count, historyId: String(currentHistoryId))
     }
 
     public func labels() async throws -> [GmailLabel] {
-        try await begin(.labels)
+        try await begin(.labels, units: GmailQuota().labels)
         return labelList
     }
 
     public func createLabel(name: String) async throws -> GmailLabel {
-        try await begin(.createLabel)
+        try await begin(.createLabel, units: GmailQuota().changeLabel)
         let label = GmailLabel(id: "Label_\(labelList.count + 1)", name: name, type: "user")
         labelList.append(label)
         return label
     }
 
     public func deleteLabel(id: String) async throws {
-        try await begin(.deleteLabel)
+        try await begin(.deleteLabel, units: GmailQuota().changeLabel)
         guard labelList.contains(where: { $0.id == id && $0.type == "user" }) else { throw GmailAPIError.notFound }
         modify(store.values.filter { $0.labelIds?.contains(id) ?? false }.map(\.id), add: [], remove: [id])
         labelList.removeAll { $0.id == id }
     }
 
     public func messageIds(query: String?, labelIds: [String], pageToken: String?, maxResults: Int) async throws -> GmailIdPage {
-        try await begin(.messageIds)
+        try await begin(.messageIds, units: GmailQuota().list)
         listCalls.append(ListCall(query: query, labelIds: labelIds, pageToken: pageToken))
         let lowerQuery = query?.lowercased() ?? ""
         let includeHidden = labelIds.contains(SystemLabel.trash) || labelIds.contains(SystemLabel.spam)
@@ -258,7 +281,9 @@ public actor FakeGmail: GmailAPI {
             let labels = Set(message.labelIds ?? [])
             if !includeHidden, labels.contains(SystemLabel.trash) || labels.contains(SystemLabel.spam) { return false }
             guard required.isSubset(of: labels) else { return false }
-            return query.map { matchesQuery($0, message) } ?? true
+            guard let query else { return true }
+            if let indexedIds, !indexedIds.contains(message.id) { return false }
+            return matchesQuery(query, message)
         }
         let total = matches.count
         if let pageToken {
@@ -280,13 +305,25 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func messages(ids: [String], format: GmailMessageFormat) async throws -> [GmailMessage] {
-        try await begin(.messages)
+        try await begin(.messages, units: ids.count * GmailQuota().messageCost(format))
         fetchCalls.append(FetchCall(ids: ids, format: format))
         return ids.compactMap { id in store[id].map { formatted($0, format) } }
     }
 
+    public func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread] {
+        try await begin(.threads, units: ids.count * GmailQuota().threadCost(format))
+        threadCalls.append(FetchCall(ids: ids, format: format))
+        let messages = sortedMessages().reversed()
+        return ids.compactMap { id in
+            let members = messages.filter { $0.threadId == id }.map { formatted($0, format) }
+            guard !members.isEmpty else { return nil }
+            return GmailThread(id: id, snippet: members.last?.snippet, historyId: members.compactMap(\.historyId).max(),
+                               messages: members)
+        }
+    }
+
     public func history(startHistoryId: String, pageToken: String?) async throws -> GmailHistoryPage {
-        try await begin(.history)
+        try await begin(.history, units: GmailQuota().history)
         guard let start = Int(startHistoryId) else { throw GmailAPIError.server(status: 400, message: "Invalid startHistoryId") }
         if start < minimumStartHistoryId { throw GmailAPIError.historyExpired }
         let records = history.filter { Int($0.id)! > start }
@@ -297,7 +334,7 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func batchModify(messageIds: [String], add: [String], remove: [String]) async throws {
-        try await begin(.batchModify)
+        try await begin(.batchModify, units: GmailQuota().batchModify)
         modifyCalls.append(ModifyCall(ids: messageIds, add: add, remove: remove))
         guard messageIds.count <= 1000 else { throw GmailAPIError.server(status: 400, message: "Too many ids") }
         let known = Set(labelList.map(\.id))
@@ -310,27 +347,27 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func trashThread(id: String) async throws {
-        try await begin(.trashThread)
+        try await begin(.trashThread, units: GmailQuota().trashThread)
         let ids = ids(inThread: id)
         guard !ids.isEmpty else { throw GmailAPIError.notFound }
         modify(ids, add: [SystemLabel.trash], remove: [SystemLabel.inbox, SystemLabel.spam])
     }
 
     public func untrashThread(id: String) async throws {
-        try await begin(.untrashThread)
+        try await begin(.untrashThread, units: GmailQuota().trashThread)
         let ids = ids(inThread: id)
         guard !ids.isEmpty else { throw GmailAPIError.notFound }
         modify(ids, add: [], remove: [SystemLabel.trash])
     }
 
     public func attachment(messageId: String, attachmentId: String) async throws -> Data {
-        try await begin(.attachment)
+        try await begin(.attachment, units: GmailQuota().attachment)
         guard let data = attachmentData["\(messageId)/\(attachmentId)"] else { throw GmailAPIError.notFound }
         return data
     }
 
     public func send(raw: Data, threadId: String?) async throws -> GmailMessageRef {
-        try await begin(.send)
+        try await begin(.send, units: GmailQuota().send)
         sentRaw.append(raw)
         let message = add(messageFromRaw(raw, threadId: threadId, labels: [SystemLabel.sent]))
         try finish(.send)
@@ -338,7 +375,7 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func createDraft(raw: Data, threadId: String?) async throws -> GmailDraft {
-        try await begin(.createDraft)
+        try await begin(.createDraft, units: GmailQuota().createDraft)
         draftRaw.append(raw)
         let message = add(messageFromRaw(raw, threadId: threadId, labels: [SystemLabel.draft]))
         let draftId = "r\(nextCounter())"
@@ -348,7 +385,7 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func updateDraft(id: String, raw: Data, threadId: String?) async throws -> GmailDraft {
-        try await begin(.updateDraft)
+        try await begin(.updateDraft, units: GmailQuota().updateDraft)
         guard let old = drafts[id], let previous = store[old] else { throw GmailAPIError.notFound }
         draftRaw.append(raw)
         remove(old)
@@ -359,14 +396,14 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func deleteDraft(id: String) async throws {
-        try await begin(.deleteDraft)
+        try await begin(.deleteDraft, units: GmailQuota().deleteDraft)
         guard let messageId = drafts.removeValue(forKey: id) else { throw GmailAPIError.notFound }
         remove(messageId)
         try finish(.deleteDraft)
     }
 
     public func sendDraft(id: String) async throws -> GmailMessageRef {
-        try await begin(.sendDraft)
+        try await begin(.sendDraft, units: GmailQuota().send)
         guard let messageId = drafts.removeValue(forKey: id), var message = store[messageId] else { throw GmailAPIError.notFound }
         remove(messageId)
         message.id = nextId()
@@ -377,15 +414,27 @@ public actor FakeGmail: GmailAPI {
     }
 
     public func sendAs() async throws -> [GmailSendAs] {
-        try await begin(.sendAs)
+        try await begin(.sendAs, units: GmailQuota().sendAs)
         return [GmailSendAs(sendAsEmail: email, isPrimary: true, isDefault: true)]
     }
 
     // MARK: Mutations
 
-    private func begin(_ operation: Operation) async throws {
+    private func begin(_ operation: Operation, units: Int) async throws {
         callCounts[operation, default: 0] += 1
         if latency > 0 { try await sleep(latency) }
+        if let quota, let quotaClock {
+            let now = quotaClock.now()
+            quotaLedger.removeAll { $0.at <= now.addingTimeInterval(-60) }
+            let used = quotaLedger.reduce(0) { $0 + $1.units }
+            if used + units > quota.unitsPerMinute, used > 0 {
+                quotaViolations += 1
+                let wait = quotaLedger.first.map { $0.at.addingTimeInterval(60).timeIntervalSince(now) } ?? 60
+                throw GmailAPIError.rateLimited(retryAfter: wait)
+            }
+            quotaLedger.append((now, units))
+        }
+        unitsSpent += units
         guard let index = failures.firstIndex(where: { $0.operation == nil || $0.operation == operation }) else { return }
         if failures[index].skip > 0 {
             failures[index].skip -= 1
@@ -511,8 +560,17 @@ public actor FakeGmail: GmailAPI {
             case "in" where value == "anywhere":
                 continue
             case "in", "label":
-                let wanted = labelList.first { $0.id.lowercased() == value || $0.name.lowercased() == value }?.id ?? value.uppercased()
+                let aliases = ["drafts": "DRAFT", "sent": "SENT", "inbox": "INBOX"]
+                let wanted = aliases[value]
+                    ?? labelList.first { $0.id.lowercased() == value || $0.name.lowercased() == value }?.id ?? value.uppercased()
                 if !labels.contains(wanted) { return false }
+            case "after", "before":
+                guard let seconds = Double(value) else { return false }
+                let date = (Double(message.internalDate ?? "0") ?? 0) / 1000
+                if parts[0] == "after" ? date <= seconds : date >= seconds { return false }
+            case "rfc822msgid":
+                let id = payload?.header("Message-ID")?.trimmingCharacters(in: CharacterSet(charactersIn: "<> ")).lowercased()
+                if id != value { return false }
             case "is":
                 let wanted = ["unread": SystemLabel.unread, "starred": SystemLabel.starred, "important": SystemLabel.important][value]
                 if let wanted, !labels.contains(wanted) { return false }
@@ -643,7 +701,13 @@ public actor FakeGmail: GmailAPI {
                                        headers: headers, body: GmailPartBody(size: data.count, data: MailParsing.base64URLEncode(data)))
         return GmailMessage(id: id, threadId: threadId.flatMap { tid in store.values.contains { $0.threadId == tid } ? tid : nil } ?? id,
                             labelIds: labels, snippet: Self.snippet(text: mimeType == "text/html" ? nil : body, html: mimeType == "text/html" ? body : nil),
-                            internalDate: String(Int64(Date().timeIntervalSince1970 * 1000)), payload: payload)
+                            internalDate: String(Int64(newestDate() * 1000)), payload: payload)
+    }
+
+    /// Now, or just after the newest message when the account's mail is dated in the future.
+    private func newestDate() -> Double {
+        let latest = store.values.compactMap { Double($0.internalDate ?? "") }.max().map { $0 / 1000 + 1 } ?? 0
+        return max(Date().timeIntervalSince1970, latest)
     }
 
     private static func snippet(text: String?, html: String?) -> String {

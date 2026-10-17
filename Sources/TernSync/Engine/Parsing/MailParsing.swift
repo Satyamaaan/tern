@@ -38,6 +38,46 @@ extension MailParsing {
     }
 }
 
+// MARK: - Raw messages
+
+extension MailParsing {
+    /// Sets a header on an RFC 822 message, replacing every existing one of that name (with its
+    /// folded continuation lines). The header goes first; the body is untouched.
+    public static func settingHeader(_ name: String, to value: String, in raw: Data) -> Data {
+        let bytes = [UInt8](raw)
+        var headerEnd = bytes.count
+        var bodyStart = bytes.count
+        var index = 0
+        while index < bytes.count {
+            if bytes[index] == 0x0A, index + 1 < bytes.count, bytes[index + 1] == 0x0A {
+                headerEnd = index
+                bodyStart = index + 2
+                break
+            }
+            if bytes[index] == 0x0D, index + 3 < bytes.count, bytes[index + 1] == 0x0A, bytes[index + 2] == 0x0D, bytes[index + 3] == 0x0A {
+                headerEnd = index
+                bodyStart = index + 4
+                break
+            }
+            index += 1
+        }
+        let headerText = String(decoding: bytes[..<headerEnd], as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n")
+        var kept: [String] = []
+        var skipping = false
+        for line in headerText.split(separator: "\n", omittingEmptySubsequences: true) {
+            if line.first == " " || line.first == "\t" {
+                if !skipping { kept.append(String(line)) }
+                continue
+            }
+            let field = line.split(separator: ":", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            skipping = field.caseInsensitiveCompare(name) == .orderedSame
+            if !skipping { kept.append(String(line)) }
+        }
+        let header = (["\(name): \(value)"] + kept).joined(separator: "\r\n") + "\r\n\r\n"
+        return Data(header.utf8) + Data(bytes[min(bodyStart, bytes.count)...])
+    }
+}
+
 // MARK: - Charsets
 
 extension MailParsing {
