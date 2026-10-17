@@ -35,6 +35,9 @@ public protocol GmailAPI: Sendable {
     func updateDraft(id: String, raw: Data, threadId: String?) async throws -> GmailDraft
     func deleteDraft(id: String) async throws
     func sendDraft(id: String) async throws -> GmailMessageRef
+    /// users.drafts.list. `query` uses Gmail search syntax; the engine looks drafts up by the stable
+    /// Message-ID it gives them (`rfc822msgid:`) so a create whose response was lost isn't repeated.
+    func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage
 
     /// Send-as identities with signatures.
     func sendAs() async throws -> [GmailSendAs]
@@ -44,6 +47,11 @@ extension GmailAPI {
     /// Default for clients without threads.get; the engine then falls back to messages.get.
     public func threads(ids: [String], format: GmailMessageFormat) async throws -> [GmailThread] {
         throw GmailAPIError.server(status: 501, message: GmailThread.unsupported)
+    }
+
+    /// Default for clients without drafts.list; the engine then skips the duplicate check.
+    public func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
+        throw GmailAPIError.server(status: 501, message: GmailDraftPage.unsupported)
     }
 }
 
@@ -279,6 +287,22 @@ public struct GmailDraft: Codable, Sendable, Hashable {
         self.id = id
         self.message = message
     }
+}
+
+public struct GmailDraftPage: Codable, Sendable, Hashable {
+    /// Each draft's `message` carries only its id and threadId.
+    public var drafts: [GmailDraft]?
+    public var nextPageToken: String?
+    public var resultSizeEstimate: Int?
+
+    public init(drafts: [GmailDraft]? = nil, nextPageToken: String? = nil, resultSizeEstimate: Int? = nil) {
+        self.drafts = drafts
+        self.nextPageToken = nextPageToken
+        self.resultSizeEstimate = resultSizeEstimate
+    }
+
+    /// The message of the default `drafts(query:pageToken:maxResults:)`.
+    public static let unsupported = "drafts.list is not implemented by this client"
 }
 
 public struct GmailSendAs: Codable, Sendable, Hashable {

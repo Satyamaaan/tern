@@ -13,7 +13,7 @@ import Foundation
 /// with `messageIds(query: "rfc822msgid:<Message-ID>", …)`.
 public final class GmailHTTPClient: GmailAPI {
     public struct Options: Sendable {
-        /// Batches of `messages(ids:format:)` in flight at once.
+        /// Batches of `messages(ids:format:)` / `threads(ids:format:)` in flight at once.
         public var maxConcurrentBatches: Int
         /// Sub-requests per batch, at most 50.
         public var batchSize: Int
@@ -172,6 +172,14 @@ public final class GmailHTTPClient: GmailAPI {
 
     public func sendDraft(id: String) async throws -> GmailMessageRef {
         try await send("POST", "users/me/drafts/send", json: ["id": id], cost: GmailQuotaCost.draftsSend, idempotent: false)
+    }
+
+    public func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
+        var items: [(String, String)] = []
+        if let query, !query.isEmpty { items.append(("q", query)) }
+        if let pageToken { items.append(("pageToken", pageToken)) }
+        items.append(("maxResults", String(min(max(1, maxResults), 500))))
+        return try await get("users/me/drafts", query: items, cost: GmailQuotaCost.draftsList)
     }
 
     public func sendAs() async throws -> [GmailSendAs] {

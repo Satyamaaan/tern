@@ -58,6 +58,7 @@ public actor FakeGmail: GmailAPI {
     public enum Operation: String, Sendable, CaseIterable {
         case profile, labels, createLabel, deleteLabel, messageIds, messages, threads, history, batchModify
         case trashThread, untrashThread, attachment, send, createDraft, updateDraft, deleteDraft, sendDraft, sendAs
+        case drafts
     }
 
     public struct ListCall: Sendable, Hashable {
@@ -411,6 +412,26 @@ public actor FakeGmail: GmailAPI {
         let sent = add(message)
         try finish(.sendDraft)
         return GmailMessageRef(id: sent.id, threadId: sent.threadId)
+    }
+
+    public func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
+        try await begin(.drafts, units: GmailQuota().listDrafts)
+        let matching = drafts.compactMap { draftId, messageId -> (draftId: String, message: GmailMessage)? in
+            guard let message = store[messageId] else { return nil }
+            if let query, !query.isEmpty, !matchesQuery(query, message) { return nil }
+            return (draftId, message)
+        }.sorted { lhs, rhs in
+            let left = Int64(lhs.message.internalDate ?? "0") ?? 0, right = Int64(rhs.message.internalDate ?? "0") ?? 0
+            return left != right ? left > right : lhs.draftId > rhs.draftId
+        }
+        let offset = pageToken.flatMap(Int.init) ?? 0
+        let page = Array(matching.dropFirst(offset).prefix(max(1, min(maxResults, 500))))
+        let next = offset + page.count < matching.count ? String(offset + page.count) : nil
+        return GmailDraftPage(
+            drafts: page.isEmpty ? nil : page.map {
+                GmailDraft(id: $0.draftId, message: GmailMessage(id: $0.message.id, threadId: $0.message.threadId))
+            },
+            nextPageToken: next, resultSizeEstimate: matching.count)
     }
 
     public func sendAs() async throws -> [GmailSendAs] {

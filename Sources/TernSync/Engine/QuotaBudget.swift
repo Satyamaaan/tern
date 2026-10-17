@@ -17,6 +17,7 @@ public struct GmailQuota: Sendable, Hashable {
     public var createDraft = 10
     public var updateDraft = 15
     public var deleteDraft = 10
+    public var listDrafts = 5
     public var profile = 1
     public var labels = 1
     public var changeLabel = 5
@@ -221,6 +222,17 @@ struct BudgetedGmail: GmailAPI {
 
     func sendDraft(id: String) async throws -> GmailMessageRef {
         try await charge(quota.send) { try await base.sendDraft(id: id) }
+    }
+
+    func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
+        do {
+            return try await charge(quota.listDrafts) {
+                try await base.drafts(query: query, pageToken: pageToken, maxResults: maxResults)
+            }
+        } catch GmailAPIError.server(501, GmailDraftPage.unsupported) {
+            await budget.refund(quota.listDrafts)
+            throw GmailAPIError.server(status: 501, message: GmailDraftPage.unsupported)
+        }
     }
 
     func sendAs() async throws -> [GmailSendAs] { try await charge(quota.sendAs) { try await base.sendAs() } }
