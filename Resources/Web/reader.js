@@ -413,6 +413,7 @@
     const active = pathOf(event)[0];
     if (active && (active.isContentEditable || /^(input|textarea|select)$/i.test(active.localName))) return;
     const attachment = active && active.dataset && active.dataset.att ? active : null;
+    if (event.key === 'Enter' && active && linkIn([active])) return;
     switch (event.key) {
       case 'n': move(1); break;
       case 'p': move(-1); break;

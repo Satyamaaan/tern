@@ -18,9 +18,10 @@ import WebKit
 @MainActor
 enum ReaderSnapshot {
     private static var started = false
+    private static let requestedPath = ProcessInfo.processInfo.environment["TERN_READER_SNAPSHOT"]
 
     static func startIfRequested() {
-        guard !started, let path = ProcessInfo.processInfo.environment["TERN_READER_SNAPSHOT"], !path.isEmpty else { return }
+        guard !started, let path = requestedPath, !path.isEmpty else { return }
         started = true
         Task { @MainActor in
             let runner = Runner(output: URL(fileURLWithPath: path))
