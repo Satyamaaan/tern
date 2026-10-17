@@ -28,6 +28,7 @@ final class LoopbackServer: @unchecked Sendable {
     // Guarded by `queue`.
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var ready: CheckedContinuation<UInt16, Error>?
 
     private static let maxHeaderBytes = 32 * 1024
 
@@ -48,29 +49,29 @@ final class LoopbackServer: @unchecked Sendable {
             throw GoogleAuthError.listenerFailed(String(describing: error))
         }
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-        return try await withCheckedThrowingContinuation { (resume: CheckedContinuation<UInt16, Error>) in
-            var resumed = false
-            listener.stateUpdateHandler = { state in
-                guard !resumed else { return }
-                switch state {
-                case .ready:
-                    resumed = true
-                    if let port = listener.port?.rawValue {
-                        resume.resume(returning: port)
-                    } else {
-                        resume.resume(throwing: GoogleAuthError.listenerFailed("no port"))
-                    }
-                case .failed(let error):
-                    resumed = true
-                    resume.resume(throwing: GoogleAuthError.listenerFailed(String(describing: error)))
-                case .cancelled:
-                    resumed = true
-                    resume.resume(throwing: CancellationError())
-                default:
-                    break
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self, let ready = self.ready else { return }
+            switch state {
+            case .ready:
+                self.ready = nil
+                if let port = listener?.port?.rawValue {
+                    ready.resume(returning: port)
+                } else {
+                    ready.resume(throwing: GoogleAuthError.listenerFailed("no port"))
                 }
+            case .failed(let error):
+                self.ready = nil
+                ready.resume(throwing: GoogleAuthError.listenerFailed(String(describing: error)))
+            case .cancelled:
+                self.ready = nil
+                ready.resume(throwing: CancellationError())
+            default:
+                break
             }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                self.ready = continuation
                 self.listener = listener
                 listener.start(queue: self.queue)
             }
