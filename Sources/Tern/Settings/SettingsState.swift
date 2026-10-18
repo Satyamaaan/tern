@@ -209,9 +209,11 @@ final class SettingsState {
 
     // MARK: Recording shortcuts
 
-    /// Click on a keycap (or +): the next key pressed becomes the shortcut.
+    /// Click on a keycap (or +): the next key pressed becomes the shortcut. The key bindings files are read now
+    /// if launch hasn't read them yet, so their Control keys count.
     func startRecording(_ commandId: String, slot: Int?) {
         takeKeyboard()
+        model.registry?.loadKeyBindings()
         recording = ShortcutRecording(commandId: commandId, slot: slot)
     }
 
@@ -259,7 +261,7 @@ final class SettingsState {
 
     /// Why `shortcut` can't simply go to `commandId`, if it can't.
     static func problem(_ shortcut: KeyShortcut, for commandId: String, registry: CommandRegistry) -> ShortcutRecording.Problem? {
-        if let owner = ShortcutRules.reservation(shortcut, for: commandId) { return .reserved(shortcut, owner: owner) }
+        if let owner = registry.reservation(shortcut, for: commandId) { return .reserved(shortcut, owner: owner) }
         let others = registry.conflicts(shortcut, for: commandId)
         if let locked = others.first(where: { ShortcutRules.isLocked($0.id) }) { return .reserved(shortcut, owner: locked.displayTitle) }
         return others.isEmpty ? nil : .taken(shortcut, by: others.map(\.id))

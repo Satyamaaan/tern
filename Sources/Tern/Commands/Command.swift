@@ -40,6 +40,11 @@ struct Command: Identifiable {
     var yieldsToReader = false
     /// Only works while the open conversation has the keyboard, so it can share a key with a list command.
     var readerOnly = false
+    /// Its ⌘ or ⌃ key may fire while a text field has the keyboard. Off unless the command never acts on mail and
+    /// belongs to every moment: ⌘K, new mail, Settings, find, print, New Project, ⌘0–⌘9, view and appearance, the
+    /// app's own items. Any other command's key keeps its meaning in the text (⌃G beeps, ⌃H deletes back) and the
+    /// menu bar leaves it alone; so does Split Inbox, which rebuilds the tabs and the list.
+    var isTextSafe = false
     var isEnabled: @MainActor () -> Bool = { true }
     /// Title that changes with state ("Star" / "Unstar"); falls back to `title`.
     var currentTitle: (@MainActor () -> String)?
@@ -62,11 +67,5 @@ struct Command: Identifiable {
     /// commands, new mail and ⌘K, but nothing that acts on the mail the page hides.
     var availableInSettings: Bool { group == .settings || Self.settingsSafe.contains(id) }
 
-    /// Whether its ⌘ or ⌃ key may fire while a text field has the keyboard: the commands above, find, print,
-    /// New Project and the account scopes, none of which acts on mail. Any other command's key keeps its
-    /// meaning in the text (⌃G beeps, ⌃H deletes back) and the menu bar leaves it alone.
-    var isTextSafe: Bool { availableInSettings || Self.textSafe.contains(id) || id.hasPrefix("scope.") }
-
     private static let settingsSafe: Set<String> = ["compose", "palette", "addAccount"]
-    private static let textSafe: Set<String> = ["find", "findNext", "findPrevious", "print", "newProject"]
 }

@@ -18,9 +18,10 @@ struct ShortcutOverrides: Equatable {
     }
 
     /// Entries that don't read back whole (a format from another version) are dropped, so their
-    /// commands fall back to the defaults instead of losing a key. Reserved keys are dropped too, and an
-    /// entry left with none falls back the same way. The registry checks the rest against its commands
-    /// (`CommandRegistry.validated`) and saves what is left.
+    /// commands fall back to the defaults instead of losing a key. Built-in reserved keys are dropped too, and
+    /// an entry left with none falls back the same way. This runs at launch, so it reads no file. The registry
+    /// checks the rest against its commands (`CommandRegistry.validated`), and again once the key bindings files
+    /// are read (`CommandRegistry.loadKeyBindings`), and saves what is left.
     init(stored: [String: [String]]) {
         for (id, strings) in stored {
             let shortcuts = strings.compactMap(KeyShortcut.init(stored:))
@@ -50,7 +51,7 @@ enum KeyScope {
 
 /// Shortcuts the user can't take: macOS's own, the menu items Tern doesn't build from the registry, the
 /// Control keys text fields edit with, and bare `g`, which starts the Go to chords. Commands whose keys
-/// can't change are locked.
+/// can't change are locked. Everything here is built in; nothing reads a file.
 enum ShortcutRules {
     static let reserved: [KeyShortcut: String] = [
         .command("q"): "Quit Tern",
@@ -88,11 +89,14 @@ enum ShortcutRules {
         commandId == "settings" || (commandId.hasPrefix("scope.") && commandId != "scope.all")
     }
 
-    /// What `shortcut` is kept for, unless it is `commandId`'s own built-in key (⌘A for Select All).
-    static func reservation(_ shortcut: KeyShortcut, for commandId: String) -> String? {
+    /// What `shortcut` is kept for, unless it is `commandId`'s own built-in key (⌘A for Select All). `textKeys` are
+    /// the Control keys the key bindings files give text fields, once read (`KeyBindingFiles`); before that only
+    /// the built-in list counts, so nothing here reads a file.
+    static func reservation(_ shortcut: KeyShortcut, for commandId: String, textKeys: Set<KeyShortcut> = []) -> String? {
         if shortcut == .command("a") && commandId == "selectAll" { return nil }
         if shortcut == .command(",") && commandId == "settings" { return nil }
-        return reserved[shortcut] ?? (textEditing.contains(shortcut) ? "text editing" : nil)
+        if let owner = reserved[shortcut] { return owner }
+        return textEditing.contains(shortcut) || textKeys.contains(shortcut) ? "text editing" : nil
     }
 
     /// Whether two commands can both have `shortcut`. Only bare keys are routed by where the keyboard is;
@@ -104,8 +108,8 @@ enum ShortcutRules {
     // MARK: Text editing
 
     /// Control keys text fields edit with (⌃H deletes back, ⌃A goes to the start of the line, ⌃K cuts to
-    /// the end): the Cocoa and Emacs bindings with and without ⇧ and ⌥, plus every Control key in the
-    /// system's key bindings and the user's own `DefaultKeyBinding.dict`.
+    /// the end): the Cocoa and Emacs bindings with and without ⇧ and ⌥. The ones the system's and the
+    /// user's key bindings files add are read later, in the background (`KeyBindingFiles`).
     static let textEditing: Set<KeyShortcut> = {
         var keys = Set<KeyShortcut>()
         for letter in "abdefhklnoptvy" {
@@ -120,56 +124,8 @@ enum ShortcutRules {
             KeyShortcut(key: .char("/"), modifiers: .control), KeyShortcut(key: .char("'"), modifiers: .control),
             KeyShortcut(key: .char("'"), modifiers: [.control, .shift]),
         ])
-        let dictionaries = [
-            URL(fileURLWithPath: "/System/Library/Frameworks/AppKit.framework/Resources/StandardKeyBinding.dict"),
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/KeyBindings/DefaultKeyBinding.dict"),
-        ]
-        for url in dictionaries {
-            guard let data = try? Data(contentsOf: url),
-                  let bindings = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-            else { continue }
-            keys.formUnion(controlKeys(inBindings: bindings))
-        }
         return keys
     }()
-
-    /// The Control keys (without ⌘) a key bindings dictionary binds, as shortcuts. Its keys are modifier
-    /// characters (^ Control, ~ Option, $ Shift, @ Command, # keypad) then the key: "^h", "~^B", "^\u{F700}".
-    static func controlKeys(inBindings bindings: [String: Any]) -> Set<KeyShortcut> {
-        var keys = Set<KeyShortcut>()
-        for binding in bindings.keys {
-            var scalars = Array(binding.unicodeScalars)
-            var modifiers: NSEvent.ModifierFlags = []
-            while scalars.count > 1, let flag = bindingModifiers[scalars[0]] {
-                modifiers.insert(flag)
-                scalars.removeFirst()
-            }
-            guard scalars.count == 1, modifiers.contains(.control), !modifiers.contains(.command) else { continue }
-            let scalar = scalars[0]
-            let key: KeyShortcut.Key
-            switch scalar.value {
-            case 0x0D, 0x0A, 0x03: key = .returnKey
-            case 0x09: key = .tab
-            case 0x19: key = .tab; modifiers.insert(.shift)
-            case 0x08, 0x7F: key = .delete
-            case 0x1B: key = .escape
-            case 0x20: key = .space
-            case 0xF700: key = .up
-            case 0xF701: key = .down
-            case 0x21...0x7E, 0xA0...0xF6FF:
-                let character = String(scalar)
-                if character != character.lowercased() { modifiers.insert(.shift) }
-                key = .char(character.lowercased())
-            default: continue
-            }
-            keys.insert(KeyShortcut(key: key, modifiers: modifiers.subtracting(.numericPad)))
-        }
-        return keys
-    }
-
-    private static let bindingModifiers: [Unicode.Scalar: NSEvent.ModifierFlags] = [
-        "^": .control, "~": .option, "$": .shift, "@": .command, "#": .numericPad,
-    ]
 }
 
 extension KeyShortcut {

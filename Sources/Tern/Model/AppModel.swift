@@ -90,7 +90,12 @@ final class AppModel {
 
     // MARK: Overlays
 
-    var palette: PaletteMode? { didSet { if oldValue != nil, palette == nil { paletteClosed() } } }
+    var palette: PaletteMode? {
+        didSet {
+            if oldValue == nil, palette != nil { paletteOpened() }
+            if oldValue != nil, palette == nil { paletteClosed() }
+        }
+    }
     var showsShortcuts = false
     /// Pending `g` chord, shown in a small HUD.
     var chordHUD: String?
@@ -149,6 +154,9 @@ final class AppModel {
     @ObservationIgnored var cursorAnchor: ThreadKey?
     /// Where the keyboard goes back to when the settings page closes.
     @ObservationIgnored var settingsReturn = SettingsReturn()
+    /// Where the keyboard was when the palette opened, until it has closed and settled: a command it runs that
+    /// remembers the place (Settings) takes this one, not the palette's own field.
+    @ObservationIgnored var paletteReturn: SettingsReturn?
     @ObservationIgnored var cursorBeforeSearch: ThreadKey?
     /// Threads being dragged onto the sidebar.
     @ObservationIgnored var draggedKeys: [ThreadKey] = []
@@ -214,12 +222,13 @@ final class AppModel {
 
     // MARK: Navigation
 
-    func setScope(_ scope: Scope) {
+    /// `keepingPlace`: see `reloadList(keepingPlace:)`.
+    func setScope(_ scope: Scope, keepingPlace: Bool = false) {
         guard scope != self.scope else { return }
         if case .label = kind, scope == .all { kind = .inbox }
         self.scope = scope
         observeScope()
-        reloadList()
+        reloadList(keepingPlace: keepingPlace)
     }
 
     func show(_ kind: Mailbox.Kind) {
@@ -243,10 +252,13 @@ final class AppModel {
         reloadList()
     }
 
+    /// Split Inbox on or off (Settings → Layout, the Mailbox menu). The open thread, the selection and the
+    /// list stay as they were: All is the same list either way, and a category tab turned off becomes All,
+    /// which still has its threads.
     func setSplitInbox(_ enabled: Bool) {
         prefs.splitInbox = enabled
         if !enabled { split = nil }
-        reloadList()
+        reloadList(keepingPlace: true)
     }
 
     // MARK: Cursor and selection
@@ -349,12 +361,20 @@ final class AppModel {
         clearSelection()
     }
 
+    /// The palette's field is about to take the keyboard. A palette opened from another (Snooze… from ⌘K) keeps the
+    /// place the first one was opened from.
+    private func paletteOpened() {
+        if paletteReturn == nil { paletteReturn = keyboardPlace() }
+    }
+
     /// Once the palette closes, the keyboard goes back to the settings page, the list or the open thread,
     /// unless the command it ran moved it somewhere (the search pill).
     private func paletteClosed() {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.palette == nil, !self.searchFieldFocused, self.projectEditor == nil else { return }
+                guard let self, self.palette == nil else { return }
+                self.paletteReturn = nil
+                guard !self.searchFieldFocused, self.projectEditor == nil else { return }
                 if let settings = self.settings { return settings.takeKeyboard() }
                 if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
             }

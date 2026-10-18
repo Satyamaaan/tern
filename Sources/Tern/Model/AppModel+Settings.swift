@@ -1,6 +1,6 @@
 import AppKit
 
-/// Where the keyboard was when the settings page opened.
+/// Where the keyboard was when the settings page (or the palette) opened.
 struct SettingsReturn {
     enum Place { case list, reader, search }
 
@@ -19,20 +19,19 @@ extension AppModel {
     /// The section the page opens at when none is asked for: the one shown last.
     var lastSettingsSection: SettingsSection { SettingsSection(rawValue: prefs.settingsSection) ?? .accounts }
 
-    /// Shows the page at `section` (else the last one), or moves an open page to it.
+    /// Shows the page at `section` (else the last one), or moves an open page to it. Opened from the palette (its
+    /// Settings command, or ⌘, while it shows), the keyboard goes back where it was before the palette opened.
     func openSettings(_ section: SettingsSection? = nil, updater: Updater? = nil) {
         if let settings {
             if let section { settings.show(section) }
             return
         }
+        settingsReturn = paletteReturn ?? keyboardPlace()
+        paletteReturn = nil
         palette = nil
         showsShortcuts = false
         chordHUD = nil
         markReadTimer?.invalidate()
-        let text = searchFieldFocused ? nil : Self.textView(in: listView?.window)
-        let place: SettingsReturn.Place = searchFieldFocused ? .search
-            : (focus == .reader || text != nil) && services.reader.isActive ? .reader : .list
-        settingsReturn = SettingsReturn(place: place, text: text)
         if searchFieldFocused { searchFieldFocused = false }
         let section = section ?? lastSettingsSection
         prefs.settingsSection = section.rawValue
@@ -59,6 +58,15 @@ extension AppModel {
             services.reader.focus()
         case .reader, .list: focusList()
         }
+    }
+
+    /// Where the keyboard is now: the search pill, a text view in the mail (an inline reply, the find bar), the open
+    /// thread or the list.
+    func keyboardPlace() -> SettingsReturn {
+        let text = searchFieldFocused ? nil : Self.textView(in: listView?.window)
+        let place: SettingsReturn.Place = searchFieldFocused ? .search
+            : (focus == .reader || text != nil) && services.reader.isActive ? .reader : .list
+        return SettingsReturn(place: place, text: text)
     }
 
     /// The text view typing goes to in `window`; for a text field, the field rather than its field editor.

@@ -4,8 +4,9 @@ import Testing
 @testable import Tern
 @testable import TernCore
 
-// Settings: shortcut overrides (storage, validation, conflicts, reserved keys, reset, bare keys, typing, the
-// reader page's keys), the defaults of the settings the page added, what follows triage, and image senders.
+// Settings: shortcut overrides (storage, validation, conflicts, reserved keys, the key bindings files, reset, bare
+// keys, typing, the reader page's keys), the defaults of the settings the page added, what follows triage, Split
+// Inbox keeping the open thread, and image senders.
 
 @MainActor
 private func makeModel(threads: Int = 0) throws -> AppModel {
@@ -24,11 +25,11 @@ private func makeModel(threads: Int = 0) throws -> AppModel {
     return AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/dev/null"))
 }
 
-/// A registry that keeps its changes to itself: nothing reaches the saved preferences.
+/// A registry that keeps its changes to itself: nothing reaches the saved preferences, and it reads no key bindings file.
 @MainActor
 private func makeRegistry(_ overrides: ShortcutOverrides = ShortcutOverrides(), threads: Int = 0) throws -> CommandRegistry {
     let model = try makeModel(threads: threads)
-    let registry = CommandRegistry(model: model, shell: nil, overrides: overrides)
+    let registry = CommandRegistry(model: model, shell: nil, overrides: overrides, keyBindings: KeyBindingFiles(urls: []))
     model.registry = registry
     return registry
 }
@@ -230,8 +231,8 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     #expect(ShortcutRules.reservation(KeyShortcut(key: .char("g"), modifiers: .control), for: "trash") == nil)
     // A saved override with one is dropped when it loads.
     #expect(ShortcutOverrides(stored: ["trash": ["⌃|c:h"]]).keys["trash"] == nil)
-    // The Control keys a key bindings dictionary binds (the system's and the user's are read at launch).
-    let parsed = ShortcutRules.controlKeys(inBindings: [
+    // The Control keys a key bindings dictionary binds (the system's and the user's are read after launch).
+    let parsed = KeyBindingFiles.controlKeys(in: [
         "^w": "deleteToMark:", "~^B": "moveWordBackwardAndModifySelection:", "^\u{F700}": "scrollPageUp:",
         "^\u{19}": "selectPreviousKeyView:", "^x": ["^x": "swapWithMark:"], "@^a": "selectAll:", "a": "insertText:",
         "^": "noop:", "^\u{F702}": "moveToLeftEndOfLine:",
@@ -240,6 +241,106 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
         KeyShortcut(key: .char("w"), modifiers: .control), KeyShortcut(key: .char("b"), modifiers: [.control, .option, .shift]),
         .special(.up, [.control]), .special(.tab, [.control, .shift]), KeyShortcut(key: .char("x"), modifiers: .control),
     ])
+}
+
+/// A key bindings file the user could have written: an XML plist of `bindings`.
+private func bindingsFile(_ bindings: [String: String]) throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("tern-keybindings-\(UUID().uuidString).dict")
+    try PropertyListSerialization.data(fromPropertyList: bindings, format: .xml, options: 0).write(to: url)
+    return url
+}
+
+@Test func aHugeModifierRunInAKeyBindingStaysCheap() throws {
+    // 400,000 ^ then h: the scan stops after `maxBindingLength` scalars, so the entry is ignored at once.
+    let long = String(repeating: "^", count: 400_000) + "h"
+    var clock = ContinuousClock.now
+    let parsed = KeyBindingFiles.controlKeys(in: [long: "deleteBackward:", "^j": "insertNewline:"])
+    let parse = ContinuousClock.now - clock
+    #expect(parsed == [KeyShortcut(key: .char("j"), modifiers: .control)])
+    #expect(parse < .milliseconds(200), "parsed in \(parse)")
+
+    // The same entry as a file: 400 KB is over the size cap, so it isn't even read.
+    let big = try bindingsFile([long: "deleteBackward:"])
+    defer { try? FileManager.default.removeItem(at: big) }
+    clock = ContinuousClock.now
+    #expect(KeyBindingFiles.dictionary(at: big) == nil)
+    #expect(KeyBindingFiles.read([big]).isEmpty)
+    let skip = ContinuousClock.now - clock
+
+    // Under the cap it is read, and the entry is ignored as quickly.
+    let medium = try bindingsFile([String(repeating: "^", count: 200_000) + "h": "deleteBackward:", "~^j": "insertNewline:"])
+    defer { try? FileManager.default.removeItem(at: medium) }
+    clock = ContinuousClock.now
+    #expect(KeyBindingFiles.read([medium]) == [KeyShortcut(key: .char("j"), modifiers: [.control, .option])])
+    let read = ContinuousClock.now - clock
+    #expect(skip < .milliseconds(200) && read < .milliseconds(500), "skipped in \(skip), read in \(read)")
+    print("Key bindings: 400k-scalar entry parsed in \(parse), 400 KB file skipped in \(skip), 200 KB file read in \(read)")
+
+    // Not a dictionary, not a file, not there: nothing.
+    let text = FileManager.default.temporaryDirectory.appendingPathComponent("tern-keybindings-\(UUID().uuidString).dict")
+    try Data("not a plist {".utf8).write(to: text)
+    defer { try? FileManager.default.removeItem(at: text) }
+    #expect(KeyBindingFiles.read([text, FileManager.default.temporaryDirectory, URL(fileURLWithPath: "/nonexistent/DefaultKeyBinding.dict")]).isEmpty)
+}
+
+@MainActor
+@Test func launchReadsNoKeyBindingsFileAndTheBackgroundReadCleansUp() async throws {
+    // The user binds ⌃J in their DefaultKeyBinding.dict and has given ⌃J to Archive.
+    let file = try bindingsFile(["^j": "insertNewline:"])
+    defer { try? FileManager.default.removeItem(at: file) }
+    let files = KeyBindingFiles(urls: [file])
+    let defaults = scratchDefaults()
+    let controlJ = KeyShortcut(key: .char("j"), modifiers: .control)
+    ShortcutOverrides(keys: ["archive": [controlJ], "star": [.key("y")]]).save(to: defaults)
+
+    // What launch runs: the preferences, then the registry. Neither reads the file.
+    let prefs = Preferences(defaults: defaults)
+    #expect(prefs.shortcutOverrides.keys["archive"] == [controlJ])
+    let registry = CommandRegistry(model: try makeModel(), shell: nil, overrides: prefs.shortcutOverrides,
+                                   save: { $0.save(to: defaults) }, keyBindings: files)
+    #expect(files.reads == 0 && files.keys == nil)
+    #expect(registry["archive"]?.keys == [controlJ] && registry.reservation(controlJ, for: "trash") == nil)
+
+    // After launch it is read once in the background, and the change that uses its key goes.
+    registry.loadKeyBindings()
+    registry.loadKeyBindings()
+    let keys = await withCheckedContinuation { continuation in files.load { continuation.resume(returning: $0) } }
+    #expect(keys == [controlJ] && files.reads == 1)
+    #expect(registry["archive"]?.keys == [.key("e")] && registry["star"]?.keys == [.key("y")])
+    #expect(ShortcutOverrides.load(from: defaults).keys == ["star": [.key("y")]])
+    #expect(SettingsState.problem(controlJ, for: "trash", registry: registry) == .reserved(controlJ, owner: "text editing"))
+    // A registry made later starts with what was read.
+    let later = CommandRegistry(model: try makeModel(), shell: nil, overrides: ShortcutOverrides(keys: ["mute": [controlJ]]), keyBindings: files)
+    #expect(later.overrides.isEmpty && files.reads == 1)
+}
+
+@MainActor
+@Test func theRecorderAsksForTheKeyBindingsFiles() throws {
+    let file = try bindingsFile(["^j": "insertNewline:"])
+    defer { try? FileManager.default.removeItem(at: file) }
+    let files = KeyBindingFiles(urls: [file])
+    let model = try makeModel()
+    let registry = CommandRegistry(model: model, shell: nil, overrides: ShortcutOverrides(), keyBindings: files)
+    model.registry = registry
+    #expect(files.reads == 0)
+    SettingsState(model: model, section: .shortcuts, updater: nil).startRecording("archive", slot: 0)
+    #expect(files.reads == 1)
+}
+
+@MainActor
+@Test func onlyCommandsThatNeverActOnMailAreTextSafe() throws {
+    let registry = try makeRegistry()
+    let safe = Set(registry.commands.filter(\.isTextSafe).map(\.id))
+    let expected: Set<String> = [
+        "palette", "compose", "settings", "find", "findNext", "findPrevious", "print", "newProject", "addAccount",
+        "scope.all", "scope.1", "scope.2", "scope.3", "scope.4", "scope.5", "scope.6", "scope.7", "scope.8", "scope.9",
+        "toggleSidebar", "readingPane", "appearance.toggle", "appearance.system", "appearance.light", "appearance.dark",
+        "density.auto", "density.compact", "density.comfortable", "dimRead", "senderLogos", "shortcuts",
+        "about", "checkForUpdates", "mainWindow",
+    ]
+    #expect(safe == expected)
+    // Split Inbox rebuilds the tabs and the list: a settings command, but not one for while typing.
+    #expect(registry["splitInbox"]?.isTextSafe == false && registry["splitInbox"]?.availableInSettings == true)
 }
 
 @MainActor
@@ -270,6 +371,15 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     #expect(!registry.leavesToText(event("k", "k", 40, .command), in: window))
     #expect(!registry.leavesToText(event("n", "n", 45, .command), in: window))
     #expect(!registry.leavesToText(event("f", "f", 3, .command), in: window))
+    // So do ⌘, ⌘G, ⌘P, ⇧⌘P, ⌘0–⌘9 and the view keys (⌘\, ⇧⌘L, ⌃⌘S).
+    for (characters, keyCode, modifiers) in [(",", UInt16(43), NSEvent.ModifierFlags.command), ("g", 5, .command), ("p", 35, .command),
+                                             ("p", 35, [.command, .shift]), ("0", 29, .command), ("1", 18, .command), ("9", 25, .command),
+                                             ("\\", 42, .command), ("l", 37, [.command, .shift]), ("s", 1, [.control, .command])] {
+        #expect(!registry.leavesToText(event(characters, characters, keyCode, modifiers), in: window), "\(characters) \(modifiers)")
+    }
+    // A modified key given to Split Inbox keeps its meaning in the text: the tabs and the list stay.
+    registry.assign(KeyShortcut(key: .char("j"), modifiers: [.command, .option]), to: "splitInbox", replacing: nil)
+    #expect(registry.leavesToText(event("∆", "j", 38, [.command, .option]), in: window))
 
     let mainMenu = MainMenu(registry: registry)
     let menu = mainMenu.build()
@@ -457,6 +567,40 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
         model.perform(.archive, on: [order[end]])
         #expect(model.cursor == order[1] && model.readerExpanded && model.focus == .reader, "\(mode)")
     }
+}
+
+@MainActor
+@Test func splitInboxKeepsTheOpenThreadAndTheSelection() throws {
+    let prefs = Preferences.shared
+    let saved = prefs.splitInbox
+    defer { prefs.splitInbox = saved }
+    prefs.splitInbox = true
+    let model = try makeModel(threads: 6)
+    model.reloadList()
+    // Unclassified mail is in Important, so that tab lists every thread.
+    model.showSplit(.important)
+    let order = model.snapshot.order
+    try #require(order.count == 6 && model.cursor == order[0])
+    model.setCursor(order[3], open: false)
+    model.click(order[4], command: true, shift: false)
+    let checked: Set<ThreadKey> = [order[3], order[4]]
+    #expect(model.checked == checked)
+
+    // Off: the tab becomes All, which still has both threads, with the cursor where it was.
+    model.setSplitInbox(false)
+    #expect(model.activeTab == .all && model.source.split == nil)
+    #expect(model.cursor == order[4] && model.checked == checked && model.snapshot.order == order)
+
+    // On again, the list is All either way: nothing is read again.
+    model.checked = []
+    model.setCursor(order[2], open: false)
+    let source = model.source
+    model.setSplitInbox(true)
+    #expect(model.source == source && model.activeTab == .all && model.cursor == order[2])
+
+    // Choosing another list still starts at its first row.
+    model.show(.allMail)
+    #expect(model.cursor == model.snapshot.order.first && model.cursor != order[2])
 }
 
 @MainActor

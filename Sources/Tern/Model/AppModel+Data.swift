@@ -59,21 +59,32 @@ extension AppModel {
     private func receive(accounts: [Account]) {
         self.accounts = accounts
         services.accounts = accounts
-        if let id = scope.accountId, !accounts.contains(where: { $0.id == id }) { setScope(.all) }
+        // The account in scope was removed (Settings → Accounts): all accounts, keeping the place.
+        if let id = scope.accountId, !accounts.contains(where: { $0.id == id }) { setScope(.all, keepingPlace: true) }
     }
 
     // MARK: The list
 
-    /// Starts reading a different list (mailbox, scope or split changed).
-    func reloadList() {
-        source = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
-        limit = Self.pageSize
-        hidden = [:]
+    /// Starts reading a different list (mailbox, scope or split changed), from its first row. With
+    /// `keepingPlace` (a setting changed under the open thread, like Split Inbox) the cursor and the selection
+    /// stay on the threads the new list still has, so the open thread stays open as it was, and the same list
+    /// isn't read again at all.
+    func reloadList(keepingPlace: Bool = false) {
+        let next = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
+        if keepingPlace, next == source, listLoaded { return }
+        source = next
         pendingCursor = nil
-        checked = []
-        cursor = nil
         listLoaded = false
-        observeRows(immediate: true)
+        if keepingPlace {
+            // Rows the user scrolled to stay read, and threads still being triaged stay out.
+            limit = max(limit, Self.pageSize)
+        } else {
+            limit = Self.pageSize
+            hidden = [:]
+            checked = []
+            cursor = nil
+        }
+        observeRows(immediate: true, keepingPlace: keepingPlace)
     }
 
     /// Infinite scroll: read another page when the user nears the end.
@@ -85,7 +96,7 @@ extension AppModel {
         observeRows(immediate: false)
     }
 
-    private func observeRows(immediate: Bool) {
+    private func observeRows(immediate: Bool, keepingPlace: Bool = false) {
         let source = self.source
         let limit = self.limit
         let signpost = Timing.begin("list")
@@ -99,7 +110,7 @@ extension AppModel {
             self.rawRows = rows
             if self.hasMore != (rows.count >= limit) { self.hasMore = rows.count >= limit }
             if first { self.listLoaded = true }
-            if !self.isSearching { self.rebuildSnapshot(first ? .reset : .none) }
+            if !self.isSearching { self.rebuildSnapshot(first && !keepingPlace ? .reset : .none, keepingPlace: first && keepingPlace) }
             if first, let done = self.onFirstRows { self.onFirstRows = nil; done() }
         }
         let reader = store.database.reader
@@ -109,8 +120,9 @@ extension AppModel {
     }
 
     /// Recomputes what the list shows from the latest rows, keeping hidden (just triaged) threads out
-    /// and the cursor on a sensible row.
-    func rebuildSnapshot(_ animation: ListAnimation) {
+    /// and the cursor on a sensible row. `keepingPlace` is the first rows of a list read with
+    /// `reloadList(keepingPlace:)`: a cursor the new list doesn't have goes to its first row, like a new list.
+    func rebuildSnapshot(_ animation: ListAnimation, keepingPlace: Bool = false) {
         let input = isSearching ? searchRows : rawRows
         let present = Set(input.map(\.id))
         for (key, state) in hidden where state == .committed && !present.contains(key) { hidden[key] = nil }
@@ -130,8 +142,8 @@ extension AppModel {
             pendingCursor = nil
         } else if let current = cursor, snapshot.rows[current] == nil {
             let upward = animation == .collapse && prefs.afterTriage == .previous
-            newCursor = Self.successor(of: current, in: old, keeping: snapshot, upward: upward)
-        } else if cursor == nil, animation == .reset {
+            newCursor = keepingPlace ? snapshot.order.first : Self.successor(of: current, in: old, keeping: snapshot, upward: upward)
+        } else if cursor == nil, animation == .reset || keepingPlace {
             newCursor = snapshot.order.first
         }
         let moved = newCursor != cursor

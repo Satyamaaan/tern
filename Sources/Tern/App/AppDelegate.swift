@@ -94,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         }
         startSnoozeTimer()
         startUpdates()
+        // The key bindings files can reserve more Control keys; read them now the window is up, not before.
+        registry.loadKeyBindings()
     }
 
     /// Release builds: the updater, and the offer to move to Applications when Tern runs from elsewhere.

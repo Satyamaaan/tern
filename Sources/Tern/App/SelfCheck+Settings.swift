@@ -2,14 +2,15 @@ import AppKit
 import TernCore
 
 /// The settings page in the main window and edited shortcuts: opening and closing it leaves the mail as it
-/// was (whatever Layout changed, and with the keyboard back in the field it was in), mail keys and the
-/// palette's mail entries do nothing while it is open, a changed shortcut fires from the keyboard and the
-/// menu bar while the old key no longer does, the reader page follows edited keys, and a mail command's ⌃
-/// key never fires while typing.
+/// was (whatever Layout changed, Split Inbox included, and with the keyboard back in the field it was in, also
+/// when ⌘K opened it), mail keys and the palette's mail entries do nothing while it is open, a changed shortcut
+/// fires from the keyboard and the menu bar while the old key no longer does, the reader page follows edited
+/// keys, and a mail command's ⌃ key never fires while typing.
 extension SelfCheck {
     func settings() {
         settingsRoundTrip()
         settingsLayoutRestore()
+        settingsSplitInbox()
         settingsRestoresTyping()
         settingsKeys()
         settingsPalette()
@@ -94,7 +95,49 @@ extension SelfCheck {
               !model.readerVisible && model.focus == .list && window.firstResponder === table)
     }
 
-    /// The find bar and an inline reply get the keyboard back, not the page around them.
+    /// Split Inbox switched in Layout leaves the open conversation as it was: on All (the same list either way) and
+    /// on a category tab (which becomes All, still holding the thread), with its find bar still open.
+    private func settingsSplitInbox() {
+        let pane = model.prefs.readingPane, split = model.prefs.splitInbox
+        defer {
+            model.prefs.readingPane = pane
+            if model.prefs.splitInbox != split { model.setSplitInbox(split) }
+        }
+        model.prefs.readingPane = false
+        if !model.prefs.splitInbox { model.setSplitInbox(true) }
+        guard let reader = model.services.reader.model else { return check("split inbox: a reader", false) }
+
+        func roundTrip(_ tab: InboxSplit?, _ name: String) {
+            model.showSplit(tab)
+            wait(0.2)
+            let order = model.snapshot.order
+            guard order.count > 4 else { return check("split inbox \(name): rows", false) }
+            let thread = order[3]
+            model.click(thread, command: false, shift: false)
+            wait(0.3)
+            model.services.reader.find()
+            _ = waitUntil(1) { reader.findVisible }
+            model.openSettings(.layout)
+            wait(0.1)
+            model.setSplitInbox(false)
+            wait(0.2)
+            check("Split Inbox off in Layout keeps the conversation open in All (\(name))",
+                  model.activeTab == .all && model.cursor == thread && reader.key == thread && reader.findVisible && model.readerExpanded)
+            model.setSplitInbox(true)
+            wait(0.2)
+            check("…and on again keeps it (\(name))", model.activeTab == .all && model.cursor == thread && reader.key == thread && reader.findVisible)
+            model.closeSettings()
+            check("…and closing settings shows it as it was (\(name))", model.cursor == thread && model.readerExpanded && model.focus == .reader)
+            reader.closeFind()
+            model.back()
+            wait(0.2)
+        }
+        roundTrip(nil, "All")
+        roundTrip(.important, "a category tab")
+    }
+
+    /// The find bar and an inline reply get the keyboard back, not the page around them, also when Settings is
+    /// opened from ⌘K, whose own field has the keyboard by then.
     private func settingsRestoresTyping() {
         let pane = model.prefs.readingPane
         defer { model.prefs.readingPane = pane }
@@ -115,6 +158,21 @@ extension SelfCheck {
             model.closeSettings()
             _ = waitUntil(1) { AppModel.textView(in: window) === field }
             check("closing settings gives \(name) the keyboard back", AppModel.textView(in: window) === field && model.focus == .reader)
+
+            // ⌘K, then its Settings command: the palette's field has the keyboard when Settings opens. Offscreen
+            // SwiftUI doesn't always move focus from one of its fields to another, so put it there as a click would.
+            model.palette = .commands
+            func paletteHasKeyboard() -> Bool { KeyRouter.textInput(in: window) != nil && AppModel.textView(in: window) !== field }
+            if !waitUntil(1, paletteHasKeyboard), let input = textField(placeholder: palette.placeholder) { window.makeFirstResponder(input) }
+            guard waitUntil(1, paletteHasKeyboard) else {
+                model.palette = nil
+                return print("  (the palette did not take focus offscreen; the ⌘K check for \(name) skipped)")
+            }
+            palette.run(PaletteItem(id: "settings", title: "Settings…") { [model] in model.openSettings(.mail) })
+            _ = waitUntil(1) { self.model.paletteReturn == nil && KeyRouter.textInput(in: window) == nil }
+            model.closeSettings()
+            _ = waitUntil(1) { AppModel.textView(in: window) === field }
+            check("Settings from ⌘K gives \(name) the keyboard back on closing", AppModel.textView(in: window) === field && model.focus == .reader)
         }
 
         model.services.reader.find()
@@ -283,6 +341,15 @@ extension SelfCheck {
         model.back()
     }
 
+    /// The text field in the window showing `placeholder`.
+    private func textField(placeholder: String) -> NSTextField? {
+        func search(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.placeholderString == placeholder { return field }
+            return view.subviews.lazy.compactMap(search).first
+        }
+        return window.contentView.flatMap(search)
+    }
+
     /// Whether the reader page handles a keydown of `key` (it prevents the default when it does).
     private func pagePrevents(_ key: String) -> Bool? {
         var answer: Bool?
@@ -329,6 +396,15 @@ extension SelfCheck {
               && model.palette == .commands)
         model.palette = nil
         wait(0.1)
+        // Split Inbox with a ⌥⌘ key: typing keeps the key, and the tabs and the list stay.
+        registry.assign(KeyShortcut(key: .char("j"), modifiers: [.command, .option]), to: "splitInbox", replacing: nil)
+        model.beginSearch()
+        if waitUntil(1, { KeyRouter.textInput(in: window) != nil }) {
+            let split = model.prefs.splitInbox, tabs = model.tabs
+            check("a Split Inbox key doesn't fire from the menu bar while typing",
+                  NSApp.mainMenu?.performKeyEquivalent(with: event("∆", "j", 38, [.command, .option])) == false
+                    && model.prefs.splitInbox == split && model.tabs == tabs)
+        }
         model.endSearch(restoreFocus: true)
     }
 }
