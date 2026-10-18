@@ -10,6 +10,9 @@ enum Theme {
     static let raised = dynamic(light: 0xFFFFFF, dark: 0x1A1A1A)
     static let hover = dynamic(light: 0xF1F1EF, dark: 0x1F1F1F)
     static let selected = dynamic(light: 0xEBEBE8, dark: 0x272727)
+    /// The selected row while the list has the keyboard: a step stronger than `selected`, so focus shows
+    /// without a ring.
+    static let selectedFocus = dynamic(light: 0xE4E4E0, dark: 0x2F2F2F)
     static let hairline = dynamic(light: 0xE6E6E2, dark: 0x2A2A2A)
     static let hairlineStrong = dynamic(light: 0xD6D6D1, dark: 0x3A3A3A)
     static let text1 = dynamic(light: 0x161616, dark: 0xECECEA)

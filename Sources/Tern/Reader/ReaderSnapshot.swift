@@ -138,10 +138,12 @@ enum ReaderSnapshot {
                         services.reader.summarize()
                         try? await Task.sleep(for: .milliseconds(400))
                         await save(hosting, name: "\(fixture.name)-summary-\(suffix(appearance))")
+                        await focusShots(hosting, suffix(appearance))
                         continue
                     }
                     if fixture.name == "hostile" { await checkHostile() }
                     await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
+                    if fixture.name == "reply-chain" { await focusShots(hosting, suffix(appearance)) }
                     if fixture.name == "hostile", appearance == .aqua {
                         _ = try? await js("""
                             const link = [...document.querySelectorAll('.mbody')].map((h) => h.shadowRoot).filter(Boolean)
@@ -235,6 +237,17 @@ enum ReaderSnapshot {
         func js(_ body: String) async throws -> Any? {
             try await ReaderWebEngine.shared.webView.callAsyncJavaScript(
                 body, arguments: [:], in: nil, contentWorld: ReaderWebEngine.shared.world)
+        }
+
+        /// Where the keyboard is in the thread: a collapsed message (p) and a selected attachment, then the
+        /// open message (n).
+        func focusShots(_ hosting: NSView, _ suffix: String) async {
+            _ = try? await js("Tern.previous(); document.querySelector('.att')?.classList.add('selected'); return true;")
+            try? await Task.sleep(for: .milliseconds(150))
+            await save(hosting, name: "reply-chain-focus-line-\(suffix)")
+            _ = try? await js("Tern.next(); window.scrollTo(0, 0); return true;")
+            try? await Task.sleep(for: .milliseconds(150))
+            await save(hosting, name: "reply-chain-focus-open-\(suffix)")
         }
 
         /// Find, n/p, quote toggles and expand-all, driven through the same entry points the UI uses.

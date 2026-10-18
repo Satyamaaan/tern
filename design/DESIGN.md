@@ -29,6 +29,7 @@ Hard rules
 | `raised` reading pane, bottom bar, popovers | `#FFFFFF` | `#1A1A1A` |
 | `hover` | `#F1F1EF` | `#1F1F1F` |
 | `selected` selected row, active tab | `#EBEBE8` | `#272727` |
+| `selectedFocus` selected row while the list has the keyboard | `#E4E4E0` | `#2F2F2F` |
 | `hairline` row separators | `#E6E6E2` | `#2A2A2A` |
 | `hairlineStrong` tag outlines, field focus, bars | `#D6D6D1` | `#3A3A3A` |
 | `text1` | `#161616` | `#ECECEA` |
@@ -174,9 +175,12 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - **Tags**: outline chips, 20 px tall, radius 4, 1 px `hairlineStrong`, 12 px coloured icon, label Inter 11.5
     500 `text2`. Needs reply (ink reply icon) first, then the project or the category (not People/Other). Two
     at most on one line, one on two lines; dropped before they squeeze the subject.
-  - Hairline separators across the column. Hover: `hover` fill (radius 6, 4 px outside the column) and three
-    icon buttons replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; keyboard focus adds a
-    1.5 px `ink` ring at 45 %.
+  - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
+    radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
+    date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
+    replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus`
+    while the list has the keyboard in the key window, so focus shows without a ring. Selected neighbours
+    join into one block.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
 - Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
@@ -206,7 +210,8 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
-  disclosure, date in tabular `text3`. Bodies in the WKWebView (transparent before first paint, sanitized,
+  disclosure, date in tabular `text3`. The focused message (n/p) and a selected attachment get the `selected`
+  fill, no ring. Bodies in the WKWebView (transparent before first paint, sanitized,
   remote images blocked until "Load images"; Tern's own avatars come as `data:` URLs, which the CSP allows while
   it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always
   sees a light colour scheme: its `prefers-color-scheme: dark` styles and `color-scheme` never apply. Attachments
