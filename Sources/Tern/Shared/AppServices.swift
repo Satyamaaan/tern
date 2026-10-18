@@ -24,6 +24,10 @@ final class AppServices {
     var loadAttachment: (MailAttachment) async throws -> URL = { _ in throw CocoaError(.featureUnsupported) }
     /// AI helpers; nil when AI is off or unavailable.
     var ai: AIActions?
+    /// Checks whether Claude Code or Codex is installed and signed in, for onboarding and Settings → AI.
+    /// Wired to TernAI's providers by the integration; nil leaves the status unknown (snapshots inject
+    /// their own).
+    var aiAvailability: AIAvailabilityCheck?
     /// Where drafts keep pasted images and attached copies. Nil uses Application Support/Tern/Draft Files.
     var draftFilesDirectory: URL?
     /// Shows the "Sending in 5 s · Undo" notice after Send. When nil the composer shows its own floating pill.

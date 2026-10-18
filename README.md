@@ -57,6 +57,9 @@ scripts/release.sh                    # notarized build/Tern-<version>.dmg (need
 - [Hugeicons](https://github.com/hugeicons/hugeicons) free "Stroke Rounded" icons, under the MIT License
   ([Resources/Licenses/Hugeicons-MIT.txt](Resources/Licenses/Hugeicons-MIT.txt)). `scripts/hugeicons.py` turns the
   icons Tern uses into `Sources/Tern/Shared/Hugeicons.swift`.
+- The Claude and OpenAI marks come from [Simple Icons](https://simpleicons.org) (path data CC0 1.0).
+  `scripts/brandlogos.py` turns them into `Sources/Tern/Shared/BrandLogos.swift`. The marks are trademarks of
+  Anthropic and OpenAI; Tern shows them only to name the AI provider it runs through.
 
 ## License
 

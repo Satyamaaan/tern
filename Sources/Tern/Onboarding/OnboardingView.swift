@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TernCore
 
@@ -9,15 +10,24 @@ struct OnboardingView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(AppServices.self) private var services
-    @State private var step = 0
+    @State private var step: Int
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var showWhy = false
     @State private var message: String?
     @State private var working = false
-    @State private var provider: AIProvider = CLITool.find("codex") != nil ? .codex : CLITool.find("claude") != nil ? .claude : .off
+    @State private var board = AIStatusBoard()
+    /// The AI the user picked; until then the first ready one.
+    @State private var picked: AIProvider?
 
     private let steps = ["Google client", "Accounts", "AI", "Done"]
+
+    /// `startStep` opens a later step (snapshots).
+    init(onFinish: @escaping () -> Void, onDemo: @escaping () -> Void, startStep: Int = 0) {
+        self.onFinish = onFinish
+        self.onDemo = onDemo
+        _step = State(initialValue: startStep)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,18 +40,24 @@ struct OnboardingView: View {
             }
             .padding(.top, 36)
 
-            Text("Mail at the speed you think.")
+            Text(headline)
                 .font(.display(30))
                 .tracking(-0.5)
                 .foregroundStyle(Color(Theme.text1))
-                .padding(.top, 28)
-                .padding(.bottom, 24)
+                .padding(.top, 32)
+            Text(intro)
+                .font(.ui(13))
+                .foregroundStyle(Color(Theme.text2))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
 
             Group {
                 switch step {
                 case 0: clientStep
                 case 1: accountsStep
-                case 2: aiStep
+                case 2:
+                    OnboardingAIStep(board: board, choice: provider, choose: { picked = $0 }, recheck: { recheckAI() })
                 default: doneStep
                 }
             }
@@ -49,11 +65,8 @@ struct OnboardingView: View {
 
             Spacer(minLength: 16)
 
-            HStack {
-                Button("Try it with demo mail", action: onDemo)
-                    .buttonStyle(.plain)
-                    .font(.ui(12))
-                    .foregroundStyle(Color(Theme.text3))
+            HStack(spacing: 8) {
+                DemoLink(action: onDemo)
                 Spacer()
                 if let message {
                     Text(message).font(.ui(12, .medium)).foregroundStyle(Color(Theme.ink)).lineLimit(2)
@@ -70,6 +83,39 @@ struct OnboardingView: View {
         .background(Color(Theme.bg))
         .tint(Color(Theme.ink))
         .googleClientFileDrop { data in if step == 0 { importClient(data) } }
+        // The CLIs are asked as soon as the window opens, so the AI step has its answer when it shows.
+        .task { board.check(services.aiAvailability) }
+        .onChange(of: step) { if step == 2 { board.check(services.aiAvailability) } }
+        // Back from Terminal after `codex login`: look again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if step == 2 && board.needsAttention { recheckAI() }
+        }
+    }
+
+    private var headline: String {
+        switch step {
+        case 0: "Mail at the speed you think."
+        case 1: "Add your accounts."
+        case 2: "Choose your AI."
+        default: "You're set."
+        }
+    }
+
+    private var intro: String {
+        switch step {
+        case 0: "Tern talks to Gmail with your own Google Cloud client. Create one of type “Desktop app” with the Gmail API enabled, then paste its ID and secret."
+        case 1: "Add every Gmail or Google Workspace account you use. They all land in one inbox."
+        case 2: "Triage, summaries and reply drafts run through an AI app you already use, on this Mac."
+        default: "Press ⌘K any time for every command and its shortcut."
+        }
+    }
+
+    /// The chosen AI: what the user picked, else the first ready provider. Nil while the first check
+    /// is still out.
+    private var provider: AIProvider? {
+        if let picked { return picked }
+        if let ready = board.firstReady { return ready }
+        return board.statuses.isEmpty && services.aiAvailability != nil ? nil : .off
     }
 
     private var stepper: some View {
@@ -81,7 +127,7 @@ struct OnboardingView: View {
                         .frame(width: 6, height: 6)
                     Text(steps[index])
                         .font(.ui(12, index == step ? .medium : .regular))
-                        .foregroundStyle(Color(index == step ? Theme.text1 : Theme.text3))
+                        .foregroundStyle(Color(index == step ? Theme.text1 : index < step ? Theme.text2 : Theme.text3))
                 }
             }
         }
@@ -102,6 +148,7 @@ struct OnboardingView: View {
             Button("Continue") { saveAI(); step = 3 }
                 .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
+                .disabled(provider == nil)
         default:
             Button("Open Tern", action: onFinish)
                 .buttonStyle(TernButtonStyle(.primary))
@@ -113,11 +160,6 @@ struct OnboardingView: View {
 
     private var clientStep: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Tern talks to Gmail with your own Google Cloud client. Create one of type “Desktop app” with the Gmail API enabled, then paste its ID and secret.")
-                .font(.ui(13))
-                .foregroundStyle(Color(Theme.text2))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 14)
             Hairline()
             GoogleClientFields(clientId: $clientId, clientSecret: $clientSecret)
             HStack(spacing: 16) {
@@ -145,70 +187,84 @@ struct OnboardingView: View {
 
     private var accountsStep: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Add every Gmail or Google Workspace account you use. They all land in one inbox.")
-                .font(.ui(13))
-                .foregroundStyle(Color(Theme.text2))
-                .padding(.bottom, 14)
             Hairline()
             ForEach(model.accounts) { account in
-                HStack(spacing: 10) {
-                    Dot(color: Theme.accountColor(account.colorIndex), size: 8)
-                    Text(account.email).font(.ui(13)).foregroundStyle(Color(Theme.text1))
-                    Spacer()
-                    Text(account.syncState == .live ? "Synced" : "Syncing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
-                }
-                .frame(height: 40)
-                Hairline()
+                accountRow(account)
             }
-            Button(working ? "Opening Google…" : "Add Gmail account") { addAccount() }
+            Button(working ? "Opening Google…" : model.accounts.isEmpty ? "Add Gmail account" : "Add another account") { addAccount() }
                 .buttonStyle(TernButtonStyle(model.accounts.isEmpty ? .primary : .secondary))
                 .disabled(working)
                 .padding(.top, 16)
         }
     }
 
-    private var aiStep: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Triage, summaries and reply drafts run through a command-line AI you already use, on this Mac.")
-                .font(.ui(13))
-                .foregroundStyle(Color(Theme.text2))
-                .padding(.bottom, 14)
-            Hairline()
-            ForEach(AIProvider.allCases) { option in
-                HStack(spacing: 12) {
-                    Circle()
-                        .strokeBorder(Color(provider == option ? Theme.ink : Theme.hairlineStrong), lineWidth: provider == option ? 5 : 1.5)
-                        .frame(width: 16, height: 16)
-                    Text(option.title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
-                    Spacer()
-                    if let executable = option.executable {
-                        let found = CLITool.find(executable) != nil
-                        HStack(spacing: 5) {
-                            if found { IconView(icon: .done, size: 14, color: Color(Theme.text1)) }
-                            Text(found ? "Found" : "Not found")
-                                .font(.ui(12))
-                                .foregroundStyle(Color(found ? Theme.text1 : Theme.text3))
-                        }
-                    }
-                }
-                .frame(height: 40)
-                .contentShape(Rectangle())
-                .onTapGesture { provider = option }
-                Hairline()
+    private func accountRow(_ account: Account) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Dot(color: Theme.accountColor(account.colorIndex), size: 8)
+                    .frame(width: 16)
+                Text(account.email).font(.ui(13)).foregroundStyle(Color(Theme.text1)).lineLimit(1)
+                Spacer()
+                Text(account.syncState == .live ? "Synced" : "Syncing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
             }
+            .frame(height: 40)
+            Hairline()
         }
     }
 
+    /// What's set up: the accounts, the AI with its mark, then the keys worth knowing.
     private var doneStep: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("You're set.")
-                .font(.display(18))
-                .tracking(-0.2)
-                .foregroundStyle(Color(Theme.text1))
-            Text("Press ⌘K any time for every command and its shortcut. e archives, z undoes, j and k move.")
-                .font(.ui(13))
-                .foregroundStyle(Color(Theme.text2))
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            Hairline()
+            if model.accounts.isEmpty {
+                summaryRow(title: "No accounts yet", detail: "Add them in Settings → Accounts") {
+                    IconView(icon: .at, size: 16, color: Color(Theme.text2))
+                }
+            }
+            ForEach(model.accounts.prefix(3)) { account in
+                accountRow(account)
+            }
+            if model.accounts.count > 3 {
+                summaryRow(title: "\(model.accounts.count - 3) more", detail: nil) {
+                    IconView(icon: .at, size: 16, color: Color(Theme.text2))
+                }
+            }
+            let ai = provider ?? .off
+            summaryRow(title: ai == .off ? "AI is off" : ai.title,
+                       detail: ai == .off ? "Turn it on in Settings → AI" : "Triage, summaries and reply drafts") {
+                if let logo = ai.logo {
+                    BrandLogoView(logo: logo, size: 16)
+                } else {
+                    IconView(icon: .sparkles, size: 16, color: Color(Theme.text3))
+                }
+            }
+            HStack(spacing: 18) {
+                keyHint(["e"], "archive")
+                keyHint(["z"], "undo")
+                keyHint(["j", "k"], "move")
+                keyHint(["/"], "search")
+            }
+            .padding(.top, 20)
+        }
+    }
+
+    private func summaryRow<Mark: View>(title: String, detail: String?, @ViewBuilder mark: () -> Mark) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                mark().frame(width: 16)
+                Text(title).font(.ui(13)).foregroundStyle(Color(Theme.text1))
+                Spacer()
+                if let detail { Text(detail).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
+            }
+            .frame(height: 40)
+            Hairline()
+        }
+    }
+
+    private func keyHint(_ keys: [String], _ title: String) -> some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 3) { ForEach(keys, id: \.self) { Keycap(text: $0) } }
+            Text(title).font(.ui(12)).foregroundStyle(Color(Theme.text2))
         }
     }
 
@@ -266,12 +322,31 @@ struct OnboardingView: View {
         }
     }
 
+    private func recheckAI() {
+        board.check(services.aiAvailability, refresh: true)
+    }
+
     private func saveAI() {
         let store = model.store
-        let provider = provider
+        let provider = provider ?? .off
         model.writes.async {
             try? store.setSetting(SettingKey.aiEnabled, provider == .off ? "false" : "true")
             if provider != .off { try? store.setSetting(SettingKey.aiProvider, provider.rawValue) }
         }
+    }
+}
+
+/// "Try it with demo mail": quiet `text3`, underlined under the pointer.
+private struct DemoLink: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button("Try it with demo mail", action: action)
+            .buttonStyle(.plain)
+            .font(.ui(12))
+            .foregroundStyle(Color(hovering ? Theme.text2 : Theme.text3))
+            .underline(hovering)
+            .onHover { hovering = $0 }
     }
 }

@@ -60,6 +60,9 @@ Tab and tag icons only, 12–14 px, never their text, never a fill:
 | Needs reply, All, Other, labels, searches | `ink` / `text2` / `text3` | same |
 | Project | the project's colour (Graphite, Blue, Green, Violet, Sand, Rose, Teal, Slate) | same |
 
+AI provider marks (onboarding, Settings → AI) are the one other place colour shows: Claude's mark in its own
+`#D97757`, OpenAI's (for Codex) in `text1`. Only ever next to the provider's name (`scripts/brandlogos.py`).
+
 Account hues (`#4F7CAC #8A6FB3 #3E9A86 #8F7F62 #B05C7A #6B7F4A`) tint letter avatars, softly (18% light,
 32% dark, initials in the hue darkened or lightened), and only when several accounts share a list.
 
@@ -230,8 +233,13 @@ with a formatting bar on selection (Hugeicons bold, italic, underline, link, lis
 
 ### Settings, onboarding
 Settings is its own window with a section sidebar (Accounts, AI, Appearance, Shortcuts, Notifications,
-Advanced), flat rows with hairlines, the button system, segmented controls. Onboarding: one window, four
-steps, Inter Display headline "Mail at the speed you think."
+Advanced), flat rows with hairlines, the button system, segmented controls. Onboarding: one 640×560 window,
+four steps (Google client, Accounts, AI, Done), each with an Inter Display 30 headline (the first is "Mail at
+the speed you think."), one `text2` line under it, the stepper top right and Back / Continue bottom right. The AI
+step shows Claude Code and Codex as two cards (mark, name, what pays for it, live status: Ready; Not signed
+in with the sign-in command and a copy button; Not installed with an install link); the chosen card gets a
+1.5 px `ink` border and a filled radio mark. "Skip, no AI" sits under them. Settings → AI uses the same marks in
+its segmented provider control and the same status line.
 
 ## Motion
 Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring

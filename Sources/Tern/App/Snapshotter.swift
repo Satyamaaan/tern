@@ -122,6 +122,7 @@ struct Snapshotter {
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-light.png"), dark: false)
         standalone(OnboardingView(onFinish: {}, onDemo: {}).environment(model).environment(model.services),
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-dark.png"), dark: true)
+        onboardingShots(directory)
         if let project = model.projects.first {
             let draft = ProjectDraft(
                 id: project.id, name: project.name, colorIndex: project.colorIndex, icon: project.icon ?? "folder",
