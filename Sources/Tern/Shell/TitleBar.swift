@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The title bar row: traffic lights, the list's tabs, then the accounts and compose at the right.
+/// The title bar row: traffic lights, the list's tabs, then the accounts and compose at the right. With the
+/// sidebar open the traffic lights sit in the sidebar, so the tabs start at the list's edge.
 struct TitleBar: View {
     @Environment(AppModel.self) private var model
 
@@ -11,7 +12,7 @@ struct TitleBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Color.clear.frame(width: Self.trafficLightsWidth - 8)
+            Color.clear.frame(width: model.prefs.sidebarOpen ? 4 : Self.trafficLightsWidth - 8)
             TabBar()
                 .frame(maxWidth: .infinity, alignment: .leading)
             AccountStack()

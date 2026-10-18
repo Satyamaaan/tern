@@ -4,6 +4,9 @@ import TernCore
 
 /// The main window, list first: the title bar's tabs over the list, the sidebar behind a toggle, and the
 /// open thread over the list (or beside it with the reading pane, ⌘\). Palette and sheets on top.
+///
+/// The open sidebar runs the full height of the window, traffic lights at its top, and the title bar
+/// moves over to sit above the list only.
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -14,19 +17,23 @@ struct MainView: View {
     static let readerMinWidth: CGFloat = 420
 
     var body: some View {
-        VStack(spacing: 0) {
-            TitleBar()
-            GeometryReader { geometry in
-                let sidebar = model.prefs.sidebarOpen ? Self.sidebarWidth + 1 : 0
-                let available = max(geometry.size.width - sidebar, 0)
+        HStack(spacing: 0) {
+            if model.prefs.sidebarOpen {
                 HStack(spacing: 0) {
-                    if model.prefs.sidebarOpen {
+                    VStack(spacing: 0) {
+                        WindowDragArea().frame(height: MainWindow.headerHeight)
                         SidebarView()
-                            .frame(width: Self.sidebarWidth)
-                            .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
-                        Hairline(vertical: true)
                     }
-                    content(available: available)
+                    .frame(width: Self.sidebarWidth)
+                    .background(Color(Theme.sidebar))
+                    Hairline(vertical: true)
+                }
+                .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+            }
+            VStack(spacing: 0) {
+                TitleBar()
+                GeometryReader { geometry in
+                    content(available: geometry.size.width)
                 }
             }
         }
