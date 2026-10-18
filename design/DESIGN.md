@@ -142,7 +142,7 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 ### Title bar (52 px)
 - Traffic lights at (16, 18), then the **tabs**, left-aligned after an 84 px gutter.
 - Tabs: `All` · `Needs reply` · the category tabs `Important · People · Notifications · Newsletters · Other`
-  (split inbox; off in `⋯` → Split Inbox or Settings) · pinned tabs (projects, labels of the account in scope, saved
+  (split inbox; off in `⋯` → Split Inbox or Settings → Layout) · pinned tabs (projects, labels of the account in scope, saved
   searches). Each: 14 px icon (hue per the table), title, count (unread; Needs reply counts waiting
   threads) in tabular `text3`. 28 px tall, radius 6; active = `selected` fill and Medium text; hover = `hover`.
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
@@ -200,7 +200,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   slide on the pane spring; a crossfade with Reduce Motion). Esc or the ← button goes back with the selection kept; j/k move to the
   next thread while reading; the list underneath keeps its scroll position.
 - ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
-  `raised`. Remembered.
+  `raised`. Remembered (Settings → Layout).
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
   Done, Snooze, `⋯` as icon buttons.
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
@@ -241,9 +241,32 @@ Errors are one quiet `text2` line with OK. States: checking, available (auto-upd
 ready ("Tern 0.2.1 is ready" · Later · Restart to update), installing, up to date (manual checks only), error. The
 move-to-Applications prompt is the same card: "Move Tern to Applications?" · Not now · Move to Applications.
 
-### Settings, onboarding
-Settings is its own window with a section sidebar (Accounts, AI, Appearance, Shortcuts, Notifications,
-Advanced), flat rows with hairlines, the button system, segmented controls. Onboarding: one 640×560 window,
+### Settings
+A page of the main window, not a window or a sheet: ⌘,, the bottom bar's gear, the scope menu and ⌘K open it
+over the mail the way a thread opens over the list, with a 140 ms fade (80 ms with Reduce Motion). The mail
+underneath doesn't change, so Esc, ⌘[, the title bar's ← or ⌘, again put back the tab, the selection, the
+scroll and an open thread, and the keyboard goes where it was. The page remembers its last section.
+- Left, where the sidebar goes (232 px, `sidebar` surface, traffic lights at its top): a "Search settings" field
+  (28 px, `bg` fill, hairline that strengthens with focus) and the sections as sidebar rows — Accounts, Mail,
+  Appearance, Layout, Notifications, AI, Shortcuts, Advanced. The chosen one has the `selected` fill and nothing
+  else. ↑ ↓ and ⌃Tab move between them when no field has the keyboard; ⌘F goes to the search.
+- Right: a 52 px title bar with ← (back) and "Settings" in `text2`, then a centred column at most 680 wide
+  (28 px margins from 760 px, 20 below) with the section title (Display 22) and flat rows with hairlines:
+  title Inter 13, detail 12 `text3`, the control on the right. Small caps (`CapsLabel`) group rows inside a
+  section (Reading, Writing; Window, Tabs). The bottom bar is hidden under the page.
+- Search lists matching settings across sections under their sections' caps, then matching shortcuts; words match
+  from their start. Sections without a match fade to `text3` in the list. Return opens the first match's section.
+- Shortcuts: a filter field, "Reset All" (quiet), one line of help, then every command by palette group with its
+  keys as keycaps (radius 4) flush right. Click a keycap to record; + on hover adds a key; a changed command has a
+  5 px `text3` dot and a reset button on hover. While recording, the row sits on a `hover` fill, the keycap reads
+  "Type a shortcut" inside a 1.5 px `ink` 55 % border, and one line under it says esc cancels and ⌫ removes the key,
+  or why the key can't be used: reserved for macOS or a fixed menu item, or used by another command, with Replace.
+  The g chords and ⌘1–⌘9 show as read-only keycaps.
+- While the page is open, mail commands don't run (their menu items are disabled) and bare keys never reach the
+  mail; appearance, layout, ⌘K and new mail still work.
+
+### Onboarding
+Onboarding: one 640×560 window,
 four steps (Google client, Accounts, AI, Done), each with an Inter Display 30 headline (the first is "Mail at
 the speed you think."), one `text2` line under it, the stepper top right and Back / Continue bottom right. The AI
 step shows Claude Code and Codex as two cards (mark, name, what pays for it, live status: Ready; Not signed
@@ -257,13 +280,14 @@ Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar
 triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
 
 ## Keyboard
-See `research.md` §E. Changes in this direction: ⌘\ toggles the reading pane (was: the sidebar); ⌃⌘S toggles
+See `research.md` §E. Every shortcut can be changed in Settings → Shortcuts; the keys here are the built-in
+ones. Changes in this direction: ⌘\ toggles the reading pane (was: the sidebar); ⌃⌘S toggles
 the sidebar; ⌘⇧\ is gone (list only is now the default); Tab / ⇧Tab and ⌥1–⌥7 move between tabs; ⌘F searches
 mail unless a thread is on screen. Bare-letter keys are inactive while a text field has focus. `g` chords time
 out after 1 s and show a small HUD.
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
---snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, settings,
-onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
+--snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, the settings page
+(every section, search, a shortcut being recorded and in conflict), onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
 behaviour and timings.

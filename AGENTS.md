@@ -84,6 +84,23 @@ the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to
   hover. Everything has a keyboard shortcut.
 - Lists must stay smooth with 50k threads: AppKit `NSTableView` (cell reuse, fixed row height) for the
   message list; SwiftUI elsewhere.
+- Settings is a page of the main window (`Settings/SettingsPage.swift`, `AppModel.openSettings`), never a
+  separate window or sheet. Every user-facing preference belongs there: add new ones to `SettingsItem`
+  (`Settings/SettingsCatalog.swift`) so they show in their section and in settings search. Interface
+  preferences live in `Preferences` (UserDefaults), mail ones shared with other lanes in the database
+  `setting` table.
+
+## Keyboard
+
+- `CommandRegistry` is the one list behind the menu bar, ⌘K, the `?` sheet, tooltips and `KeyRouter`. A
+  command's keys are its built-in ones with the user's overrides on top (`ShortcutOverrides`, UserDefaults,
+  only the deltas, keyed by command id). Show a shortcut with `registry.hint(title, id)` or
+  `command.shortcutText`, never as a literal string, so edits show everywhere at once.
+- Bare keys (no ⌘ or ⌃) run through `KeyRouter` and only outside text fields; `BareKeySafeMenu` never fires them
+  as menu key equivalents. ⌘ keys fire from the menu bar, which is rebuilt when shortcuts change.
+- A command that only makes sense in one place sets `yieldsToReader` (list) or `readerOnly`, so it can share a
+  key with a command of the other scope. Reserved keys and locked commands are in `ShortcutRules`.
+- While the settings page is open, only `Command.availableInSettings` commands run (`registry.canRun`).
 
 ## Code
 
