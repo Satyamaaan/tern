@@ -52,6 +52,8 @@ enum ReaderSnapshot {
         var log: [String] = []
         var rendered: (ThreadKey, Double)?
         var window: NSWindow?
+        /// The reader's own text, measured before any mail rendered (`textWidth`).
+        var textWidthBeforeMail: Double?
 
         init(output: URL) { self.output = output }
 
@@ -118,6 +120,7 @@ enum ReaderSnapshot {
             note("Web view ready (template + fonts) in \(Int((CACurrentMediaTime() - warmStart) * 1000)) ms after first reader")
             let visibility = try? await ReaderWebEngine.shared.webView.evaluateJavaScript("document.visibilityState")
             note("Page visibility: \(visibility.map { "\($0)" } ?? "?") (open times include paint only when visible)")
+            textWidthBeforeMail = try? await js(Self.textWidth + "return await width();") as? Double
 
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 window.appearance = NSAppearance(named: appearance)
@@ -334,8 +337,9 @@ enum ReaderSnapshot {
         /// `contain`, `overflow` and `position` as a fresh host without mail CSS, and its sanitized sheet never
         /// names `:host`. As a control, the same reading must catch the old sanitizer's output for the
         /// combining-mark reproducer. Then proves the mail can't restyle Tern's own text: a line in the reader's
-        /// font measures the same with the mail's sheet in place and taken out, while the old sanitizer's
-        /// `@font-face` output, as a control, changes it.
+        /// font measures the same with the mail's sheet in place, taken out, and before any mail rendered (WebKit
+        /// keeps a face that got out after its sheet is removed), while the old sanitizer's `@font-face` output, as a
+        /// control, changes it.
         func checkCSSEscape(_ suffix: String) async {
             let control = "@media all {\u{301}, :host {\n& { contain: none !important; overflow: visible !important; "
                 + "position: absolute !important; inset: 0 !important }\n}\n"
@@ -366,18 +370,7 @@ enum ReaderSnapshot {
                 const styles = [...host.shadowRoot.querySelectorAll('style')];
                 const sheet = styles.map((style) => style.textContent).join('\\n');
                 const named = /:host|::part|::slotted/i.test(sheet);
-                const width = async () => {
-                  const line = document.createElement('span');
-                  line.style.cssText = 'position: absolute; left: -9999px; top: 0; white-space: nowrap; font: 400 15px var(--ui)';
-                  line.textContent = 'Your statement is available. WWW wmw 0123';
-                  document.body.append(line);
-                  line.getBoundingClientRect();
-                  await document.fonts.ready;
-                  await new Promise((resolve) => setTimeout(resolve, 60));
-                  const value = line.getBoundingClientRect().width;
-                  line.remove();
-                  return value;
-                };
+                \(Self.textWidth)
                 const withMail = await width();
                 styles.forEach((style) => style.remove());
                 const withoutMail = await width();
@@ -388,13 +381,32 @@ enum ReaderSnapshot {
                 const withControl = await width();
                 other.remove();
                 await width();
+                const unchanged = withMail === withoutMail && withMail === before;
                 return `${read(host) === expected ? 'contained' : 'ESCAPED'} (${read(host)}), :host in sheet = ${named}, `
-                  + `control caught = ${caught}; reader text ${withMail === withoutMail ? 'unchanged' : 'RESTYLED'} `
-                  + `(${withMail.toFixed(2)} px with the mail, ${withoutMail.toFixed(2)} px without), `
+                  + `control caught = ${caught}; reader text ${unchanged ? 'unchanged' : 'RESTYLED'} `
+                  + `(${withMail.toFixed(2)} px with the mail, ${withoutMail.toFixed(2)} px without, `
+                  + `${before.toFixed(2)} px before any mail), `
                   + `font control caught = ${withControl !== withoutMail} (${withControl.toFixed(2)} px)`;
-                """, arguments: ["control": control, "fontControl": fontControl], in: nil, contentWorld: ReaderWebEngine.shared.world)
+                """, arguments: ["control": control, "fontControl": fontControl, "before": textWidthBeforeMail ?? -1], in: nil,
+                contentWorld: ReaderWebEngine.shared.world)
             note("css-escape (\(suffix)): \(result.map { "\($0)" } ?? "?")")
         }
+
+        /// Defines `width()`: a line in the reader's own font, measured off-screen once fonts have settled.
+        static let textWidth = """
+            const width = async () => {
+              const line = document.createElement('span');
+              line.style.cssText = 'position: absolute; left: -9999px; top: 0; white-space: nowrap; font: 400 15px var(--ui)';
+              line.textContent = 'Your statement is available. WWW wmw 0123';
+              document.body.append(line);
+              line.getBoundingClientRect();
+              await document.fonts.ready;
+              await new Promise((resolve) => setTimeout(resolve, 60));
+              const value = line.getBoundingClientRect().width;
+              line.remove();
+              return value;
+            };
+            """
 
         func save(_ hosting: NSView, name: String) async {
             let webView = ReaderWebEngine.shared.webView

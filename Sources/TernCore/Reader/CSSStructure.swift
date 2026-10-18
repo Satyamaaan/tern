@@ -57,26 +57,50 @@ struct CSSStructure {
 
     /// The text of the tokens in `range` without comments. With `skippingBlocks`, a `{…}` block at the range's own
     /// level is left out (a bracketed group keeps any block inside it).
-    func text(_ range: Range<Int>, skippingBlocks: Bool = false) -> String {
+    ///
+    /// Nil when leaving something out joins the tokens on either side into different ones, so the text would read
+    /// back as something the browser never saw: `@/**/font-face` as the at-rule `@font-face`, `a/**/b` as one name,
+    /// `0/**/1px` as `01px`. Whitespace on both sides of a comment reads back as one run, which is the same.
+    func text(_ range: Range<Int>, skippingBlocks: Bool = false) -> String? {
         var output = String.UnicodeScalarView()
+        /// What each kept token should read back as.
+        var kept: [(kind: Kind, length: Int)] = []
+        var joined = false
+        func keep(_ token: Token) {
+            guard token.kind != .comment else {
+                joined = true
+                return
+            }
+            output.append(contentsOf: scalars[token.range])
+            if token.kind == .whitespace, kept.last?.kind == .whitespace {
+                kept[kept.count - 1].length += token.range.count
+            } else {
+                kept.append((token.kind, token.range.count))
+            }
+        }
         var index = range.lowerBound
         while index < range.upperBound {
             let token = tokens[index]
             if skippingBlocks, case .open(let bracket) = token.kind {
                 if bracket == "{" {
                     index = match[index].map { $0 + 1 } ?? range.upperBound
+                    joined = true
                     continue
                 }
                 if let close = match[index] {
-                    for inner in tokens[index...close] where inner.kind != .comment {
-                        output.append(contentsOf: scalars[inner.range])
-                    }
+                    for inner in tokens[index...close] { keep(inner) }
                     index = close + 1
                     continue
                 }
             }
-            if token.kind != .comment { output.append(contentsOf: scalars[token.range]) }
+            keep(token)
             index += 1
+        }
+        guard joined else { return String(output) }
+        let reread = CSSStructure(output)
+        guard reread.tokens.count == kept.count else { return nil }
+        for (token, original) in zip(reread.tokens, kept) where token.kind != original.kind || token.range.count != original.length {
+            return nil
         }
         return String(output)
     }

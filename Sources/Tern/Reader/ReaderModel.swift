@@ -213,9 +213,9 @@ final class ReaderModel {
         guard !work.isEmpty else { return }
         Task { [weak self] in
             for batch in work {
-                let bodies = await Task.detached(priority: .userInitiated) {
+                let bodies = await MailSanitizer.onDeepStack {
                     batch.map { ($0.0.id, ReaderBodies.shared.body(for: $0.0, trusted: $0.1)) }
-                }.value
+                }
                 guard let self, self.key == key else { return }
                 var payload: [String: Any] = [:]
                 for (id, body) in bodies { payload[id] = ReaderPayload.bodyPayload(body) }
@@ -231,10 +231,12 @@ final class ReaderModel {
         services.prefetchBodies?(keys)
         let store = services.store
         let trust = trust
-        Task.detached(priority: .utility) {
-            for key in keys.prefix(4) {
-                guard let detail = try? store.threadDetail(key), let target = ReaderPayload.targetMessage(detail) else { continue }
-                _ = ReaderBodies.shared.body(for: target, trusted: trust.allows(target))
+        Task {
+            await MailSanitizer.onDeepStack(qualityOfService: .utility) {
+                for key in keys.prefix(4) {
+                    guard let detail = try? store.threadDetail(key), let target = ReaderPayload.targetMessage(detail) else { continue }
+                    _ = ReaderBodies.shared.body(for: target, trusted: trust.allows(target))
+                }
             }
         }
     }
@@ -287,7 +289,7 @@ final class ReaderModel {
             return
         }
         Task { [weak self] in
-            let body = await Task.detached(priority: .userInitiated) { ReaderBodies.shared.body(for: message, trusted: trusted) }.value
+            let body = await MailSanitizer.onDeepStack { ReaderBodies.shared.body(for: message, trusted: trusted) }
             guard let self, self.key == key else { return }
             self.engine.run("Tern.setBodies(k, b)", ["k": key.description, "b": [id: ReaderPayload.bodyPayload(body)]])
         }

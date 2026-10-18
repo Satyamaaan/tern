@@ -36,7 +36,7 @@ struct CSSSanitizer {
     // MARK: Declarations
 
     mutating func declarations(_ css: String) -> String {
-        let text = Self.stripComments(css)
+        guard let text = Self.stripComments(css) else { return "" }
         var output: [String] = []
         for declaration in Self.split(text, on: ";") {
             let scalars = declaration.unicodeScalars
@@ -51,7 +51,7 @@ struct CSSSanitizer {
     }
 
     private mutating func clean(property: String, value: inout String) -> String? {
-        guard Self.isSelfContained(value), !value.unicodeScalars.contains("<") else { return nil }
+        guard Self.isSelfContained(value), !value.unicodeScalars.contains("<"), !Self.hasAtToken(value) else { return nil }
         let lower = value.lowercased()
         if Self.forbiddenProperties.contains(property) || Self.colorSchemeProperties.contains(property) { return nil }
         if Self.has(lower, "expression") || Self.has(lower, "javascript:") || Self.has(lower, "vbscript:")
@@ -229,13 +229,14 @@ struct CSSSanitizer {
     /// Sanitizes a whole `<style>` element. Selectors for `html`, `body` and `:root` are pointed at the
     /// message wrappers; media queries never see a dark colour scheme; `@import`, `@font-face` (a face declared in
     /// the mail's shadow root would apply to the whole reader, Tern's own text included), media blocks that can't
-    /// match and unknown at-rules go.
+    /// match and unknown at-rules go. The result is read back once more (`readsBackSafely`); a sheet that fails goes
+    /// whole.
     mutating func stylesheet(_ css: String) -> String {
         // The light-scheme marker can only come from `lightSchemeMedia`.
         let sheet = CSSStructure(css.unicodeScalars.lazy.filter { $0 != Self.lightSchemeScalar })
         var output = ""
         rules(sheet, sheet.tokens.indices, topLevel: true, depth: 0, into: &output)
-        return output
+        return Self.readsBackSafely(output) ? output : ""
     }
 
     /// A `<style media>` sheet: sanitized only when its media list can match, then wrapped in `@media`
@@ -274,8 +275,10 @@ struct CSSSanitizer {
     private mutating func styleRule(_ sheet: CSSStructure, at start: Int, in range: Range<Int>, into output: inout String) -> Int {
         guard let open = preludeEnd(sheet, from: start, in: range, atRule: false) else { return range.upperBound }
         let close = sheet.match[open] ?? range.upperBound
-        let selector = Self.rewriteSelector(sheet.text(start..<open))
-        let cleaned = declarations(sheet.text(open + 1..<close, skippingBlocks: true))
+        // `text` is nil where leaving a comment out would change how the rest reads; the rule goes.
+        let selector = sheet.text(start..<open).map(Self.rewriteSelector) ?? ""
+        var cleaned = ""
+        if let block = sheet.text(open + 1..<close, skippingBlocks: true) { cleaned = declarations(block) }
         if !selector.isEmpty, !cleaned.isEmpty {
             output += "\(selector) { \(cleaned) }\n"
         }
@@ -288,9 +291,9 @@ struct CSSSanitizer {
         let close = sheet.match[end] ?? range.upperBound
         let prelude = sheet.text(start + 1..<end)
         let condition: String?
-        switch sheet.text(start..<start + 1).lowercased() {
-        case "@media": condition = Self.lightSchemeMedia(prelude).map { "@media \($0)" }
-        case "@supports": condition = Self.supportsCondition(prelude).map { "@supports \($0)" }
+        switch (sheet.text(start..<start + 1) ?? "").lowercased() {
+        case "@media": condition = prelude.flatMap(Self.lightSchemeMedia).map { "@media \($0)" }
+        case "@supports": condition = prelude.flatMap(Self.supportsCondition).map { "@supports \($0)" }
         default: condition = nil
         }
         if let condition, depth <= 4 {
@@ -321,10 +324,10 @@ struct CSSSanitizer {
     }
 
     /// An `@supports` condition is written back as the mail wrote it, so it must stand on its own. It can't
-    /// select anything, but naming the shadow host is still left out so no output ever mentions it.
+    /// select anything, but naming the shadow host or holding a `@` is still left out so no output ever does.
     private static func supportsCondition(_ condition: String) -> String? {
-        let trimmed = condition.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<"),
+        let trimmed = trimmingCSSWhitespace(condition)
+        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<"), !hasAtToken(trimmed),
               !reachesHost(trimmed.lowercased()) else { return nil }
         return trimmed
     }
@@ -334,9 +337,13 @@ struct CSSSanitizer {
     /// around it (`:host`, `::part`, `::slotted`) are dropped, so mail can't move or cover Tern's UI, and so are
     /// selectors that name Tern's own elements in the card (`namesTernElement`). A selector starting with `--` reads
     /// as a custom property where a block takes declarations, so it could swallow the rules after it; none is valid.
+    /// Nor is one with a `@`: starting with it, the rule would be written back as an at-rule (`@font-face`). Only CSS
+    /// whitespace is trimmed; a no-break space before the `@` is part of a name.
     static func rewriteSelector(_ selector: String) -> String {
-        let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<") else { return "" }
+        let trimmed = trimmingCSSWhitespace(selector)
+        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<"), !hasAtToken(trimmed) else {
+            return ""
+        }
         let lower = trimmed.lowercased()
         guard !reachesHost(lower), !namesTernElement(lower), !lower.unicodeScalars.starts(with: "--".unicodeScalars) else {
             return ""
@@ -502,8 +509,8 @@ struct CSSSanitizer {
     }
 
     /// Removes `/* … */` comments; an unterminated one runs to the end, and `/*` inside a string or `url(…)` is text,
-    /// as in the browser.
-    static func stripComments(_ css: String) -> String {
+    /// as in the browser. Nil when taking one out joins the text around it into different tokens (`col/**/or`).
+    static func stripComments(_ css: String) -> String? {
         guard css.utf8.contains(UInt8(ascii: "*")) else { return css }
         let structure = CSSStructure(css.unicodeScalars)
         return structure.text(structure.tokens.indices)
@@ -543,6 +550,48 @@ struct CSSSanitizer {
         return parts
     }
 
+    /// True when CSS text has a `@` of its own, as an at-keyword or alone, outside strings and URLs. No selector,
+    /// value or `@supports` condition the sanitizer writes holds one: a rule whose selector starts with it would be
+    /// written back as an at-rule, and the sheet's last check (`readsBackSafely`) allows no at-rule but `@media` and
+    /// `@supports`.
+    private static func hasAtToken(_ text: String) -> Bool {
+        guard text.unicodeScalars.contains("@") else { return false }
+        let structure = CSSStructure(text.unicodeScalars)
+        return structure.tokens.contains { token in
+            token.kind == .atKeyword || token.kind == .other && structure.scalars[token.range.lowerBound] == "@"
+        }
+    }
+
+    /// The last check on a sanitized sheet, read back with the browser's tokenizer: every bracket closes and no
+    /// closer is left over, there are no comments, no at-rule but `@media` and `@supports`, and nothing outside
+    /// strings and URLs reaches the shadow host. The checks above should leave nothing for this to catch.
+    static func readsBackSafely(_ sheet: String) -> Bool {
+        let output = CSSStructure(sheet.unicodeScalars)
+        var visible = String.UnicodeScalarView()
+        var opens = 0, closes = 0
+        for (index, token) in output.tokens.enumerated() {
+            let text = output.scalars[token.range]
+            switch token.kind {
+            case .comment:
+                return false
+            case .opaque:
+                continue
+            case .atKeyword:
+                let name = String(String.UnicodeScalarView(text)).lowercased()
+                guard name == "@media" || name == "@supports" else { return false }
+            case .open:
+                guard output.match[index] != nil else { return false }
+                opens += 1
+            case .close:
+                closes += 1
+            default:
+                break
+            }
+            visible.append(contentsOf: text)
+        }
+        return opens == closes && !reachesHost(String(visible).lowercased())
+    }
+
     /// True for `:host`, `::part` and `::slotted`, which reach outside the shadow tree.
     private static func reachesHost(_ lowercased: String) -> Bool {
         has(lowercased, ":host") || has(lowercased, "::part") || has(lowercased, "::slotted")
@@ -554,6 +603,15 @@ struct CSSSanitizer {
     }
 
     private static func isSpace(_ scalar: Unicode.Scalar) -> Bool { scalar.properties.isWhitespace }
+
+    /// Trims CSS whitespace (space, tab and line breaks) and nothing else: any other space is part of the token next
+    /// to it, so `\u{A0}@font-face` is a name and an at-keyword, not an at-rule.
+    private static func trimmingCSSWhitespace(_ text: String) -> String {
+        let scalars = text.unicodeScalars
+        let isText = { (scalar: Unicode.Scalar) in scalar != " " && scalar != "\t" && !isNewline(scalar) }
+        guard let first = scalars.firstIndex(where: isText), let last = scalars.lastIndex(where: isText) else { return "" }
+        return String(scalars[first...last])
+    }
 
     /// The characters that end a CSS string: line feed, carriage return and form feed.
     private static func isNewline(_ scalar: Unicode.Scalar) -> Bool {

@@ -503,6 +503,102 @@ private func outline(_ css: String) -> String {
     #expect(CSSSanitizer.rewriteSelector("--x:hover").isEmpty)
 }
 
+// MARK: Forged at-rules
+
+/// At-rules a style rule could be written back as. Only `@font-face` reaches outside the shadow root, but none may
+/// come out.
+private let forgeable = [
+    "font-face { font-family: Inter; src: local(Zapfino) }", "keyframes spin { color: red }", "layer base { color: red }",
+    "property --x { syntax: '*'; inherits: true }", "scope (.a) { color: red }",
+]
+
+@Test func aCommentAfterAtCantForgeAnAtRule() {
+    // Without its comment `@/**/font-face` would be written back as `@font-face`, which re-glyphs Tern's own Inter
+    // text. With CSS whitespace after the `@` WebKit reads a style rule with a broken selector, and a no-break or em
+    // space before it is part of a name, not whitespace to trim; all of them go.
+    let joins = ["@/**/", "@/* */", "@/*\u{301}*/", "@/**//**/", "@ ", "@\n", "@\t", "@/**/ ", "\u{A0}@", "\u{2003}@", "\u{3000}@",
+                 "\u{A0}@/**/"]
+    for join in joins {
+        for rule in forgeable {
+            let forged = join + rule
+            let name = String(rule.prefix { $0 != " " })
+            let sheets = [
+                "\(forged) .after { width: 1px }",
+                "@media screen { \(forged) .in { width: 1px } } .after { width: 1px }",
+                "@supports (display: grid) { \(forged) .in { width: 1px } } .after { width: 1px }",
+                "@media screen { @supports (display: grid) { \(forged) } } .after { width: 1px }",
+            ]
+            for sheet in sheets {
+                let css = clean("<style>\(sheet)</style><style media=\"screen\">\(forged)</style><p>Hi</p>").css
+                #expect(!css.lowercased().contains(name), "\(sheet.debugDescription) → \(css.debugDescription)")
+                #expect(css.contains(".after { width: 1px }"), "\(sheet.debugDescription) → \(css.debugDescription)")
+                #expect(CSSSanitizer.readsBackSafely(css) && isWellFormed(css), "\(css.debugDescription)")
+            }
+        }
+    }
+}
+
+@Test func leavingACommentOutNeverJoinsTokens() {
+    func text(_ css: String, skippingBlocks: Bool = false) -> String? {
+        let sheet = CSSStructure(css.unicodeScalars)
+        return sheet.text(sheet.tokens.indices, skippingBlocks: skippingBlocks)
+    }
+    // Joined, these read as other tokens: an at-keyword, a name, a dimension, a number, a hash, a comment, the
+    // markers, a URL, Tern's class and a custom property.
+    let joining = ["@/**/font-face", "a/**/b", "col/**/or", "0/**/1px", "1/**/.5", "#/**/x", "//**/*", "-/**/->", "<!/**/--",
+                   "u/**/rl(x)", ".tern/**/-root", "-/**/-x"]
+    for css in joining { #expect(text(css) == nil, "\(css)") }
+    #expect(text("a{}b", skippingBlocks: true) == nil, "a block left out joins its neighbours too")
+    let kept = [
+        "a/**/.b": "a.b", "a /**/ b": "a  b", "html>/**/body": "html>body", "\"a\"/**/\"b\"": "\"a\"\"b\"", "/**/a/**/": "a",
+        "(display:/**/grid)": "(display:grid)", "12px/**/!important": "12px!important", "color: red;/* x */margin: 0": "color: red;margin: 0",
+    ]
+    for (css, expected) in kept { #expect(text(css) == expected, "\(css)") }
+    #expect(text("a {} b", skippingBlocks: true) == "a  b")
+    #expect(text("x { a: b } y", skippingBlocks: true) == "x  y")
+}
+
+@Test func textJoinedAcrossACommentDropsItsRule() {
+    let mail = clean("""
+        <style>.a { col/**/or: red } .b { margin: 0/**/1px } .c { color: red; /* note */ margin: 0 }
+        .d/**/.e { width: 1px } html>/**/body .f { width: 1px } .g/**/h { width: 1px }
+        @media screen/**/and (min-width: 1px) { .h { width: 1px } } @supports (display:/**/grid) { .i { width: 1px } }</style>
+        <p style="col/**/or: red">a</p><p style="margin: 0; /* x */ padding: 0">b</p>
+        """)
+    #expect(outline(mail.css) == ".c .d.e .tern-root>.tern-body .f @supports (display:grid){.i}", "\(mail.css)")
+    #expect(mail.css.contains(".c { color: red; margin: 0 }"), "\(mail.css)")
+    #expect(!mail.html.contains("red"), "\(mail.html)")
+    #expect(mail.html.contains("style=\"margin: 0; padding: 0\""), "\(mail.html)")
+}
+
+@Test func noSelectorValueOrConditionHoldsAnAt() {
+    for selector in ["@font-face", "@ x", "\u{A0}@font-face", "\u{2003}@x", "a@b", "a, @x", ":is(@x)", "[x=@]"] {
+        #expect(CSSSanitizer.rewriteSelector(selector).isEmpty, "\(selector.debugDescription)")
+    }
+    #expect(CSSSanitizer.rewriteSelector("[title=\"a@b\"]") == "[title=\"a@b\"]")
+    #expect(CSSSanitizer.rewriteSelector("\u{A0}p\u{2003}") == "\u{A0}p\u{2003}", "only CSS whitespace is trimmed: this is one name")
+    let mail = clean("""
+        <style>.j { font-family: @MS Gothic; width: 1px } .k { content: "a@b" } @supports (x: @y) { .l { width: 1px } }
+        .after { width: 1px }</style><p style="font-family: @x; width: 2px">Hi</p>
+        """)
+    #expect(mail.css == ".j { width: 1px }\n.k { content: \"a@b\" }\n.after { width: 1px }\n", "\(mail.css)")
+    #expect(mail.html.contains("style=\"width: 2px\""), "\(mail.html)")
+}
+
+@Test func theLastCheckReadsTheSheetBack() {
+    #expect(CSSSanitizer.readsBackSafely(
+        "p { color: red }\n@media screen {.a { width: 1px }\n}\n@SUPPORTS (display: grid) {.b { color: red }\n}\n"))
+    #expect(CSSSanitizer.readsBackSafely("p { content: \":host /* @font-face\"; background: url(\"x@2x.png\") }\n"))
+    #expect(CSSSanitizer.readsBackSafely(""))
+    let unsafe = [
+        "@font-face { font-family: Inter; src: local(Zapfino) }\n", "@media screen {@font-face { src: local(x) }\n}\n",
+        "@keyframes x { }\n", "p { color: red } /* x */\n", "p { color: @x }\n", ":host { contain: none }\n",
+        "p::PART(x) { color: red }\n", "::slotted(p) { color: red }\n", "p { color: red }\n}\n", "p { color: red\n",
+        "p:is(.a { color: red }\n",
+    ]
+    for sheet in unsafe { #expect(!CSSSanitizer.readsBackSafely(sheet), "\(sheet.debugDescription)") }
+}
+
 // MARK: Linear time
 
 /// Mail CSS built to make a backtracking or quadratic reader slow: long runs of spaces inside a feature, deep

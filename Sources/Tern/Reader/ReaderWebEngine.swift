@@ -152,9 +152,11 @@ final class ReaderWebEngine: NSObject {
                 self.flushIfReady()
             }
         }
-        Task.detached(priority: .utility) {
-            _ = MailSanitizer.sanitize(html: ReaderResources.warmupMail)
-            _ = PlainTextMail.html("Warm up https://example.com\n\nOn Mon, A wrote:\n> q")
+        Task {
+            await MailSanitizer.onDeepStack(qualityOfService: .utility) {
+                _ = MailSanitizer.sanitize(html: ReaderResources.warmupMail)
+                _ = PlainTextMail.html("Warm up https://example.com\n\nOn Mon, A wrote:\n> q")
+            }
         }
     }
 
