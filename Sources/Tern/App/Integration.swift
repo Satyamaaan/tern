@@ -217,6 +217,11 @@ final class Integration {
             draftReply: { key, instruction in try await assistant.draftReply(thread: key, instruction: instruction) },
             naturalLanguageQuery: { text in try await assistant.naturalLanguageToQuery(text) })
 
+        services.aiAvailability = { choice, refresh in
+            guard let id = choice.executable, let provider = AIProviders.shared.provider(id: id) else { return .notInstalled }
+            return AIStatus(await provider.availability(refresh: refresh))
+        }
+
         // AI helpers exist only while AI is switched on in Settings.
         let observation = ValueObservation.tracking { db in try AISettings.read(db).enabled }.removeDuplicates()
         settingsObservation = observation.startRestarting(

@@ -33,14 +33,14 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 /// AI choices. Stored in the database `setting` table so the AI lane reads the same values.
 enum AIProvider: String, CaseIterable, Identifiable {
-    case codex, claude, off
+    case claude, codex, off
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .codex: "Codex"
         case .claude: "Claude Code"
+        case .codex: "Codex"
         case .off: "Off"
         }
     }
@@ -48,8 +48,8 @@ enum AIProvider: String, CaseIterable, Identifiable {
     /// The command-line tool behind the provider.
     var executable: String? {
         switch self {
-        case .codex: "codex"
         case .claude: "claude"
+        case .codex: "codex"
         case .off: nil
         }
     }
@@ -324,7 +324,9 @@ private struct AccountsSettings: View {
 }
 
 private struct AISettings: View {
+    @Environment(AppServices.self) private var services
     @Bindable var state: SettingsState
+    @State private var board = AIStatusBoard()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -334,9 +336,7 @@ private struct AISettings: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 8)
             Hairline()
-            SettingsRow(title: "Provider", detail: providerDetail) {
-                SegmentedPicker(options: AIProvider.allCases, selection: $state.provider) { $0.title }
-            }
+            AIProviderRow(selection: $state.provider, board: board) { board.check(services.aiAvailability, refresh: true) }
             SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
                 TextField("Default", text: $state.aiModel)
                     .textFieldStyle(.plain)
@@ -349,15 +349,10 @@ private struct AISettings: View {
                 InkToggle(isOn: $state.autoProjects).disabled(state.provider == .off)
             }
         }
+        .task { board.check(services.aiAvailability) }
         .onChange(of: state.provider) { state.saveAI() }
         .onChange(of: state.aiModel) { state.saveAI() }
         .onChange(of: state.autoProjects) { state.saveAI() }
-    }
-
-    private var providerDetail: String {
-        AIProvider.allCases.compactMap { provider in
-            provider.executable.map { "\(provider.title): \(CLITool.find($0) == nil ? "not found" : "found")" }
-        }.joined(separator: " · ")
     }
 }
 
