@@ -82,8 +82,10 @@ enum MailQuotes {
         if let id = node.attribute("id"), toEndIds.contains(id) { return .toEnd }
         if classes.contains("OutlookMessageHeader") { return .toEnd }
         if node.name == "div" || node.name == "p" {
-            let style = (node.attribute("style") ?? "").lowercased().replacingOccurrences(of: " ", with: "")
-            let bordered = style.contains("border-top:solid") || style.contains("border-top:1pxsolid") || style.contains("border-top-style:solid")
+            let bordered = node.attribute("style").map { style in
+                let style = style.lowercased().replacingOccurrences(of: " ", with: "")
+                return style.contains("border-top:solid") || style.contains("border-top:1pxsolid") || style.contains("border-top-style:solid")
+            } ?? false
             if bordered || node.name == "p" || node.children.first?.kind == .text, let text = node.firstText() {
                 if bordered, headerPrefixes.contains(where: { text.hasPrefix($0) }) { return .toEnd }
                 if text.hasPrefix("---"), text.range(of: #"^-{3,}\s*Original Message\s*-{3,}"#, options: [.regularExpression, .caseInsensitive]) != nil {

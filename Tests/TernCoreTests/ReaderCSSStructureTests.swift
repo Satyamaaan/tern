@@ -273,27 +273,234 @@ private let escape = "contain: none !important; overflow: visible !important; po
 }
 
 @Test func nestedMediaAndSupportsKeepTheirRules() {
+    // Each broken block sits in a sheet of its own: an unclosed bracket swallows everything after it in its sheet
+    // (see `sheetStructureMatchesWebKit`).
     let mail = clean("""
         <style>
         @supports (display: grid) {
           @media (prefers-color-scheme: dark) { .a { color: #fff } }
-          @media (min-width: 1px { .b { color: red } }
           .c { display: grid }
         }
         @media screen { @supports (display: flex) { @media (prefers-color-scheme: light) { .d { display: block } } } }
-        @supports (a: b)) , :host { .e { \(escape) } }
         @supports selector(:host) { .f { display: block } }
         @media screen { @media screen { @media screen { @media screen { @media screen { @media screen { .deep { color: red } } } } } } }
         .after { width: 1px }
-        </style><p>Hi</p>
+        </style>
+        <style>@supports (display: grid) { @media (min-width: 1px { .b { color: red } } }</style>
+        <style>@supports (a: b)) , :host { .e { \(escape) } } .after2 { width: 1px }</style><p>Hi</p>
         """)
     #expect(!mail.css.contains(".a ") && !mail.css.contains(".b ") && !mail.css.contains(".e ") && !mail.css.contains(".f "), "\(mail.css)")
     #expect(mail.css.contains("@supports (display: grid) {.c { display: grid }"))
     #expect(mail.css.contains("@media screen {@supports (display: flex) {@media (prefers-color-scheme: light) {.d { display: block }"))
     #expect(!mail.css.contains(".deep"))
-    #expect(mail.css.contains(".after { width: 1px }"))
+    #expect(outline(mail.css).hasSuffix(" .after @supports (display: grid){} .after2"), "\(outline(mail.css))")
     #expect(isWellFormed(mail.css))
     #expect(!reachesHost(mail.css))
+}
+
+// MARK: WebKit's error recovery
+
+/// Sanitized CSS as its rules: selectors, and `@media …{…}` around the rules inside, so a test sees which block
+/// every rule ended up in.
+private func outline(_ css: String) -> String {
+    let scalars = Array(css.unicodeScalars)
+    var index = 0
+    func block() -> [String] {
+        var items: [String] = []
+        var prelude = String.UnicodeScalarView()
+        var quote: Unicode.Scalar?
+        while index < scalars.count {
+            let scalar = scalars[index]
+            index += 1
+            if let open = quote {
+                if scalar == open { quote = nil }
+                prelude.append(scalar)
+                continue
+            }
+            switch scalar {
+            case "\"", "'":
+                quote = scalar
+                prelude.append(scalar)
+            case "{":
+                let name = String(prelude).trimmingCharacters(in: .whitespacesAndNewlines)
+                prelude = String.UnicodeScalarView()
+                if name.hasPrefix("@") {
+                    items.append("\(name){\(block().joined(separator: " "))}")
+                } else {
+                    items.append(name)
+                    while index < scalars.count {
+                        let inner = scalars[index]
+                        index += 1
+                        if let open = quote {
+                            if inner == open { quote = nil }
+                        } else if inner == "\"" || inner == "'" {
+                            quote = inner
+                        } else if inner == "}" {
+                            break
+                        }
+                    }
+                }
+            case "}":
+                return items
+            default:
+                prelude.append(scalar)
+            }
+        }
+        return items
+    }
+    return block().joined(separator: " ")
+}
+
+/// Sheets read by WebKit (macOS 15) through a probe that printed each one's CSSOM, and the rules it kept in each
+/// block. A rule the sanitizer drops on purpose is left out of the expected outline (`:is(})`, escapes, declarations
+/// that aren't self-contained); every rule both keep must sit in the same block.
+@Test func sheetStructureMatchesWebKit() {
+    let cases: [(String, String)] = [
+        // A stray `}` or `;` at the top joins the next rule's prelude, and only that rule goes.
+        (".a{color:#111}} .b{color:red} .c{color:blue}", ".a .c"),
+        (".a { x: y } } } .b { color: red } .c { color: blue }", ".a .c"),
+        (".a; .b{color:red} .c{color:blue}", ".c"),
+        (".a { color: red }; .b { color: blue } .c { color: green }", ".a .c"),
+        ("p { color: red } ;", "p"),
+        ("@media print { .p{color:red} } } .lost{color:red} .kept{color:blue}", "@media print{.p} .kept"),
+        // An at-rule without a block ends at `;`, or at the `}` of the block around it without taking it; at the top
+        // a `}` is part of its prelude.
+        ("@media print{@import \"x\"} .after{color:red}", "@media print{} .after"),
+        ("@media screen { .a { color: red } @import 'x' } .b{color:blue}", "@media screen{.a} .b"),
+        ("@import \"x\" } .a { color: red } .b { color: blue }", ".b"),
+        // Inside @media and @supports, `;`, `<!--` and `-->` start a prelude.
+        ("@media screen { .a; .b {color:red} .c {color:blue} }", "@media screen{.c}"),
+        ("@media screen { color: red; .b {color:red} }", "@media screen{}"),
+        ("p{color:red} @media screen { .m{color:red} ; .n{color:blue} }", "p @media screen{.m}"),
+        ("@supports (display:grid) { .s{color:red} ; .t{color:blue} .u{color:green} }", "@supports (display:grid){.s .u}"),
+        ("@media screen { -->.a{color:red} .b{color:blue} }", "@media screen{.b}"),
+        ("@media screen { p { color: red } <!-- .x{color:blue} .y{color:green} }", "@media screen{p .y}"),
+        // At the top, `<!--` and `-->` are skipped.
+        ("<!-- p{margin:10px 0} --> .q{color:red} <!-- .r{color:blue}", "p .q .r"),
+        ("@media screen{.a{color:red}} <!-- --> .z{color:blue}", "@media screen{.a} .z"),
+        ("p{color:red}--> .q{color:blue}", "p .q"),
+        ("p{color:red}<!--.q{color:blue}", "p .q"),
+        // Brackets, strings, escapes, comments and unquoted URLs decide where a block ends.
+        ("@media screen { p:is(}) { color: red } .in { width: 1px } } .after { width: 1px }", "@media screen{.in} .after"),
+        (".a, [title=\"}\"] { color: red } .b{color:blue}", ".a, [title=\"}\"] .b"),
+        ("@media screen { .a\\{ { color: red } .in{width:1px} } .after{width:1px}", "@media screen{.in} .after"),
+        ("@media screen { .a\\;{color:red} .b{color:blue} }", "@media screen{.b}"),
+        ("p { content: \"/*\" } .x { color: red } /* */ .y{color:blue}", "p .x .y"),
+        ("p { content: \"a\\\" } .x{color:red} \" } .y{color:blue}", ".y"),
+        ("p { content: \"abc\n} .x{color:red}", ".x"),
+        ("p { content: \"a\\\n} .x{color:red}\"} .y{color:blue}", ".y"),
+        ("p { background: url(a}b) } .x { color: red }", ".x"),
+        ("@media screen { p { background: url(}) } .in{color:red} } .after{color:blue}", "@media screen{.in} .after"),
+        ("p { background: url( \"a}\" ) } .x{color:red}", "p .x"),
+        ("p { background: u\\72l(a}b) } .x{color:red}", ".x"),
+        ("p { background: url(a\"b) } .x{color:red}", ".x"),
+        ("p { background: url(a\"b }\n.x{color:red} ) } .y{color:blue}", ".y"),
+        ("u/**/rl(x;}) .z{color:red} .w{color:blue}", ".w"),
+        (".a { color: red; .n { color: blue } width: 2px } .b{color:green}", ".a .b"),
+        ("@media screen { @media print { .a{color:red} } } .b{color:blue}", "@media screen{@media print{.a}} .b"),
+        ("@media screen { --x: { } .b { color: red } } .c{color:blue}", "@media screen{.b} .c"),
+        ("--x: { color: red } .b { color: blue }", ".b"),
+        // A `(` that closes far away swallows everything up to it, and the block it opened in stays open to the end.
+        ("""
+         @supports (display: grid) {
+           @media (min-width: 1px { .b { color: red } }
+           .c { display: grid }
+         }
+         @media screen { .d { display: block } }
+         @supports (a: b)) , :host { .e { color: red } }
+         .after { width: 1px }
+         """, "@supports (display: grid){.after}"),
+    ]
+    for (sheet, expected) in cases {
+        let css = clean("<style>\(sheet)</style><p>Hi</p>").css
+        #expect(outline(css) == expected, "\(sheet.debugDescription)\n→ \(css.debugDescription)")
+        #expect(isWellFormed(css), "\(css)")
+    }
+}
+
+@Test func brokenBracketsRecoverLocally() {
+    // WebKit swallows everything after a bracket that never closes. The sanitizer keeps the rules WebKit kept where
+    // WebKit kept them and recovers after the bracket instead of dropping the rest of the sheet.
+    let cases: [(String, String)] = [
+        (".h { color: red; width: calc(1px + (2px) }\n.i { width: 1px }", ".h .i"),
+        ("@media screen { .a { color: red } p:is(.x { color: red } .in { width: 1px } } .after { width: 1px }",
+         "@media screen{.a .in} .after"),
+        ("p { background: url(x } .after { width: 1px }", ".after"),
+    ]
+    for (sheet, expected) in cases {
+        let css = clean("<style>\(sheet)</style><p>Hi</p>").css
+        #expect(outline(css) == expected, "\(sheet.debugDescription)\n→ \(css.debugDescription)")
+        #expect(isWellFormed(css))
+    }
+    #expect(clean("<style>.h { color: red; width: calc(1px + (2px) }</style>").css == ".h { color: red }\n")
+}
+
+@Test func htmlCommentMarkersAroundASheet() {
+    let mail = clean("""
+        <style><!--
+        p { margin: 10px 0 }
+        .a { color: red }
+        --></style><style>
+        <!-- @media screen { .b { width: 1px } } -->
+        </style><p>Hi</p>
+        """)
+    #expect(outline(mail.css) == "p .a @media screen{.b}", "\(mail.css)")
+}
+
+// MARK: Tern's own elements
+
+@Test func fontFacesAreDropped() {
+    // A face declared in the mail's shadow root applies to the whole document, so `local()` could re-glyph Tern's
+    // own Inter text, a whole family or single characters.
+    let mail = clean("""
+        <style>@font-face { font-family: Inter; src: local(Zapfino) }
+        @font-face { font-family: Inter; src: local("Zapfino"); unicode-range: U+0057 }
+        @FONT-FACE { font-family: "Brand"; src: local(Helvetica Neue) }
+        @media screen { @font-face { font-family: Inter; src: local(Zapfino) } .a { font-family: Brand, sans-serif } }
+        p { font-family: Inter, sans-serif }</style><p>Hi</p>
+        """)
+    #expect(!mail.css.lowercased().contains("font-face"), "\(mail.css)")
+    #expect(!mail.css.contains("Zapfino") && !mail.css.contains("local("))
+    #expect(outline(mail.css) == "@media screen{.a} p")
+}
+
+@Test func positionTakesOnlyBoxesThatStayInTheCard() {
+    let dropped = [
+        "--p:fixed;position:var(--p);inset:0;z-index:9", "position: var(--p, fixed)", "position: env(safe-area-inset-top)",
+        "position: attr(data-p type(<custom-ident>))", "position: -webkit-sticky", "position: fixed", "position: STICKY !important",
+        "position: absolute\u{301}", "position: fixed, absolute",
+    ]
+    for style in dropped {
+        let mail = clean("<style>.x { \(style) }</style><div style=\"\(style)\">x</div>")
+        #expect(!mail.css.contains("position") && !mail.html.contains("position"), "\(style) → \(mail.css) \(mail.html)")
+    }
+    for mode in ["static", "relative", "absolute", "ABSOLUTE ! important", "inherit", "revert-layer"] {
+        let mail = clean("<div style=\"position: \(mode)\">x</div>")
+        #expect(mail.html.contains("position: \(mode)"), "\(mode) → \(mail.html)")
+    }
+}
+
+@Test func selectorsCantNameTernElements() {
+    let reserved = [
+        ".tern-quote-toggle", ".TERN-QUOTE-TOGGLE", "div.Tern-quote", "#tern-x", ".x .tern-root p", ":is(.tern-quote) b",
+        "p:not(.a) ~ .tern-body", ".tern-\u{301}quote", "[class*=tern]", "[class*=\"TERN\"]", "[CLASS^=t]", "[class^='te']",
+        "[class$=toggle]", "[class$=\"-body\" i]", "[class|=tern]", "[class~=tern-quote]", "[class=tern-quote-toggle]",
+        "*|*[class*=quote]", "[ class *= \"q\" ]", "[svg|class$=root]", "[data-tern-blocked]", "img[data-tern-missing]",
+        "[DATA-TERN-BLOCKED=\"\"]", "[id^=tern-]", "div[class*=e]",
+    ]
+    for selector in reserved {
+        #expect(CSSSanitizer.rewriteSelector(selector).isEmpty, "\(selector)")
+        #expect(clean("<style>\(selector) { display: none }</style><p>Hi</p>").css.isEmpty, "\(selector)")
+    }
+    let allowed = [
+        "table[class=body] .container", "[class*=col]", ".pattern-bg", ".intern", ".tern", "[class^=\"mobile-\"]",
+        ".lantern p", "[title*=tern]", "[class$=x]", "[class=quote]", "[id=main]", "[id*=e]", ".t\u{301}ern-quote",
+    ]
+    for selector in allowed {
+        #expect(!CSSSanitizer.rewriteSelector(selector).isEmpty, "\(selector)")
+    }
+    #expect(CSSSanitizer.rewriteSelector("body .x") == ".tern-body .x", "html and body still point at the wrappers")
+    #expect(CSSSanitizer.rewriteSelector("--x:hover").isEmpty)
 }
 
 // MARK: Linear time
@@ -331,6 +538,22 @@ private func adversarialSheet(bytes: Int) -> String {
     #expect(clean(reproducer).css.isEmpty)
 }
 
+/// Sheets built to make the structural reading slow: unquoted URLs, brackets and blocks that never close,
+/// backslash runs, strings that run to their line, comments and markers.
+private func adversarialStructure(bytes: Int) -> String {
+    let pieces = [
+        "p { background: url(" + String(repeating: "\\", count: 41) + ")", "url(", "u\\72l(", "calc(", "[", "{", "(",
+        "\"" + String(repeating: "\\\"", count: 20) + "\n", "/* x */", "<!--", "-->", "}", ";", ".tern-x[class*=", "@media (",
+    ]
+    var css = ""
+    var index = 0
+    while css.utf8.count < bytes {
+        css += pieces[index % pieces.count] + " a "
+        index += 1
+    }
+    return "<style>" + css + "</style><style>q { width: 1px }</style><p>Hi</p>"
+}
+
 private let skipPerf = ProcessInfo.processInfo.environment["TERN_SKIP_PERF"] == "1"
 
 /// Best of five, in milliseconds.
@@ -357,4 +580,19 @@ func adversarialMediaQueriesSanitizeInLinearTime() {
     // Four times the input: linear is about 4×, quadratic 16×.
     #expect(large / small < 8, "25 KB \(small) ms → 100 KB \(large) ms")
     #expect(spacesLarge / max(spacesSmall, 0.05) < 8, "25k spaces \(spacesSmall) ms → 100k spaces \(spacesLarge) ms")
+}
+
+@Test func adversarialStructureStillSanitizes() {
+    let mail = clean(adversarialStructure(bytes: 100_000))
+    #expect(isWellFormed(mail.css))
+    #expect(mail.css.contains("q { width: 1px }"))
+}
+
+@Test(.enabled(if: !skipPerf, "TERN_SKIP_PERF=1"))
+func adversarialStructureSanitizesInLinearTime() {
+    let small = milliseconds(adversarialStructure(bytes: 25_000))
+    let large = milliseconds(adversarialStructure(bytes: 100_000))
+    print(String(format: "adversarial sheet structure: 25 KB %.2f ms, 100 KB %.2f ms", small, large))
+    #expect(large < 100, "100 KB of adversarial sheet structure took \(large) ms")
+    #expect(large / small < 8, "25 KB \(small) ms → 100 KB \(large) ms")
 }

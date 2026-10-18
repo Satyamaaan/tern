@@ -277,9 +277,12 @@ enum ReaderSnapshotFixtures {
         </table></td></tr></table></body></html>
         """
 
-    /// `ReaderSnapshot.checkCSSEscape` reads the card's containment after this renders.
+    /// `ReaderSnapshot.checkCSSEscape` reads the card's containment and the reader's own text width after this
+    /// renders. The `@font-face` rules would re-glyph Tern's Inter text (all of it, or just `W`) if they got through.
     static let cssEscape = """
         <html><head>
+        <style>@font-face{font-family:Inter;src:local(Zapfino)} @font-face{font-family:"Inter Display";src:local(Zapfino)}
+        @font-face{font-family:Inter;src:local("Zapfino");unicode-range:U+0057}</style>
         <style media="all {&#x301;, :host">
         & { contain:none !important; overflow:visible !important; position:absolute !important; inset:0 !important }
         </style>
