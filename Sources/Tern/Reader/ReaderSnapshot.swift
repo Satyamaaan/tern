@@ -138,10 +138,13 @@ enum ReaderSnapshot {
                         services.reader.summarize()
                         try? await Task.sleep(for: .milliseconds(400))
                         await save(hosting, name: "\(fixture.name)-summary-\(suffix(appearance))")
+                        await focusShots(hosting, suffix(appearance))
                         continue
                     }
                     if fixture.name == "hostile" { await checkHostile() }
+                    if fixture.name == "css-escape" { await checkCSSEscape(suffix(appearance)) }
                     await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
+                    if fixture.name == "reply-chain" { await focusShots(hosting, suffix(appearance)) }
                     if fixture.name == "hostile", appearance == .aqua {
                         _ = try? await js("""
                             const link = [...document.querySelectorAll('.mbody')].map((h) => h.shadowRoot).filter(Boolean)
@@ -237,6 +240,17 @@ enum ReaderSnapshot {
                 body, arguments: [:], in: nil, contentWorld: ReaderWebEngine.shared.world)
         }
 
+        /// Where the keyboard is in the thread: a collapsed message (p) and a selected attachment, then the
+        /// open message (n).
+        func focusShots(_ hosting: NSView, _ suffix: String) async {
+            _ = try? await js("Tern.previous(); document.querySelector('.att')?.classList.add('selected'); return true;")
+            try? await Task.sleep(for: .milliseconds(150))
+            await save(hosting, name: "reply-chain-focus-line-\(suffix)")
+            _ = try? await js("Tern.next(); window.scrollTo(0, 0); return true;")
+            try? await Task.sleep(for: .milliseconds(150))
+            await save(hosting, name: "reply-chain-focus-open-\(suffix)")
+        }
+
         /// Find, n/p, quote toggles and expand-all, driven through the same entry points the UI uses.
         func interactionChecks(_ key: ThreadKey, selection: Selection, services: AppServices) async {
             selection.key = nil
@@ -314,6 +328,72 @@ enum ReaderSnapshot {
                 return count;
                 """, arguments: [:], in: nil, contentWorld: ReaderWebEngine.shared.world)
             note("hostile: page script markers = \(page.map { "\($0)" } ?? "?"), dangerous elements left = \(dangerous.map { "\($0)" } ?? "?")")
+        }
+
+        /// Proves mail CSS can't lift the card's containment: the open message's `.mbody` computes the same
+        /// `contain`, `overflow` and `position` as a fresh host without mail CSS, and its sanitized sheet never
+        /// names `:host`. As a control, the same reading must catch the old sanitizer's output for the
+        /// combining-mark reproducer. Then proves the mail can't restyle Tern's own text: a line in the reader's
+        /// font measures the same with the mail's sheet in place and taken out, while the old sanitizer's
+        /// `@font-face` output, as a control, changes it.
+        func checkCSSEscape(_ suffix: String) async {
+            let control = "@media all {\u{301}, :host {\n& { contain: none !important; overflow: visible !important; "
+                + "position: absolute !important; inset: 0 !important }\n}\n"
+            let fontControl = "@font-face {font-family: Inter; src: local(Zapfino)}\n"
+            let result = try? await ReaderWebEngine.shared.webView.callAsyncJavaScript("""
+                const host = document.querySelector('.msg.open .mbody');
+                if (!host || !host.shadowRoot) return 'no body';
+                const read = (element) => {
+                  const style = getComputedStyle(element);
+                  return `contain=${style.contain} overflow=${style.overflow} position=${style.position}`;
+                };
+                const fresh = (css) => {
+                  const element = document.createElement('div');
+                  element.className = host.className;
+                  element.dataset.mode = host.dataset.mode;
+                  host.after(element);
+                  if (css !== null) {
+                    const style = document.createElement('style');
+                    style.textContent = css;
+                    element.attachShadow({ mode: 'open' }).append(style);
+                  }
+                  const value = read(element);
+                  element.remove();
+                  return value;
+                };
+                const expected = fresh(null);
+                const caught = fresh(control) !== expected;
+                const styles = [...host.shadowRoot.querySelectorAll('style')];
+                const sheet = styles.map((style) => style.textContent).join('\\n');
+                const named = /:host|::part|::slotted/i.test(sheet);
+                const width = async () => {
+                  const line = document.createElement('span');
+                  line.style.cssText = 'position: absolute; left: -9999px; top: 0; white-space: nowrap; font: 400 15px var(--ui)';
+                  line.textContent = 'Your statement is available. WWW wmw 0123';
+                  document.body.append(line);
+                  line.getBoundingClientRect();
+                  await document.fonts.ready;
+                  await new Promise((resolve) => setTimeout(resolve, 60));
+                  const value = line.getBoundingClientRect().width;
+                  line.remove();
+                  return value;
+                };
+                const withMail = await width();
+                styles.forEach((style) => style.remove());
+                const withoutMail = await width();
+                host.shadowRoot.prepend(...styles);
+                const other = document.createElement('div');
+                other.attachShadow({ mode: 'open' }).innerHTML = `<style>${fontControl}</style>`;
+                document.body.append(other);
+                const withControl = await width();
+                other.remove();
+                await width();
+                return `${read(host) === expected ? 'contained' : 'ESCAPED'} (${read(host)}), :host in sheet = ${named}, `
+                  + `control caught = ${caught}; reader text ${withMail === withoutMail ? 'unchanged' : 'RESTYLED'} `
+                  + `(${withMail.toFixed(2)} px with the mail, ${withoutMail.toFixed(2)} px without), `
+                  + `font control caught = ${withControl !== withoutMail} (${withControl.toFixed(2)} px)`;
+                """, arguments: ["control": control, "fontControl": fontControl], in: nil, contentWorld: ReaderWebEngine.shared.world)
+            note("css-escape (\(suffix)): \(result.map { "\($0)" } ?? "?")")
         }
 
         func save(_ hosting: NSView, name: String) async {

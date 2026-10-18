@@ -59,6 +59,8 @@ struct Snapshotter {
         model.toasts = []
 
 
+        selectionShots(window, directory)
+
         model.toggleReadingPane()
         shot("reading-pane-light")
         shot("reading-pane-dark", dark: true)

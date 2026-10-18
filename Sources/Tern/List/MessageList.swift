@@ -158,14 +158,38 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     /// Re-applies models to every row view on screen (selection, hover, content).
     func refreshVisibleRows() {
+        let underHeader = rowUnderFloatingHeader()
         table.enumerateAvailableRowViews { rowView, row in
             if let view = rowView as? ThreadRowView { view.model = rowModel(row) }
+            if let view = rowView as? HeaderRowView { view.hidesHairline = isFilled(view.isFloating ? underHeader : row + 1) }
             if let view = rowView as? ServerSearchRowView, items.indices.contains(row), case .serverSearch(let text) = items[row] {
                 view.text = text
                 view.isHovered = row == footerHovered
             }
         }
         updateHoverBar()
+    }
+
+    /// Date headers hide their hairline over a filled row, like rows do. A floating header sits over
+    /// whichever row has scrolled under it.
+    private func refreshHeaders() {
+        let underHeader = rowUnderFloatingHeader()
+        table.enumerateAvailableRowViews { rowView, row in
+            if let view = rowView as? HeaderRowView { view.hidesHairline = isFilled(view.isFloating ? underHeader : row + 1) }
+        }
+    }
+
+    private func rowUnderFloatingHeader() -> Int {
+        table.row(at: NSPoint(x: table.bounds.midX, y: scrollView.contentView.bounds.minY + Self.headerHeight + 0.5))
+    }
+
+    /// A row drawn with a fill: selected, hovered, or the hovered footer.
+    private func isFilled(_ index: Int) -> Bool {
+        index >= 0 && (index == hoveredRow || index == footerHovered || isSelectedRow(index))
+    }
+
+    private func isSelectedRow(_ index: Int) -> Bool {
+        snapshot.row(at: index).map { model.isSelected($0.id) } ?? false
     }
 
     // MARK: Data source and delegate
@@ -195,6 +219,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             let view = tableView.makeView(withIdentifier: .init("header"), owner: nil) as? HeaderRowView ?? HeaderRowView()
             view.identifier = .init("header")
             view.title = title
+            view.hidesHairline = isFilled(row + 1)
             return view
         case .thread:
             let view = tableView.makeView(withIdentifier: .init("thread"), owner: nil) as? ThreadRowView ?? ThreadRowView()
@@ -215,13 +240,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private func rowModel(_ index: Int) -> RowModel? {
         guard let row = snapshot.row(at: index) else { return nil }
         let key = row.id
-        let selected = model.isSelected(key)
         var result = RowModel(row: row, style: style)
-        result.isSelected = selected
-        // Offscreen renders (snapshots) draw the ring as if the window were key.
-        let windowActive = table.window.map { $0.isKeyWindow || !$0.isVisible } ?? true
-        result.hasFocusRing = key == model.cursor && model.focus == .list && windowActive && !model.searchFieldFocused
+        result.isSelected = model.isSelected(key)
+        result.hasFocus = key == model.cursor && listHasKeyboard
         result.isHovered = index == hoveredRow
+        result.joinsAbove = result.isSelected && isSelectedRow(index - 1)
+        result.joinsBelow = result.isSelected && isSelectedRow(index + 1)
+        result.hidesHairline = result.isSelected || result.isHovered || isFilled(index + 1)
         result.avatar = avatar(for: row)
         if row.needsReply, model.kind != .needsReply {
             result.chips.append(RowChip(text: "Needs reply", icon: .needsReply, tint: .ink))
@@ -239,6 +264,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         }
         if model.isSearching { result.highlight = model.highlight(for: key) }
         return result
+    }
+
+    /// Keyboard focus shows as the cursor row's stronger fill: only while the list has the keyboard in the
+    /// key window. Offscreen renders (snapshots, click-through at 1 % opacity) draw as if the window were key.
+    private var listHasKeyboard: Bool {
+        let windowActive = table.window.map { $0.isKeyWindow || !$0.isVisible || $0.ignoresMouseEvents } ?? true
+        return model.focus == .list && windowActive && !model.searchFieldFocused
     }
 
     /// The sender's domain logo, else initials (in the account's hue when several accounts share the
@@ -283,7 +315,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         refreshVisibleRows()
     }
 
-    /// The focus ring follows the window's key state.
+    /// The focused fill follows the window's key state.
     func windowKeyChanged() {
         refreshVisibleRows()
     }
@@ -320,6 +352,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let nearEnd = visible.location + visible.length >= items.count - 30
         if !resetting, nearEnd, bounds.minY > style.height || table.frame.height <= bounds.height { model.loadMore() }
         updateHoverFromMouse()
+        refreshHeaders()
     }
 
     func updateHoverFromMouse() {
@@ -328,11 +361,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let point = table.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         let row = scrollView.contentView.bounds.contains(table.convert(point, to: scrollView.contentView)) ? table.row(at: point) : -1
         setHovered(row >= 0 && items.indices.contains(row) && items[row].threadKey != nil ? row : nil)
-        let footer = row >= 0 && items.indices.contains(row) && isFooter(row) ? row : nil
-        if footer != footerHovered {
-            footerHovered = footer
-            refreshVisibleRows()
-        }
+        setFooterHovered(row >= 0 && items.indices.contains(row) && isFooter(row) ? row : nil)
+    }
+
+    func setFooterHovered(_ row: Int?) {
+        guard row != footerHovered else { return }
+        footerHovered = row
+        refreshVisibleRows()
     }
 
     private func isFooter(_ row: Int) -> Bool {
@@ -351,9 +386,11 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard row != hoveredRow else { return }
         let previous = hoveredRow
         hoveredRow = row
-        for index in [previous, row].compactMap({ $0 }) where items.indices.contains(index) {
+        // The hovered rows and the rows above them, whose hairlines touch the fill.
+        for index in [previous, row].compactMap({ $0 }).flatMap({ [$0 - 1, $0] }) where items.indices.contains(index) {
             (table.rowView(atRow: index, makeIfNecessary: false) as? ThreadRowView)?.model = rowModel(index)
         }
+        refreshHeaders()
         updateHoverBar()
     }
 

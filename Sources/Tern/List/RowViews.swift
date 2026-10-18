@@ -59,8 +59,14 @@ struct RowModel: Equatable {
     var row: ThreadRow
     var style: RowStyle
     var isSelected = false
-    var hasFocusRing = false
+    /// The cursor row while the list has the keyboard: its fill is a step stronger.
+    var hasFocus = false
     var isHovered = false
+    /// Selected and next to selected rows: the fills join into one block.
+    var joinsAbove = false
+    var joinsBelow = false
+    /// This row or the one below it is filled, so the line between them goes.
+    var hidesHairline = false
     var avatar = RowAvatar.letters("?", account: nil)
     var chips: [RowChip] = []
     /// Replaces the compact time (snoozed list shows when it wakes).
@@ -77,6 +83,9 @@ final class ThreadRowView: NSTableRowView {
 
     /// Space inside the column before the avatar and after the time.
     static let padding: CGFloat = 10
+    /// The selection and hover fill sits this far inside the row's top and bottom, clear of the hairlines
+    /// and the date header.
+    static let fillInset: CGFloat = 2
     static let avatarSize: CGFloat = 20
     /// Width of the hover buttons that replace the tags and time.
     static let hoverWidth: CGFloat = 84
@@ -96,23 +105,13 @@ final class ThreadRowView: NSTableRowView {
     override func draw(_ dirtyRect: NSRect) {
         guard let model else { return }
         let column = ListLayout.column(in: bounds)
-        Theme.hairline.setFill()
-        CGRect(x: column.minX, y: bounds.maxY - 1, width: column.width, height: 1).fill()
-
-        let fill = CGRect(x: column.minX - 4, y: bounds.minY + 1, width: column.width + 8, height: bounds.height - 2)
-        let shape = NSBezierPath(roundedRect: fill, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row)
-        if model.isSelected {
-            Theme.selected.setFill()
-            shape.fill()
-        } else if model.isHovered {
-            Theme.hover.setFill()
-            shape.fill()
+        if !model.hidesHairline {
+            Theme.hairline.setFill()
+            CGRect(x: column.minX, y: bounds.maxY - 1, width: column.width, height: 1).fill()
         }
-        if model.hasFocusRing {
-            let ring = NSBezierPath(roundedRect: fill.insetBy(dx: 0.75, dy: 0.75), xRadius: Theme.Radius.row - 0.5, yRadius: Theme.Radius.row - 0.5)
-            ring.lineWidth = 1.5
-            Theme.ink.withAlphaComponent(0.45).setStroke()
-            ring.stroke()
+        if model.isSelected || model.isHovered {
+            (model.isSelected ? (model.hasFocus ? Theme.selectedFocus : Theme.selected) : Theme.hover).setFill()
+            Self.fill(column: column, in: bounds, joinsAbove: model.joinsAbove, joinsBelow: model.joinsBelow)
         }
 
         let context = NSGraphicsContext.current?.cgContext
@@ -362,6 +361,8 @@ private struct RowPainter {
 /// background while it floats over rows.
 final class HeaderRowView: NSTableRowView {
     var title = "" { didSet { if title != oldValue { needsDisplay = true } } }
+    /// The row under the header is filled: no line between them.
+    var hidesHairline = false { didSet { if hidesHairline != oldValue { needsDisplay = true } } }
 
     override var isFlipped: Bool { true }
     override func drawBackground(in dirtyRect: NSRect) {}
@@ -384,8 +385,10 @@ final class HeaderRowView: NSTableRowView {
             Theme.bg.setFill()
             bounds.fill()
         }
-        Theme.hairline.setFill()
-        CGRect(x: column.minX, y: bounds.maxY - 1, width: column.width, height: 1).fill()
+        if !hidesHairline {
+            Theme.hairline.setFill()
+            CGRect(x: column.minX, y: bounds.maxY - 1, width: column.width, height: 1).fill()
+        }
         let text = title as NSString
         let size = text.size(withAttributes: Self.attributes)
         text.draw(at: CGPoint(x: column.midX - size.width / 2, y: bounds.maxY - 9 - size.height), withAttributes: Self.attributes)
@@ -409,20 +412,32 @@ final class ServerSearchRowView: NSTableRowView {
 
     override func draw(_ dirtyRect: NSRect) {
         let column = ListLayout.column(in: bounds)
-        let pill = CGRect(x: column.minX - 4, y: 6, width: column.width + 8, height: bounds.height - 12)
         if isHovered {
+            // As tall as a one-line row's fill, in the middle of the row.
             Theme.hover.setFill()
-            NSBezierPath(roundedRect: pill, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row).fill()
+            ThreadRowView.fill(column: column, in: bounds.insetBy(dx: 0, dy: (bounds.height - RowStyle.oneLine.height) / 2))
         }
         let left = column.minX + ThreadRowView.padding + 3
-        Icon.search.draw(in: CGRect(x: left, y: pill.midY - 7, width: 14, height: 14), color: Theme.text3)
+        Icon.search.draw(in: CGRect(x: left, y: bounds.midY - 7, width: 14, height: 14), color: Theme.text3)
         let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text3]
         let size = (text as NSString).size(withAttributes: attributes)
-        (text as NSString).draw(at: CGPoint(x: left + 27, y: pill.midY - size.height / 2), withAttributes: attributes)
+        (text as NSString).draw(at: CGPoint(x: left + 27, y: bounds.midY - size.height / 2), withAttributes: attributes)
     }
 }
 
 extension ThreadRowView {
+    /// Fills the column's width between the insets with the current colour, rounded at the row radius.
+    /// A side that joins a selected neighbour runs to the row's edge, square.
+    static func fill(column: CGRect, in bounds: CGRect, joinsAbove: Bool = false, joinsBelow: Bool = false) {
+        let top = joinsAbove ? bounds.minY : bounds.minY + fillInset
+        let bottom = joinsBelow ? bounds.maxY : bounds.maxY - fillInset
+        let rect = CGRect(x: column.minX, y: top, width: column.width, height: bottom - top)
+        let radius = Theme.Radius.row
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+        if joinsAbove { CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: radius).fill() }
+        if joinsBelow { CGRect(x: rect.minX, y: rect.maxY - radius, width: rect.width, height: radius).fill() }
+    }
+
     /// The snippet on one line, without the subject when the body starts by repeating it (common in
     /// notification mail), so the row doesn't say the same thing twice.
     static func preview(_ snippet: String, subject: String) -> String {

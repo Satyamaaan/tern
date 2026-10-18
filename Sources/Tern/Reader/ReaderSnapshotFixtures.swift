@@ -150,6 +150,20 @@ enum ReaderSnapshotFixtures {
                 """)
         fixtures.append(Fixture(name: "remote-images", key: key("fx-remote")))
 
+        // A rich mail that also styles itself for dark mode: on the light card it must still read as light.
+        message("fx-dark-css", thread: "fx-dark-css", from: Participant(name: "Storage Team", email: "reports@storage.example"),
+                to: [me], subject: "Your monthly storage report", minutesAgo: 55, html: darkModeCSS, unread: true)
+        fixtures.append(Fixture(name: "dark-mode-css", key: key("fx-dark-css")))
+        message("fx-dark-sheet", thread: "fx-dark-sheet", from: Participant(name: "Storage Team", email: "reports@storage.example"),
+                to: [me], subject: "Your invoice is ready", minutesAgo: 56, html: darkModeSheet)
+        fixtures.append(Fixture(name: "dark-mode-sheet", key: key("fx-dark-sheet")))
+
+        // Mail CSS that hides `{`, `}` and comment starts behind combining marks or in strings that run past their
+        // line, to reach the shadow host and lift the card's containment.
+        message("fx-css-escape", thread: "fx-css-escape", from: Participant(name: "Account Notices", email: "notices@account-alerts.example"),
+                to: [me], subject: "Your statement is available", minutesAgo: 57, html: cssEscape)
+        fixtures.append(Fixture(name: "css-escape", key: key("fx-css-escape")))
+
         try store.upsertMessages(messages, attachments: attachments)
         try store.database.writer.write { db in for item in ai { try item.upsert(db) } }
         try store.setProject("proj-lumen", on: [key("fx-chain")], assigned: true)
@@ -218,6 +232,71 @@ enum ReaderSnapshotFixtures {
         <p style="font:12px/1.5 Helvetica,Arial,sans-serif;color:#8a8f98;margin:16px 0 0">You're receiving this because you subscribed at weeklybuild.example. <a href="https://weeklybuild.example/unsubscribe" style="color:#8a8f98">Unsubscribe</a></p>
         <img src="https://t.weeklybuild.example/open?id=8812" width="1" height="1" alt="">
         </td></tr></table></body></html>
+        """
+
+    /// Light tables painted inline, plus the ways mail asks for dark mode: `color-scheme` on the root, the meta
+    /// tags and `prefers-color-scheme` blocks in several spellings.
+    static let darkModeCSS = """
+        <html><head>
+        <meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">
+        <style>
+        :root { color-scheme: light dark; supported-color-schemes: light dark; }
+        body { margin: 0; background-color: #f4f4f5; font: 15px/1.6 Helvetica, Arial, sans-serif; color: #3f3f46; }
+        h1 { color: #18181b; } .note { color: #71717a; } .light-only { display: none; }
+        @media (prefers-color-scheme: light) { .light-only { display: block !important; } }
+        @media screen and (prefers-color-scheme:DARK) { .note { color: #FFF !important; } }
+        @MEDIA (PREFERS-COLOR-SCHEME: DARK) {
+          body, .email-body { background-color: #333 !important; color: #FFF !important; }
+          p, h1, span, td { color: #FFF !important; }
+        }
+        @supports (display: grid) { @media (prefers-color-scheme: dark) { h1 { color: #fafafa !important; } } }
+        </style>
+        </head>
+        <body class="email-body" bgcolor="#f4f4f5">
+        <table width="100%" bgcolor="#f4f4f5" cellpadding="0" cellspacing="0" role="presentation"><tr><td align="center" style="padding:32px 16px">
+        <table class="card" width="520" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px">
+        <tr><td style="padding:32px 40px 8px"><h1 style="margin:0;font:600 22px/1.3 Helvetica,Arial,sans-serif">Your monthly storage report</h1></td></tr>
+        <tr><td style="padding:8px 40px"><p style="margin:0">The workspace <b>design-archive</b> used <b>82%</b> of its storage this month. Exports older than a year move to cold storage on the 1st.</p></td></tr>
+        <tr><td style="padding:8px 40px"><p class="light-only" style="margin:0">Tip: archived exports can be restored at any time from the dashboard.</p></td></tr>
+        <tr class="cta"><td style="padding:16px 40px"><a href="https://storage.example/report" style="display:inline-block;background:#0f766e;color:#ffffff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">Review storage</a></td></tr>
+        <tr><td style="padding:8px 40px 32px"><span class="note">Questions? Reply to this mail and the team will help.</span></td></tr>
+        </table></td></tr></table></body></html>
+        """
+
+    /// A whole style sheet for dark mode only, through `<style media>`.
+    static let darkModeSheet = """
+        <html><head>
+        <style media="screen">.total { font-weight: 600; }</style>
+        <style media="(prefers-color-scheme: dark)">.card { background-color: #27272a !important; } td { color: #ffffff !important; }</style>
+        </head><body bgcolor="#eef2f6">
+        <table width="100%" bgcolor="#eef2f6" cellpadding="0" cellspacing="0" role="presentation"><tr><td align="center" style="padding:28px 16px">
+        <table class="card" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;font:15px/1.6 Helvetica,Arial,sans-serif;color:#334155">
+        <tr><td style="padding:28px 36px 4px;font-size:20px;font-weight:600;color:#0f172a">Invoice INV-2048</td></tr>
+        <tr><td style="padding:4px 36px">Storage, October · 1.2 TB</td></tr>
+        <tr><td class="total" style="padding:4px 36px 28px">Total due: $24.00</td></tr>
+        </table></td></tr></table></body></html>
+        """
+
+    /// `ReaderSnapshot.checkCSSEscape` reads the card's containment and the reader's own text width after this
+    /// renders. The `@font-face` rules would re-glyph Tern's Inter text (all of it, or just `W`) if they got through.
+    static let cssEscape = """
+        <html><head>
+        <style>@font-face{font-family:Inter;src:local(Zapfino)} @font-face{font-family:"Inter Display";src:local(Zapfino)}
+        @font-face{font-family:Inter;src:local("Zapfino");unicode-range:U+0057}</style>
+        <style media="all {&#x301;, :host">
+        & { contain:none !important; overflow:visible !important; position:absolute !important; inset:0 !important }
+        </style>
+        <style>p { font-family: Helvetica }\u{301}, :host {\u{301}; contain: none !important; overflow: visible !important }</style>
+        <style>.note { content: "a
+        } :host { contain: none !important; overflow: visible !important } .x { content: "b" }</style>
+        <style>.y /*\u{301} { color: red }
+        .z { content: "*/, :host { contain: none !important; overflow: visible !important } x{" }</style>
+        </head><body>
+        <div style="font:15px/1.6 Helvetica,Arial,sans-serif">
+        <p style="margin:0 0 8px;font-weight:600">Your October statement is ready.</p>
+        <p class="note" style="margin:0">Sign in to view it. The red panel above this text covers the reader only if mail CSS escapes the card.</p>
+        <div style="position:absolute;left:0;top:-400px;width:100%;height:400px;background:#d92d20"></div>
+        </div></body></html>
         """
 
     static let bigNewsletter: String = {
