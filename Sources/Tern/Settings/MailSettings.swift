@@ -49,9 +49,9 @@ struct RemoteImagesItem: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Remote images", detail: state.imageSenders.isEmpty
+            SettingsRow(title: "Remote images", detail: state.imageSendersError ?? (state.imageSenders.isEmpty
                 ? "Blocked until you load them in a message. Senders you always load from show here."
-                : "Blocked until you load them in a message, except from these senders.") { EmptyView() }
+                : "Blocked until you load them in a message, except from these senders.")) { EmptyView() }
             ForEach(state.imageSenders, id: \.self) { sender in
                 ImageSenderRow(sender: sender) { state.forgetImages(from: sender) }
             }

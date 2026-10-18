@@ -245,7 +245,9 @@ move-to-Applications prompt is the same card: "Move Tern to Applications?" · No
 A page of the main window, not a window or a sheet: ⌘,, the bottom bar's gear, the scope menu and ⌘K open it
 over the mail the way a thread opens over the list, with a 140 ms fade (80 ms with Reduce Motion). The mail
 underneath doesn't change, so Esc, ⌘[, the title bar's ← or ⌘, again put back the tab, the selection, the
-scroll and an open thread, and the keyboard goes where it was. The page remembers its last section.
+scroll and an open thread, and the keyboard goes where it was (the list, the thread, the search field, the find
+bar or an inline reply). If Layout changed the reading pane meanwhile, an open thread stays open in the new layout,
+and the keyboard goes to the list when the thread it was in no longer shows. The page remembers its last section.
 - Left, where the sidebar goes (232 px, `sidebar` surface, traffic lights at its top): a "Search settings" field
   (28 px, `bg` fill, hairline that strengthens with focus) and the sections as sidebar rows — Accounts, Mail,
   Appearance, Layout, Notifications, AI, Shortcuts, Advanced. The chosen one has the `selected` fill and nothing
@@ -260,10 +262,12 @@ scroll and an open thread, and the keyboard goes where it was. The page remember
   keys as keycaps (radius 4) flush right. Click a keycap to record; + on hover adds a key; a changed command has a
   5 px `text3` dot and a reset button on hover. While recording, the row sits on a `hover` fill, the keycap reads
   "Type a shortcut" inside a 1.5 px `ink` 55 % border, and one line under it says esc cancels and ⌫ removes the key,
-  or why the key can't be used: reserved for macOS or a fixed menu item, or used by another command, with Replace.
-  The g chords and ⌘1–⌘9 show as read-only keycaps.
-- While the page is open, mail commands don't run (their menu items are disabled) and bare keys never reach the
-  mail; appearance, layout, ⌘K and new mail still work.
+  or why the key can't be used: reserved for macOS, a fixed menu item or text editing (⌃A ⌃E ⌃H ⌃K… with or
+  without ⇧ ⌥), or used by another command, with Replace. Only bare keys can be shared, by a list command and a
+  reader command (`p`); a ⌘ or ⌃ key is one menu item. The g chords and ⌘1–⌘9 show as read-only keycaps.
+- While the page is open, mail commands don't run (their menu items are disabled), bare keys never reach the
+  mail, and ⌘K lists no threads, projects, labels or accounts; appearance, layout, ⌘K and new mail still work.
+- Remote images: taking a sender off the list that can't be saved puts it back, and the row's detail says so.
 
 ### Onboarding
 Onboarding: one 640×560 window,
@@ -283,11 +287,15 @@ triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
 See `research.md` §E. Every shortcut can be changed in Settings → Shortcuts; the keys here are the built-in
 ones. Changes in this direction: ⌘\ toggles the reading pane (was: the sidebar); ⌃⌘S toggles
 the sidebar; ⌘⇧\ is gone (list only is now the default); Tab / ⇧Tab and ⌥1–⌥7 move between tabs; ⌘F searches
-mail unless a thread is on screen. Bare-letter keys are inactive while a text field has focus. `g` chords time
-out after 1 s and show a small HUD.
+mail unless a thread is on screen. Bare-letter keys are inactive while a text field has focus, and so are the ⌘
+and ⌃ keys of commands that act on mail (only ⌘K, ⌘N, ⌘,, find, view and appearance keys and the like still work);
+the Control keys text fields edit with can't be assigned. The open conversation answers the current keys of Next and
+Previous Message, Open and Quick Look itself. After archive or delete with nothing left in the list, the reader
+closes whatever the preference. `g` chords time out after 1 s and show a small HUD.
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
 --snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, the settings page
-(every section, search, a shortcut being recorded and in conflict), onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
+(every section, search, a shortcut being recorded, in conflict, reserved and kept for text editing, an image sender
+that couldn't be removed), onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
 behaviour and timings.

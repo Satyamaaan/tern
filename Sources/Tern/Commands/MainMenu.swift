@@ -12,6 +12,7 @@ final class MainMenu: NSObject, NSMenuItemValidation {
 
     func build() -> NSMenu {
         let main = BareKeySafeMenu(title: "Main Menu")
+        main.leavesToText = { [registry] event in registry.leavesToText(event, in: event.window ?? NSApp.keyWindow) }
         for name in MenuName.allCases {
             let menu = NSMenu(title: name.rawValue)
             switch name {
@@ -110,10 +111,13 @@ final class MainMenu: NSObject, NSMenuItemValidation {
 
 /// Main menu that leaves bare keys alone. Menu items show shortcuts like `e` or `⇧R`, but those keys
 /// must never fire while someone types in a text field, so only ⌘ and ⌃ combinations match here;
-/// `KeyRouter` handles bare keys itself.
+/// `KeyRouter` handles bare keys itself. While a text field has the keyboard, the ⌘ and ⌃ keys of commands
+/// that act on mail don't match either (`CommandRegistry.leavesToText`).
 final class BareKeySafeMenu: NSMenu {
+    var leavesToText: (NSEvent) -> Bool = { _ in false }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard !event.modifierFlags.isDisjoint(with: [.command, .control]) else { return false }
+        guard !event.modifierFlags.isDisjoint(with: [.command, .control]), !leavesToText(event) else { return false }
         return super.performKeyEquivalent(with: event)
     }
 }

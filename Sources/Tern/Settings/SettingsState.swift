@@ -108,6 +108,8 @@ final class SettingsState {
     var sendFrom: String? { didSet { save(DraftStore.SettingKey.defaultAccount, sendFrom) } }
     /// Senders whose remote images load by themselves, sorted.
     private(set) var imageSenders: [String]
+    /// Why the last sender couldn't be taken off that list, shown in its row.
+    var imageSendersError: String?
     var shortcutFilter = ""
     var filterFocused = false
     private(set) var recording: ShortcutRecording?
@@ -284,12 +286,27 @@ final class SettingsState {
         model.writes.async { try? store.setSetting(key, value) }
     }
 
-    /// Takes a sender off the list: their remote images are blocked again until allowed in a message.
+    /// Takes a sender off the list: their remote images are blocked again until allowed in a message. If that
+    /// can't be saved, the sender comes back (as it would after a restart) and the row says so.
     func forgetImages(from sender: String) {
         imageSenders.removeAll { $0 == sender }
+        imageSendersError = nil
         ReaderModel.forgetTrustedSender(sender)
         let store = model.store
-        model.writes.async { try? store.setImagesAllowed(false, sender: sender) }
+        model.writes.async {
+            do {
+                try store.setImagesAllowed(false, sender: sender)
+            } catch {
+                NSLog("Tern: taking \(sender) off the image senders failed: \(error)")
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        if !self.imageSenders.contains(sender) { self.imageSenders = (self.imageSenders + [sender]).sorted() }
+                        ReaderModel.rememberTrustedSender(sender)
+                        self.imageSendersError = "Couldn't take \(sender) off the list. Try again."
+                    }
+                }
+            }
+        }
     }
 
     func rebuildSearchIndex() {

@@ -31,6 +31,11 @@ final class ReaderWebEngine: NSObject {
     var isReady: Bool { pageReady && rulesSettled }
     /// False when the content blocker couldn't be installed; then no message may load remote images.
     private(set) var blocksRemoteLoads = false
+    /// The keys the page answers itself and the action each runs ("n": "next"), from the current shortcuts
+    /// (`KeyRouter.pageKeyMap`). Sent again whenever the page loads.
+    var keyActions: [String: String] = [:] {
+        didSet { if keyActions != oldValue { run("Tern.setKeys(k)", ["k": keyActions]) } }
+    }
     private var pageReady = false
     private var rulesSettled = false
     private var queued: [() -> Void] = []
@@ -137,9 +142,10 @@ final class ReaderWebEngine: NSObject {
             Tern.render(p);
             Tern.setBodies(p.key, {});
             Tern.clear();
+            Tern.setKeys(k);
             return true;
             """
-        webView.callAsyncJavaScript(warmup, arguments: ["p": ReaderResources.warmupPayload], in: nil, in: world) { [weak self] _ in
+        webView.callAsyncJavaScript(warmup, arguments: ["p": ReaderResources.warmupPayload, "k": keyActions], in: nil, in: world) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.pageReady = true

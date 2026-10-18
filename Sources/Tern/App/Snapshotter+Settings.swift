@@ -3,8 +3,9 @@ import SwiftUI
 import TernCore
 
 // The settings page in the main window: every section in light and dark, with the sidebar open behind it, a
-// narrow window, search, the Google client editor, each AI provider, Advanced as release builds show it, and a
-// shortcut mid-recording, in conflict and reserved. Preferences the shots change are put back at the end.
+// narrow window, search, the Google client editor, each AI provider, Advanced as release builds show it, a
+// sender that couldn't be taken off the image list, and a shortcut mid-recording, in conflict, reserved and
+// kept for text editing. Preferences the shots change are put back at the end.
 extension Snapshotter {
     func settingsShots(_ window: MainWindow, _ directory: URL) {
         func shot(_ name: String, dark: Bool = false) {
@@ -34,8 +35,13 @@ extension Snapshotter {
             both("settings-\(section.rawValue)")
         }
 
-        // The mail sidebar open behind the page changes nothing.
+        // Taking a sender off the image list failed.
         settings.show(.mail)
+        settings.imageSendersError = "Couldn't take news@figma.com off the list. Try again."
+        shot("settings-mail-images-error-light")
+        settings.imageSendersError = nil
+
+        // The mail sidebar open behind the page changes nothing.
         settle(window)
         prefs.sidebarOpen = true
         both("settings-sidebar-open")
@@ -77,6 +83,8 @@ extension Snapshotter {
         both("settings-shortcut-conflict")
         settings.record(Self.key("q", keyCode: 12, modifiers: .command))
         shot("settings-shortcut-reserved-light")
+        settings.record(Self.key("\u{8}", keyCode: 4, modifiers: .control))
+        shot("settings-shortcut-text-editing-light")
         settings.cancelRecording()
         registry.assign(.key("y"), to: "archive", replacing: 0)
         registry.assign(.command("j", shift: true), to: "go.inbox", replacing: nil)

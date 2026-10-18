@@ -137,15 +137,14 @@ extension AppModel {
         let moved = newCursor != cursor
         if moved { cursor = newCursor }
         // After triage the next thread is on screen: treat it like moving onto it (opened at once when
-        // reading in the reader), unless the user goes back to the list after triage.
-        if moved, animation == .collapse, newCursor != nil {
-            if prefs.afterTriage == .list, readerExpanded || focus == .reader {
+        // reading in the reader), unless the user goes back to the list after triage or no thread is left
+        // to show, which closes the reader either way.
+        if moved, animation == .collapse {
+            if prefs.afterTriage == .list || newCursor == nil, readerExpanded || focus == .reader {
                 readerExpanded = false
                 focusList()
-                scheduleMarkRead(open: false, changed: true)
-            } else {
-                scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true)
             }
+            if newCursor != nil { scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true) }
         }
         if cursorAnchor.map({ snapshot.rows[$0] == nil }) ?? true { cursorAnchor = cursor }
 

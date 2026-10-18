@@ -26,7 +26,7 @@ struct ShortcutSettings: View {
                     .buttonStyle(TernButtonStyle(.quiet, size: .small))
                     .disabled(registry?.overrides.isEmpty ?? true)
             }
-            Text("Click a shortcut to change it. Keys without ⌘ or ⌃ work only while you aren't typing.")
+            Text("Click a shortcut to change it. While you're typing, only ⌘ and ⌃ keys that don't act on mail work.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
                 .fixedSize(horizontal: false, vertical: true)

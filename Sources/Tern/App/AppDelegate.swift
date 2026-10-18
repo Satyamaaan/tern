@@ -51,11 +51,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
         mainMenu = MainMenu(registry: registry)
         NSApp.mainMenu = mainMenu.build()
-        // An edited shortcut shows (and fires) in the menu bar at once.
+        ReaderWebEngine.shared.keyActions = KeyRouter.pageKeyMap(registry)
+        // An edited shortcut shows (and fires) in the menu bar and the reader page at once.
         NotificationCenter.default.addObserver(forName: CommandRegistry.shortcutsDidChange, object: registry, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let mainMenu = self.mainMenu else { return }
                 NSApp.mainMenu = mainMenu.build()
+                ReaderWebEngine.shared.keyActions = KeyRouter.pageKeyMap(self.registry)
             }
         }
         model.startObservations()

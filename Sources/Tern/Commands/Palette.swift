@@ -149,17 +149,21 @@ final class PaletteController {
                 }
             }
         }
-        byGroup[.projects, default: []] += m.projects.map(goToProjectItem)
-        byGroup[.labels, default: []] += m.labels.map(goToLabelItem)
-        for (index, account) in m.accounts.enumerated() {
-            let id = "account.\(account.id)"
-            aliases[id] = [account.email]
-            byGroup[.accounts, default: []].append(PaletteItem(
-                id: id, title: m.accountTitle(account), subtitle: account.email,
-                shortcut: index < 9 ? "⌘\(index + 1)" : nil, leading: .dot(Theme.accountColor(account.colorIndex)),
-                run: { m.setScope(.account(account.id)) }))
+        // Projects, labels, accounts and threads change what the mail shows, so like the mail commands they
+        // aren't offered while the settings page covers it.
+        if !m.settingsOpen {
+            byGroup[.projects, default: []] += m.projects.map(goToProjectItem)
+            byGroup[.labels, default: []] += m.labels.map(goToLabelItem)
+            for (index, account) in m.accounts.enumerated() {
+                let id = "account.\(account.id)"
+                aliases[id] = [account.email]
+                byGroup[.accounts, default: []].append(PaletteItem(
+                    id: id, title: m.accountTitle(account), subtitle: account.email,
+                    shortcut: index < 9 ? "⌘\(index + 1)" : nil, leading: .dot(Theme.accountColor(account.colorIndex)),
+                    run: { m.setScope(.account(account.id)) }))
+            }
+            byGroup[.threads] = threadRows.prefix(6).map(threadItem)
         }
-        byGroup[.threads] = threadRows.prefix(6).map(threadItem)
 
         var sections: [PaletteSection] = []
         if !recentItems.isEmpty { sections.append(PaletteSection(title: "Recent", items: Array(recentItems.prefix(4)))) }
@@ -239,7 +243,7 @@ final class PaletteController {
     private func searchThreads() {
         searchTask?.cancel()
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard case .commands = mode, text.count >= 2 else {
+        guard case .commands = mode, text.count >= 2, !model.settingsOpen else {
             if !threadRows.isEmpty { threadRows = [] }
             return
         }

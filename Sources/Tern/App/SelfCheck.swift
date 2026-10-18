@@ -12,7 +12,7 @@ final class SelfCheck {
     private var failures = 0
     let window: MainWindow
     let router: KeyRouter
-    private let palette: PaletteController
+    let palette: PaletteController
 
     init(model: AppModel, registry: CommandRegistry) {
         self.model = model

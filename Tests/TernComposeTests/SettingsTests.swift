@@ -4,8 +4,8 @@ import Testing
 @testable import Tern
 @testable import TernCore
 
-// Settings: shortcut overrides (storage, conflicts, reserved keys, reset, bare keys) and the defaults of the
-// settings the page added.
+// Settings: shortcut overrides (storage, validation, conflicts, reserved keys, reset, bare keys, typing, the
+// reader page's keys), the defaults of the settings the page added, what follows triage, and image senders.
 
 @MainActor
 private func makeModel(threads: Int = 0) throws -> AppModel {
@@ -86,6 +86,34 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     #expect(loaded.keys["unread"] == [])
 }
 
+@MainActor
+@Test func savedOverridesThatCantApplyAreDroppedAndSavedAgain() throws {
+    let defaults = scratchDefaults()
+    defaults.set([
+        "archive": ["⌘|c:3"],             // Account 3's key
+        "star": ["|c:e"],                 // Archive's built-in key, which Archive gets back
+        "settings": [],                   // locked: ⌘, stays
+        "scope.2": ["|c:y"],              // locked
+        "mute": ["⌃|c:h", "|c:b"],        // ⌃H is for text editing
+        "label": ["|c:j"],                // Next Conversation's key
+        "unread": ["|c:u", "|c:U"],       // the built-in keys: no change
+        "gone.command": ["|c:q"],
+        "project": ["⌘|c:y"],
+        "previousMessage": ["⌘|c:y"],     // the same menu key as Move to Project
+    ], forKey: ShortcutOverrides.defaultsKey)
+    let model = try makeModel()
+    let registry = CommandRegistry(model: model, shell: nil, overrides: ShortcutOverrides.load(from: defaults), save: { $0.save(to: defaults) })
+    #expect(registry.overrides.keys == ["mute": [.key("b")], "project": [.command("y")]])
+    #expect(registry["archive"]?.keys == [.key("e")] && registry["star"]?.keys == [.key("s")])
+    #expect(registry["settings"]?.keys == [.command(",")] && registry["scope.2"]?.keys == [.command("2")])
+    #expect(registry["scope.3"]?.keys == [.command("3")])
+    #expect(registry["label"]?.keys == [.key("l")] && registry["previousMessage"]?.keys == [.key("p")])
+    #expect(registry["unread"]?.keys == [.key("u"), .key("U")] && !registry.isCustomized("unread"))
+    // What was dropped is gone from the saved changes too, even what didn't read back.
+    #expect(ShortcutOverrides.load(from: defaults) == registry.overrides)
+    #expect(defaults.dictionary(forKey: ShortcutOverrides.defaultsKey) as? [String: [String]] == ["mute": ["|c:b"], "project": ["⌘|c:y"]])
+}
+
 // MARK: - Editing
 
 @MainActor
@@ -132,6 +160,24 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
 }
 
 @MainActor
+@Test func onlyBareKeysAreSharedBetweenTheListAndTheReader() throws {
+    _ = NSApplication.shared
+    let registry = try makeRegistry()
+    // A ⌘ key becomes a menu key equivalent for both commands, and the menu bar doesn't know where the
+    // keyboard is, so it conflicts whatever the scopes.
+    registry.assign(.command("y"), to: "project", replacing: nil)
+    #expect(registry.conflicts(.command("y"), for: "previousMessage").map(\.id) == ["project"])
+    #expect(SettingsState.problem(.command("y"), for: "previousMessage", registry: registry) == .taken(.command("y"), by: ["project"]))
+    #expect(registry.conflicts(.key("p"), for: "project").isEmpty)
+    registry.assign(.command("y"), to: "previousMessage", replacing: nil)
+    #expect(registry["project"]?.keys == [.key("p")] && registry["previousMessage"]?.keys == [.key("p"), .command("y")])
+    let menu = MainMenu(registry: registry).build()
+    let items: [NSMenuItem] = menu.items.flatMap { $0.submenu?.items ?? [] }
+    let titles = items.filter { $0.keyEquivalent == "y" && $0.keyEquivalentModifierMask == .command }.map { $0.title }
+    #expect(titles == ["Previous Message"])
+}
+
+@MainActor
 @Test func replaceTakesTheKeyAndResetTakesItBack() throws {
     let registry = try makeRegistry()
     registry.assign(.key("s"), to: "archive", replacing: 0)
@@ -168,6 +214,86 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     #expect(problem(.key("s"), "archive") == .taken(.key("s"), by: ["star"]))
     #expect(problem(.key("y"), "archive") == nil)
     #expect(ShortcutRules.isLocked("settings") && ShortcutRules.isLocked("scope.4") && !ShortcutRules.isLocked("scope.all"))
+}
+
+@MainActor
+@Test func controlKeysTextFieldsEditWithAreReserved() throws {
+    let registry = try makeRegistry()
+    for letter in "abdefhklnoptvy" {
+        for extra: NSEvent.ModifierFlags in [[], .shift, .option, [.option, .shift]] {
+            let shortcut = KeyShortcut(key: .char(String(letter)), modifiers: extra.union(.control))
+            #expect(SettingsState.problem(shortcut, for: "trash", registry: registry) == .reserved(shortcut, owner: "text editing"), "\(shortcut.display)")
+        }
+    }
+    #expect(ShortcutRules.reservation(.special(.returnKey, [.control]), for: "archive") == "text editing")
+    #expect(ShortcutRules.reservation(.special(.delete, [.control, .option]), for: "archive") == "text editing")
+    #expect(ShortcutRules.reservation(KeyShortcut(key: .char("g"), modifiers: .control), for: "trash") == nil)
+    // A saved override with one is dropped when it loads.
+    #expect(ShortcutOverrides(stored: ["trash": ["⌃|c:h"]]).keys["trash"] == nil)
+    // The Control keys a key bindings dictionary binds (the system's and the user's are read at launch).
+    let parsed = ShortcutRules.controlKeys(inBindings: [
+        "^w": "deleteToMark:", "~^B": "moveWordBackwardAndModifySelection:", "^\u{F700}": "scrollPageUp:",
+        "^\u{19}": "selectPreviousKeyView:", "^x": ["^x": "swapWithMark:"], "@^a": "selectAll:", "a": "insertText:",
+        "^": "noop:", "^\u{F702}": "moveToLeftEndOfLine:",
+    ])
+    #expect(parsed == [
+        KeyShortcut(key: .char("w"), modifiers: .control), KeyShortcut(key: .char("b"), modifiers: [.control, .option, .shift]),
+        .special(.up, [.control]), .special(.tab, [.control, .shift]), KeyShortcut(key: .char("x"), modifiers: .control),
+    ])
+}
+
+@MainActor
+@Test func mailKeysDontFireFromTheMenuBarWhileTyping() throws {
+    _ = NSApplication.shared
+    let registry = try makeRegistry(threads: 2)
+    let model = registry.model
+    model.reloadList()
+    try #require(model.cursor != nil)
+    let control = KeyShortcut(key: .char("g"), modifiers: .control)
+    registry.assign(control, to: "trash", replacing: nil)
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+    let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    window.contentView = text
+    func event(_ characters: String, _ ignoring: String, _ keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                         characters: characters, charactersIgnoringModifiers: ignoring, isARepeat: false, keyCode: keyCode)!
+    }
+    let trash = event("\u{7}", "g", 5, .control)
+    #expect(!registry.leavesToText(trash, in: window))
+    window.makeFirstResponder(text)
+    try #require(KeyRouter.textInput(in: window) === text)
+    #expect(registry.leavesToText(trash, in: window))
+    #expect(registry.leavesToText(event("U", "u", 32, [.command, .shift]), in: window))
+    // Text-safe commands keep their keys: ⌘K, ⌘N, ⌘F. So does the Edit menu's Select All, though ⌘A is also
+    // Select All Conversations outside text fields.
+    #expect(!registry.leavesToText(event("a", "a", 0, .command), in: window))
+    #expect(!registry.leavesToText(event("k", "k", 40, .command), in: window))
+    #expect(!registry.leavesToText(event("n", "n", 45, .command), in: window))
+    #expect(!registry.leavesToText(event("f", "f", 3, .command), in: window))
+
+    let mainMenu = MainMenu(registry: registry)
+    let menu = mainMenu.build()
+    let undo = model.undoStack.count
+    #expect(menu.performKeyEquivalent(with: trash) == false)
+    #expect(model.undoStack.count == undo)
+    // Out of the text the same key trashes, as assigned.
+    window.makeFirstResponder(nil)
+    #expect(!registry.leavesToText(trash, in: window))
+    #expect(menu.performKeyEquivalent(with: trash) == true)
+    #expect(model.undoStack.count == undo + 1)
+    withExtendedLifetime(mainMenu) {}
+}
+
+@MainActor
+@Test func theReaderPageGetsTheKeysOfTheCommandsItRuns() throws {
+    let registry = try makeRegistry()
+    #expect(KeyRouter.pageKeyMap(registry) == ["n": "next", "p": "previous", "Enter": "open", "o": "open", " ": "quicklook"])
+    registry.assign(.key("n"), to: "archive", replacing: nil)
+    registry.removeKey(at: 0, from: "previousMessage")
+    registry.assign(.special(.returnKey, [.shift]), to: "nextMessage", replacing: nil)
+    // ⌥ keys don't reach the page's handler; the registry runs them.
+    registry.assign(.option("n"), to: "nextMessage", replacing: nil)
+    #expect(KeyRouter.pageKeyMap(registry) == ["Shift+Enter": "next", "Enter": "open", "o": "open", " ": "quicklook"])
 }
 
 // MARK: - Recording and routing
@@ -300,6 +426,63 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     // At the ends each falls back to the other side.
     let top = ListSnapshot(rows: Array(rows.dropFirst()), groupsByDate: false)
     #expect(AppModel.successor(of: rows[0].id, in: old, keeping: top, upward: true) == rows[1].id)
+}
+
+@MainActor
+@Test func theReaderClosesWhenTriageLeavesNothingToShow() throws {
+    let prefs = Preferences.shared
+    let saved = (prefs.afterTriage, prefs.readingPane)
+    defer { (prefs.afterTriage, prefs.readingPane) = saved }
+    prefs.readingPane = false
+    for mode in AfterTriage.allCases {
+        prefs.afterTriage = mode
+        let model = try makeModel(threads: 1)
+        model.reloadList()
+        let only = try #require(model.cursor)
+        model.open()
+        #expect(model.readerExpanded && model.focus == .reader)
+        model.perform(.archive, on: [only])
+        #expect(model.cursor == nil && !model.readerExpanded && model.focus == .list, "\(mode)")
+    }
+
+    // At the ends of the list Next and Previous take the other neighbour, and the thread stays open.
+    for (mode, end) in [(AfterTriage.next, 2), (.previous, 0)] {
+        prefs.afterTriage = mode
+        let model = try makeModel(threads: 3)
+        model.reloadList()
+        let order = model.snapshot.order
+        try #require(order.count == 3)
+        model.setCursor(order[end], open: false)
+        model.open()
+        model.perform(.archive, on: [order[end]])
+        #expect(model.cursor == order[1] && model.readerExpanded && model.focus == .reader, "\(mode)")
+    }
+}
+
+@MainActor
+@Test func aSenderThatCantBeTakenOffTheListComesBack() async throws {
+    let model = try makeModel()
+    try model.store.setImagesAllowed(true, sender: "news@figma.com")
+    try await model.store.database.writer.write { db in
+        try db.execute(sql: """
+            CREATE TRIGGER keep_image_senders BEFORE DELETE ON setting WHEN old.key LIKE 'images.allow.%'
+            BEGIN SELECT RAISE(ABORT, 'read-only'); END
+            """)
+    }
+    let settings = SettingsState(model: model, section: .mail, updater: nil)
+    settings.forgetImages(from: "news@figma.com")
+    #expect(settings.imageSenders.isEmpty)
+    for _ in 0..<200 where settings.imageSendersError == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+    #expect(settings.imageSenders == ["news@figma.com"])
+    #expect(settings.imageSendersError?.contains("news@figma.com") == true)
+    #expect(try model.store.imageAllowedSenders() == ["news@figma.com"])
+
+    // Removing it once the write works clears the message.
+    try await model.store.database.writer.write { db in try db.execute(sql: "DROP TRIGGER keep_image_senders") }
+    settings.forgetImages(from: "news@figma.com")
+    model.writes.sync {}
+    #expect(settings.imageSenders.isEmpty && settings.imageSendersError == nil)
+    #expect(try model.store.imageAllowedSenders().isEmpty)
 }
 
 @MainActor

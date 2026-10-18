@@ -22,7 +22,7 @@ protocol ShellActions: AnyObject {
 final class CommandRegistry {
     private(set) var commands: [Command] = []
     /// The user's shortcut changes, applied over `defaultKeys`.
-    private(set) var overrides: ShortcutOverrides
+    private(set) var overrides = ShortcutOverrides()
     @ObservationIgnored private var index: [String: Int] = [:]
     /// Each command's built-in keys.
     @ObservationIgnored private(set) var defaultKeys: [String: [KeyShortcut]] = [:]
@@ -34,15 +34,18 @@ final class CommandRegistry {
     /// Posted after any shortcut changes, so the menu bar and key routing rebuild.
     static let shortcutsDidChange = Notification.Name("TernShortcutsDidChange")
 
-    /// `overrides` defaults to the saved ones; passing them (tests) leaves the saved ones alone.
-    init(model: AppModel, shell: ShellActions?, overrides: ShortcutOverrides? = nil) {
+    /// `overrides` defaults to the saved ones; passing them (tests) leaves the saved ones alone unless `save`
+    /// is given too. Changes that can't apply any more are dropped, and the rest saved again, so nothing
+    /// invalid (unreadable, reserved, locked, clashing) stays in UserDefaults.
+    init(model: AppModel, shell: ShellActions?, overrides: ShortcutOverrides? = nil, save: ((ShortcutOverrides) -> Void)? = nil) {
         self.model = model
         self.shell = shell
-        self.overrides = overrides ?? model.prefs.shortcutOverrides
-        saveOverrides = overrides == nil ? { [weak model] in model?.prefs.shortcutOverrides = $0 } : { _ in }
+        saveOverrides = overrides == nil ? { [weak model] in model?.prefs.shortcutOverrides = $0 } : save ?? { _ in }
         commands = makeCommands()
         index = Dictionary(uniqueKeysWithValues: commands.enumerated().map { ($1.id, $0) })
         defaultKeys = Dictionary(uniqueKeysWithValues: commands.map { ($0.id, $0.keys) })
+        self.overrides = Self.validated(overrides ?? model.prefs.shortcutOverrides, commands: commands)
+        saveOverrides(self.overrides)
         applyOverrides()
     }
 
@@ -238,8 +241,8 @@ final class CommandRegistry {
         list.append(Command(id: "senderLogos", title: "Hide Sender Logos", group: .settings, menu: .view, section: 2, aliases: ["avatars", "icons", "favicons"],
                             currentTitle: { m.prefs.showSenderLogos ? "Hide Sender Logos" : "Show Sender Logos" }) { m.prefs.showSenderLogos.toggle() })
 
-        // The open conversation. The reader page answers n, p, Enter and Space itself while it has the
-        // keyboard; these run the same actions from the list, the menus and the palette.
+        // The open conversation. The reader page answers the keys of Next and Previous Message, Open and Quick
+        // Look itself while it has the keyboard; these run the same actions from the list, the menus and the palette.
         let reader = m.services.reader
         func reading() -> Bool { reader.isActive && m.readerKey != nil }
         list += [
@@ -293,10 +296,54 @@ extension CommandRegistry {
     /// Whether the user changed the command's keys.
     func isCustomized(_ id: String) -> Bool { overrides.keys[id] != nil }
 
-    /// Commands that already use `shortcut` where `id`'s keys act too.
+    /// Commands that already use `shortcut` where `id`'s keys act too (for a ⌘ or ⌃ key, anywhere).
     func conflicts(_ shortcut: KeyShortcut, for id: String) -> [Command] {
         guard let command = self[id] else { return [] }
-        return commands.filter { $0.id != id && $0.keys.contains(shortcut) && $0.keyScope.overlaps(command.keyScope) }
+        return commands.filter {
+            $0.id != id && $0.keys.contains(shortcut) && !ShortcutRules.canShare(shortcut, $0.keyScope, command.keyScope)
+        }
+    }
+
+    /// Whether the menu bar should leave `event` alone because a text field in `window` has the keyboard and
+    /// the key is the menu key of a command that isn't text-safe: the key keeps its meaning in the text (⌃H
+    /// deletes back) instead of acting on mail the user can't see they've selected. The Edit menu's own items
+    /// (⌘A, ⌘Z, ⌘C…) aren't commands, so they still work.
+    func leavesToText(_ event: NSEvent, in window: NSWindow?) -> Bool {
+        guard KeyRouter.textInput(in: window) != nil else { return false }
+        return commands.contains { command in
+            !command.isTextSafe && command.menu != nil && !command.paletteOnly && command.menuKey?.matches(event) == true
+        }
+    }
+
+    /// Saved changes as they can apply: only commands that exist and aren't locked, without reserved keys,
+    /// without keys equal to the built-in ones, and without a key another command has where both act. A
+    /// built-in key wins over a change; between two changes the command listed first keeps it. A change left
+    /// with no keys falls back to the built-in ones, which can take a key from a later change in turn.
+    static func validated(_ saved: ShortcutOverrides, commands: [Command]) -> ShortcutOverrides {
+        var changes: [String: [KeyShortcut]] = [:]
+        for command in commands where !ShortcutRules.isLocked(command.id) {
+            guard let stored = saved.keys[command.id] else { continue }
+            let allowed = unique(stored.filter { ShortcutRules.reservation($0, for: command.id) == nil })
+            if (allowed.isEmpty && !stored.isEmpty) || allowed == command.keys { continue }
+            changes[command.id] = allowed
+        }
+        while true {
+            var taken = commands.filter { changes[$0.id] == nil }.flatMap { command in command.keys.map { (command.keyScope, $0) } }
+            var fallback: String?
+            for command in commands {
+                guard let keys = changes[command.id] else { continue }
+                let kept = keys.filter { key in !taken.contains { $0.1 == key && !ShortcutRules.canShare(key, $0.0, command.keyScope) } }
+                if kept.isEmpty && !keys.isEmpty {
+                    fallback = command.id
+                    break
+                }
+                taken += kept.map { (command.keyScope, $0) }
+                changes[command.id] = kept == command.keys ? nil : kept
+            }
+            guard let fallback else { break }
+            changes[fallback] = nil
+        }
+        return ShortcutOverrides(keys: changes)
     }
 
     /// Puts `shortcut` in place of the key at `slot` (or after the others when `slot` is nil) and takes it

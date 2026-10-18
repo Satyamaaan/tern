@@ -97,10 +97,18 @@ the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to
   only the deltas, keyed by command id). Show a shortcut with `registry.hint(title, id)` or
   `command.shortcutText`, never as a literal string, so edits show everywhere at once.
 - Bare keys (no ⌘ or ⌃) run through `KeyRouter` and only outside text fields; `BareKeySafeMenu` never fires them
-  as menu key equivalents. ⌘ keys fire from the menu bar, which is rebuilt when shortcuts change.
+  as menu key equivalents. ⌘ keys fire from the menu bar, which is rebuilt when shortcuts change. While a text
+  field has the keyboard the menu bar also leaves alone the ⌘/⌃ keys of commands that aren't `isTextSafe`
+  (`registry.leavesToText`), so they keep their text meaning; mark a new command text-safe only if it never acts
+  on mail.
 - A command that only makes sense in one place sets `yieldsToReader` (list) or `readerOnly`, so it can share a
-  key with a command of the other scope. Reserved keys and locked commands are in `ShortcutRules`.
-- While the settings page is open, only `Command.availableInSettings` commands run (`registry.canRun`).
+  bare key with a command of the other scope (`ShortcutRules.canShare`); ⌘/⌃ keys are never shared. Reserved keys
+  (macOS, fixed menu items, text-editing Control keys) and locked commands are in `ShortcutRules`. Saved overrides
+  are validated when the registry starts (`CommandRegistry.validated`) and saved again without what can't apply.
+- The reader page runs Next/Previous Message, Open and Quick Look itself by action name; `KeyRouter.pageKeyMap`
+  sends their current keys to `reader.js` (`ReaderWebEngine.keyActions`). Don't hard-code keys in the page.
+- While the settings page is open, only `Command.availableInSettings` commands run (`registry.canRun`), and the
+  palette lists no threads, projects, labels or accounts.
 
 ## Code
 

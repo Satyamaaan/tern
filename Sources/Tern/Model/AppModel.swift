@@ -36,6 +36,8 @@ protocol ListPresenting: AnyObject {
     func selectionDidChange(scrollTo key: ThreadKey?)
     /// Makes the list the first responder.
     func takeKeyboard()
+    /// The window the list is in.
+    var window: NSWindow? { get }
 }
 
 enum ListAnimation {
@@ -146,7 +148,7 @@ final class AppModel {
     @ObservationIgnored var markReadTimer: Timer?
     @ObservationIgnored var cursorAnchor: ThreadKey?
     /// Where the keyboard goes back to when the settings page closes.
-    @ObservationIgnored var settingsReturn = SettingsReturn.list
+    @ObservationIgnored var settingsReturn = SettingsReturn()
     @ObservationIgnored var cursorBeforeSearch: ThreadKey?
     /// Threads being dragged onto the sidebar.
     @ObservationIgnored var draggedKeys: [ThreadKey] = []
@@ -367,9 +369,11 @@ final class AppModel {
 
     func toggleSidebar() { prefs.sidebarOpen.toggle() }
 
-    /// ⌘\: the reading pane beside the list, or the reader opening over it.
+    /// ⌘\: the reading pane beside the list, or the reader opening over it. Under the settings page (Layout)
+    /// only the preference changes; closing the page settles the open thread and the keyboard.
     func toggleReadingPane() {
         prefs.readingPane.toggle()
+        guard !settingsOpen else { return }
         readerExpanded = false
         if focus == .reader && !prefs.readingPane { focusList() }
     }

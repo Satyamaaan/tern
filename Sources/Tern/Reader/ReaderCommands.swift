@@ -2,8 +2,8 @@ import Foundation
 import TernCore
 
 /// Reader actions the shell can trigger from its own key handling or the ⌘K palette, for whichever
-/// reader is showing a thread. Inside the reader's web view the same keys work directly
-/// (n/p, Enter, Space on an attachment, r/a/f).
+/// reader is showing a thread. Inside the reader's web view the keys of Next and Previous Message, Open and
+/// Quick Look work directly (`KeyRouter.pageKeyMap`).
 @MainActor
 final class ReaderCommands {
     weak var model: ReaderModel?

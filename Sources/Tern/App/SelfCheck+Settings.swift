@@ -2,13 +2,20 @@ import AppKit
 import TernCore
 
 /// The settings page in the main window and edited shortcuts: opening and closing it leaves the mail as it
-/// was, mail keys do nothing while it is open, and a changed shortcut fires from the keyboard and the menu
-/// bar while the old key no longer does.
+/// was (whatever Layout changed, and with the keyboard back in the field it was in), mail keys and the
+/// palette's mail entries do nothing while it is open, a changed shortcut fires from the keyboard and the
+/// menu bar while the old key no longer does, the reader page follows edited keys, and a mail command's ⌃
+/// key never fires while typing.
 extension SelfCheck {
     func settings() {
         settingsRoundTrip()
+        settingsLayoutRestore()
+        settingsRestoresTyping()
         settingsKeys()
+        settingsPalette()
         editedShortcuts()
+        readerPageKeys()
+        typingKeepsTextKeys()
     }
 
     private func settingsRoundTrip() {
@@ -44,6 +51,83 @@ extension SelfCheck {
         send("[", modifiers: .command, keyCode: 33)
         let table = (model.listView as? MessageListController)?.table
         check("⌘[ closes settings and the list has the keyboard", !model.settingsOpen && model.cursor == listCursor && window.firstResponder === table)
+    }
+
+    /// Layout's reading pane toggle runs `toggleReadingPane`, as ⌘\ does.
+    private func settingsLayoutRestore() {
+        let pane = model.prefs.readingPane
+        defer { model.prefs.readingPane = pane }
+        model.prefs.readingPane = false
+        model.show(.inbox)
+        model.showSplit(.people)
+        wait(0.2)
+        let order = model.snapshot.order
+        guard order.count > 4 else { return check("settings layout: rows", false) }
+        model.click(order[2], command: false, shift: false)
+        wait(0.3)
+        let table = (model.listView as? MessageListController)?.table
+
+        model.openSettings(.layout)
+        wait(0.1)
+        model.toggleReadingPane()
+        model.toggleReadingPane()
+        model.closeSettings()
+        _ = waitUntil(1) { KeyRouter.readerHasKeyboard(window) }
+        check("reading pane on and off in Layout keeps the thread open over the list",
+              model.readerExpanded && model.readerVisible && model.cursor == order[2] && model.focus == .reader)
+        check("…and the keyboard goes back to that thread", KeyRouter.readerHasKeyboard(window))
+
+        model.openSettings(.layout)
+        wait(0.1)
+        model.toggleReadingPane()
+        model.closeSettings()
+        _ = waitUntil(1) { KeyRouter.readerHasKeyboard(window) }
+        check("reading pane on in Layout shows the thread beside the list, with the keyboard",
+              model.prefs.readingPane && !model.readerExpanded && model.focus == .reader && KeyRouter.readerHasKeyboard(window))
+
+        model.openSettings(.layout)
+        wait(0.1)
+        model.toggleReadingPane()
+        model.closeSettings()
+        _ = waitUntil(1) { window.firstResponder === table }
+        check("reading pane off in Layout gives the list the keyboard, the thread no longer showing",
+              !model.readerVisible && model.focus == .list && window.firstResponder === table)
+    }
+
+    /// The find bar and an inline reply get the keyboard back, not the page around them.
+    private func settingsRestoresTyping() {
+        let pane = model.prefs.readingPane
+        defer { model.prefs.readingPane = pane }
+        model.prefs.readingPane = false
+        model.showSplit(.people)
+        wait(0.2)
+        let order = model.snapshot.order
+        guard order.count > 4, let reader = model.services.reader.model else { return check("settings typing: a thread", false) }
+        model.click(order[3], command: false, shift: false)
+        wait(0.3)
+
+        func roundTrip(_ name: String) {
+            guard waitUntil(1, { KeyRouter.textInput(in: window) != nil }), let field = AppModel.textView(in: window) else {
+                return print("  (\(name) did not take focus offscreen; check skipped)")
+            }
+            model.openSettings(.mail)
+            _ = waitUntil(1) { KeyRouter.textInput(in: window) == nil }
+            model.closeSettings()
+            _ = waitUntil(1) { AppModel.textView(in: window) === field }
+            check("closing settings gives \(name) the keyboard back", AppModel.textView(in: window) === field && model.focus == .reader)
+        }
+
+        model.services.reader.find()
+        roundTrip("the find bar")
+        reader.closeFind()
+        wait(0.2)
+
+        model.focusList()
+        send("r")
+        wait(0.4)
+        roundTrip("an inline reply")
+        reader.composing = nil
+        wait(0.4)
     }
 
     private func settingsKeys() {
@@ -87,6 +171,30 @@ extension SelfCheck {
         }
         model.closeSettings()
         check("the list is as it was after settings", model.cursor == cursor && model.kind == kind)
+    }
+
+    /// ⌘K over the settings page lists only what can run there: no thread, project, label or account to jump to.
+    private func settingsPalette() {
+        guard let project = model.projects.first else { return check("settings palette: a project", false) }
+        func mailEntries() -> [PaletteItem] {
+            palette.flatItems.filter { item in ["project.", "label.", "account.", "thread."].contains(where: item.id.hasPrefix) }
+        }
+        model.openSettings(.appearance)
+        wait(0.1)
+        model.palette = .commands
+        palette.query = project.name
+        check("the palette over settings lists no projects, labels or accounts", mailEntries().isEmpty)
+        palette.query = "invoice"
+        wait(Double(AppModel.searchDebounce) / 1_000_000_000 + 0.4)
+        check("the palette over settings finds no threads", palette.threadRows.isEmpty && mailEntries().isEmpty)
+        palette.close()
+        model.closeSettings()
+
+        model.palette = .commands
+        palette.query = project.name
+        check("outside settings the palette lists projects", palette.flatItems.contains { $0.id == "project.\(project.id)" })
+        palette.close()
+        wait(0.1)
     }
 
     private func editedShortcuts() {
@@ -135,5 +243,92 @@ extension SelfCheck {
         model.undoLast()
         poll(0.6) {}
         registry.restore(saved)
+    }
+
+    /// The keys the reader page answers itself follow the registry: `n` given to Archive archives from the page,
+    /// and the page stops moving between messages on it.
+    private func readerPageKeys() {
+        let saved = registry.overrides
+        let pane = model.prefs.readingPane
+        defer { model.prefs.readingPane = pane }
+        model.prefs.readingPane = false
+        model.showSplit(.people)
+        wait(0.2)
+        let order = model.snapshot.order
+        guard order.count > 4 else { return check("reader keys: rows", false) }
+        model.setCursor(order[1], open: false)
+        model.focusList()
+        send("", keyCode: 36)
+        _ = waitUntil(1) { KeyRouter.readerHasKeyboard(window) && self.model.services.reader.model?.key == order[1] }
+        wait(0.3)
+        guard KeyRouter.readerHasKeyboard(window) else { return print("  (the reader page did not take the keyboard offscreen; checks skipped)") }
+
+        let n = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                 context: nil, characters: "n", charactersIgnoringModifiers: "n", isARepeat: false, keyCode: 45)!
+        check("the page knows n as Next Message", ReaderWebEngine.shared.keyActions["n"] == "next")
+        check("n goes to the page while it has the keyboard", router.handle(n) != nil)
+        check("the page moves to the next message on n", pagePrevents("n") == true)
+
+        registry.assign(.key("n"), to: "archive", replacing: nil)
+        check("n given to Archive leaves the page's keys", ReaderWebEngine.shared.keyActions["n"] == nil)
+        check("the page no longer answers n", pagePrevents("n") == false)
+        let undo = model.undoStack.count
+        check("n archives from the open thread", router.handle(n) == nil && model.snapshot.rows[order[1]] == nil && model.undoStack.count == undo + 1)
+        model.undoLast()
+        poll(0.6) {}
+        registry.removeKey(at: 0, from: "previousMessage")
+        check("a removed p leaves the page's keys", ReaderWebEngine.shared.keyActions["p"] == nil && pagePrevents("p") == false)
+        registry.restore(saved)
+        check("the built-in keys come back to the page", ReaderWebEngine.shared.keyActions["n"] == "next" && ReaderWebEngine.shared.keyActions["p"] == "previous")
+        model.back()
+    }
+
+    /// Whether the reader page handles a keydown of `key` (it prevents the default when it does).
+    private func pagePrevents(_ key: String) -> Bool? {
+        var answer: Bool?
+        var done = false
+        ReaderWebEngine.shared.run("""
+            const event = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+            document.body.dispatchEvent(event);
+            return event.defaultPrevented;
+            """, ["k": key]) { result in
+            answer = try? result.get() as? Bool
+            done = true
+        }
+        _ = waitUntil(2) { done }
+        return answer
+    }
+
+    /// A ⌃ key given to a mail command keeps its text meaning while typing; text-safe ⌘ keys still fire.
+    private func typingKeepsTextKeys() {
+        let saved = registry.overrides
+        defer { registry.restore(saved) }
+        model.showSplit(.people)
+        wait(0.2)
+        let control = KeyShortcut(key: .char("g"), modifiers: .control)
+        registry.assign(control, to: "trash", replacing: nil)
+        check("⌃H is reserved for text editing", SettingsState.problem(KeyShortcut(key: .char("h"), modifiers: .control), for: "trash", registry: registry)
+              == .reserved(KeyShortcut(key: .char("h"), modifiers: .control), owner: "text editing"))
+        model.beginSearch()
+        guard waitUntil(1, { KeyRouter.textInput(in: window) != nil }) else {
+            model.endSearch(restoreFocus: true)
+            return print("  (search field did not take focus offscreen; typing checks skipped)")
+        }
+        func event(_ characters: String, _ ignoring: String, _ keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: window.windowNumber,
+                             context: nil, characters: characters, charactersIgnoringModifiers: ignoring, isARepeat: false, keyCode: keyCode)!
+        }
+        let undo = model.undoStack.count, rows = model.snapshot.order.count
+        let trash = event("\u{7}", "g", 5, .control)
+        check("a mail command's ⌃ key passes the router while typing", router.handle(trash) != nil)
+        check("…and doesn't fire from the menu bar", NSApp.mainMenu?.performKeyEquivalent(with: trash) == false
+              && model.undoStack.count == undo && model.snapshot.order.count == rows)
+        check("⌘A while typing is the Edit menu's Select All", NSApp.mainMenu?.performKeyEquivalent(with: event("a", "a", 0, .command)) == true
+              && model.checked.isEmpty)
+        check("⌘K still opens the palette while typing", NSApp.mainMenu?.performKeyEquivalent(with: event("k", "k", 40, .command)) == true
+              && model.palette == .commands)
+        model.palette = nil
+        wait(0.1)
+        model.endSearch(restoreFocus: true)
     }
 }

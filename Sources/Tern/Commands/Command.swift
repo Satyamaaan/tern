@@ -62,5 +62,11 @@ struct Command: Identifiable {
     /// commands, new mail and ⌘K, but nothing that acts on the mail the page hides.
     var availableInSettings: Bool { group == .settings || Self.settingsSafe.contains(id) }
 
+    /// Whether its ⌘ or ⌃ key may fire while a text field has the keyboard: the commands above, find, print,
+    /// New Project and the account scopes, none of which acts on mail. Any other command's key keeps its
+    /// meaning in the text (⌃G beeps, ⌃H deletes back) and the menu bar leaves it alone.
+    var isTextSafe: Bool { availableInSettings || Self.textSafe.contains(id) || id.hasPrefix("scope.") }
+
     private static let settingsSafe: Set<String> = ["compose", "palette", "addAccount"]
+    private static let textSafe: Set<String> = ["find", "findNext", "findPrevious", "print", "newProject"]
 }

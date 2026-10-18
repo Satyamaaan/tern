@@ -35,7 +35,7 @@ struct KeyShortcut: Hashable {
 
     // MARK: Display
 
-    /// How keycaps show the shortcut: "⌘K", "⇧R", "e", "esc".
+    /// How keycaps show the shortcut: "⌘K", "⌃H", "⇧R", "e", "esc".
     var display: String {
         var text = ""
         if modifiers.contains(.control) { text += "⌃" }
@@ -47,7 +47,7 @@ struct KeyShortcut: Hashable {
             if c.count == 1, let scalar = c.unicodeScalars.first, CharacterSet.uppercaseLetters.contains(scalar) {
                 return text + "⇧" + c
             }
-            return text + (modifiers.contains(.command) || modifiers.contains(.option) ? c.uppercased() : c)
+            return text + (modifiers.isDisjoint(with: [.command, .option, .control]) ? c : c.uppercased())
         case .returnKey: return text + "↵"
         case .escape: return text + "esc"
         case .tab: return text + "⇥"
@@ -78,6 +78,26 @@ struct KeyShortcut: Hashable {
         case .delete: "\u{8}"
         case .space: " "
         }
+    }
+
+    // MARK: The reader page
+
+    /// The key as the reader page names it in keydown events, for keys it sees as typed: a character without
+    /// modifiers as itself ("n", "#"), a special key by its `event.key` name, after "Shift+" with ⇧ ("Enter",
+    /// "Shift+Tab"). Nil with ⌘, ⌃ or ⌥, which the page leaves alone.
+    var pageKeyName: String? {
+        if case .char(let c) = key { return modifiers.isEmpty ? c : nil }
+        guard modifiers.isSubset(of: .shift) else { return nil }
+        let name: String = switch key {
+        case .returnKey: "Enter"
+        case .escape: "Escape"
+        case .tab: "Tab"
+        case .up: "ArrowUp"
+        case .down: "ArrowDown"
+        case .delete: "Backspace"
+        case .space, .char: " "
+        }
+        return (modifiers.contains(.shift) ? "Shift+" : "") + name
     }
 
     // MARK: Matching

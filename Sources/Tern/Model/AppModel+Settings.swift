@@ -1,11 +1,18 @@
-import Foundation
+import AppKit
 
 /// Where the keyboard was when the settings page opened.
-enum SettingsReturn { case list, reader, search }
+struct SettingsReturn {
+    enum Place { case list, reader, search }
+
+    var place = Place.list
+    /// The text view or field that was being typed in (an inline reply, the find bar), to take the keyboard
+    /// back if it is still there.
+    weak var text: NSView?
+}
 
 // The settings page covers the mail the way an open thread covers the list. Nothing underneath changes
-// while it is open (tab, selection, scroll, the open thread), so closing it is just taking it away and
-// giving the keyboard back.
+// while it is open (tab, selection, scroll, the open thread), so closing it is mostly taking it away and
+// giving the keyboard back; only Layout can change how the open thread shows, and closing settles that.
 extension AppModel {
     var settingsOpen: Bool { settings != nil }
 
@@ -22,23 +29,41 @@ extension AppModel {
         showsShortcuts = false
         chordHUD = nil
         markReadTimer?.invalidate()
-        settingsReturn = searchFieldFocused ? .search : focus == .reader && services.reader.isActive ? .reader : .list
+        let text = searchFieldFocused ? nil : Self.textView(in: listView?.window)
+        let place: SettingsReturn.Place = searchFieldFocused ? .search
+            : (focus == .reader || text != nil) && services.reader.isActive ? .reader : .list
+        settingsReturn = SettingsReturn(place: place, text: text)
         if searchFieldFocused { searchFieldFocused = false }
         let section = section ?? lastSettingsSection
         prefs.settingsSection = section.rawValue
         settings = SettingsState(model: self, section: section, updater: updater)
     }
 
-    /// Esc, ⌘[, the back button or ⌘, again: the mail as it was, with the keyboard where it was.
+    /// Esc, ⌘[, the back button or ⌘, again: the mail as it was, with the keyboard where it was. If the
+    /// reading pane changed meanwhile, a thread open over the list stays open (beside it with the pane), and
+    /// the keyboard goes to the list when the thread it was in is no longer on screen.
     func closeSettings() {
         guard settings != nil else { return }
         settings = nil
-        switch settingsReturn {
+        let saved = settingsReturn
+        settingsReturn = SettingsReturn()
+        let readerOpen = services.reader.isActive && readerKey != nil
+        if readerExpanded && (!listOnly || !readerOpen) { readerExpanded = false }
+        switch saved.place {
         case .search: searchFieldFocused = true
-        case .reader where services.reader.isActive:
+        case .reader where readerOpen && readerVisible:
             focus = .reader
+            if let text = saved.text, text.window != nil, !text.isHiddenOrHasHiddenAncestor, text.window?.makeFirstResponder(text) == true {
+                return
+            }
             services.reader.focus()
         case .reader, .list: focusList()
         }
+    }
+
+    /// The text view typing goes to in `window`; for a text field, the field rather than its field editor.
+    static func textView(in window: NSWindow?) -> NSView? {
+        guard let text = KeyRouter.textInput(in: window) else { return nil }
+        return text.isFieldEditor ? text.delegate as? NSView : text
     }
 }
