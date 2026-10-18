@@ -208,7 +208,9 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
   disclosure, date in tabular `text3`. Bodies in the WKWebView (transparent before first paint, sanitized,
   remote images blocked until "Load images"; Tern's own avatars come as `data:` URLs, which the CSP allows while
-  it still allows no remote image). Attachments as chips. Quoted text behind a `•••` toggle.
+  it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always
+  sees a light colour scheme: its `prefers-color-scheme: dark` styles and `color-scheme` never apply. Attachments
+  as chips. Quoted text behind a `•••` toggle.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place.
 

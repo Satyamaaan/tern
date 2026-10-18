@@ -55,16 +55,16 @@ public enum MailSanitizer {
         let document = HTMLDocument.parse(html)
         let collapsed = options.collapseQuotes && MailQuotes.collapse(in: document.root)
         var writer = Writer(options: options)
-        let css = document.styles.map { writer.css.stylesheet($0) }.joined(separator: "\n")
+        let css = document.styles.map { writer.css.stylesheet($0.css, media: $0.media) }.joined(separator: "\n")
         let bodyStyle = writer.bodyStyle(document.bodyAttributes)
         var output = ""
         output.reserveCapacity(html.utf8.count)
         for child in document.root.children { writer.write(child, into: &output) }
-        let findings = writer.css.findings
+        let rich = writer.css.findings.paintsOwnColors || writer.paintsOwnColors
         return SanitizedMail(
-            html: output, css: css, bodyStyle: bodyStyle,
-            mode: findings.paintsOwnColors || writer.paintsOwnColors ? .rich : .simple,
-            blockedRemoteCount: findings.blockedRemote + writer.blockedRemote,
+            html: output, css: CSSSanitizer.settleColorScheme(css, paintsOwnColors: rich), bodyStyle: bodyStyle,
+            mode: rich ? .rich : .simple,
+            blockedRemoteCount: writer.css.findings.blockedRemote + writer.blockedRemote,
             hasCollapsedQuote: collapsed)
     }
 

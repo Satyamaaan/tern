@@ -105,8 +105,8 @@ final class HTMLNode {
 struct HTMLDocument {
     var root: HTMLNode
     var bodyAttributes: [HTMLAttribute]
-    /// Contents of every `<style>` element, in document order.
-    var styles: [String]
+    /// Contents of every `<style>` element and its `media` attribute, in document order.
+    var styles: [(css: String, media: String?)]
 
     static let maxDepth = 400
 
@@ -130,8 +130,9 @@ struct HTMLDocument {
         let root = HTMLNode(element: "#root")
         var stack: [HTMLNode] = [root]
         var bodyAttributes: [HTMLAttribute]?
-        var styles: [String] = []
+        var styles: [(css: String, media: String?)] = []
         var rawOwner: String?
+        var styleMedia: String?
 
         func current() -> HTMLNode { stack[stack.count - 1] }
 
@@ -175,10 +176,11 @@ struct HTMLDocument {
                 current().append(HTMLNode(text: text))
 
             case .rawText(let text):
-                if rawOwner == "style" { styles.append(text) }
+                if rawOwner == "style" { styles.append((text, styleMedia)) }
 
             case .startTag(let name, let attributes, _):
                 rawOwner = HTMLTokenizer.rawTextElements.contains(name) ? name : nil
+                if name == "style" { styleMedia = attributes.first { $0.name == "media" }?.value }
                 switch name {
                 case "html", "head": return
                 case "body":

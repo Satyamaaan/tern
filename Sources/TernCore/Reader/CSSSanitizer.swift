@@ -10,8 +10,8 @@ struct CSSFindings {
 
 /// Cleans inline `style` attributes and `<style>` sheets from mail. Drops anything that can run code,
 /// load remote content without permission, or reach outside the message; rewrites `html`/`body`
-/// selectors to the message wrappers; and turns plain colors into `light-dark()` pairs so simple mails
-/// read well in dark mode.
+/// selectors to the message wrappers; turns plain colors into `light-dark()` pairs so simple mails
+/// read well in dark mode; and keeps the mail's own dark mode out (see `lightSchemeMedia`).
 struct CSSSanitizer {
     var urlPolicy: (String) -> URLDecision
     var findings = CSSFindings()
@@ -44,7 +44,7 @@ struct CSSSanitizer {
 
     private mutating func clean(property: String, value: inout String) -> String? {
         let lower = value.lowercased()
-        if Self.forbiddenProperties.contains(property) { return nil }
+        if Self.forbiddenProperties.contains(property) || Self.colorSchemeProperties.contains(property) { return nil }
         if value.contains("\\") || lower.contains("expression") || lower.contains("javascript:")
             || lower.contains("vbscript:") || lower.contains("@import") || value.contains("<") {
             return nil
@@ -207,13 +207,25 @@ struct CSSSanitizer {
     // MARK: Style sheets
 
     /// Sanitizes a whole `<style>` element. Selectors for `html`, `body` and `:root` are pointed at the
-    /// message wrappers; `@import`, remote `@font-face`, dark-mode media blocks and unknown at-rules go.
+    /// message wrappers; media queries never see a dark colour scheme; `@import`, remote `@font-face`,
+    /// media blocks that can't match and unknown at-rules go.
     mutating func stylesheet(_ css: String) -> String {
-        let text = Self.stripComments(css)
+        // The light-scheme marker can only come from `lightSchemeMedia`.
+        let text = Self.stripComments(css).replacingOccurrences(of: Self.lightScheme, with: "")
         var output = ""
         var index = text.startIndex
         sheet(text, &index, depth: 0, into: &output)
         return output
+    }
+
+    /// A `<style media>` sheet: sanitized only when its media list can match, then wrapped in `@media`.
+    mutating func stylesheet(_ css: String, media: String?) -> String {
+        let list = (media ?? "").replacingOccurrences(of: Self.lightScheme, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !list.isEmpty, list.lowercased() != "all" else { return stylesheet(css) }
+        // A list the browser couldn't parse matches nothing, and neither does its sheet.
+        guard !list.contains(where: { "{};\\\"'".contains($0) }), let condition = Self.lightSchemeMedia(list) else { return "" }
+        let inner = stylesheet(css)
+        return inner.isEmpty ? "" : "@media \(condition) {\n\(inner)}\n"
     }
 
     private mutating func sheet(_ text: String, _ index: inout String.Index, depth: Int, into output: inout String) {
@@ -226,7 +238,7 @@ struct CSSSanitizer {
             }
             if text[index] == "@" {
                 let prelude = readPrelude(text, &index)
-                let keyword = prelude.prefix { !$0.isWhitespace && $0 != "{" }.lowercased()
+                let keyword = prelude.prefix { !$0.isWhitespace && $0 != "{" && $0 != "(" }.lowercased()
                 guard index < text.endIndex, text[index] == "{" else {
                     if index < text.endIndex { index = text.index(after: index) }
                     continue
@@ -234,13 +246,15 @@ struct CSSSanitizer {
                 index = text.index(after: index)
                 switch keyword {
                 case "@media", "@supports":
-                    let lowered = prelude.lowercased()
-                    if lowered.contains("prefers-color-scheme") && lowered.contains("dark") || depth > 4 {
-                        skipBlock(text, &index)
-                    } else {
+                    let condition = keyword == "@media"
+                        ? Self.lightSchemeMedia(String(prelude.dropFirst(keyword.count))).map { "@media \($0)" }
+                        : prelude.trimmingCharacters(in: .whitespaces)
+                    if let condition, depth <= 4 {
                         var inner = ""
                         sheet(text, &index, depth: depth + 1, into: &inner)
-                        output += "\(prelude.trimmingCharacters(in: .whitespaces)) {\(inner)}\n"
+                        output += "\(condition) {\(inner)}\n"
+                    } else {
+                        skipBlock(text, &index)
                     }
                 case "@font-face":
                     let body = readBlock(text, &index)
@@ -350,6 +364,66 @@ struct CSSSanitizer {
     private func skipWhitespace(_ text: String, _ index: inout String.Index) {
         while index < text.endIndex, text[index].isWhitespace || text[index] == ";" { index = text.index(after: index) }
     }
+
+    // MARK: Colour scheme
+
+    /// Rewrites a media query list so the mail never sees a dark colour scheme: `(prefers-color-scheme:
+    /// dark)` never matches, in any case or spacing, after `not`, in `and`/`or` chains and in comma lists,
+    /// and a query that needs it is dropped; `(prefers-color-scheme: light)` becomes a marker that
+    /// `settleColorScheme` resolves once the mail's mode is known. Mail paints its dark mode with
+    /// `!important` white text over backgrounds that stay light on the reader's light card, so it must never
+    /// apply. Returns nil when no query in the list can match.
+    static func lightSchemeMedia(_ list: String) -> String? {
+        let trimmed = list.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.range(of: "prefers-color-scheme", options: .caseInsensitive) != nil else { return trimmed }
+        var queries: [String] = []
+        for part in split(trimmed, on: ",") {
+            let query = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            let source = query as NSString
+            var rewritten = ""
+            var location = 0
+            var needsDark = false
+            for match in colorSchemeFeature.matches(in: query, range: NSRange(location: 0, length: source.length)) {
+                rewritten += source.substring(with: NSRange(location: location, length: match.range.location - location))
+                let value = match.range(at: 1).location == NSNotFound ? "" : source.substring(with: match.range(at: 1)).lowercased()
+                switch value {
+                case "": rewritten += alwaysMatches
+                case "light": rewritten += lightScheme
+                default:
+                    rewritten += neverMatches
+                    needsDark = true
+                }
+                location = NSMaxRange(match.range)
+            }
+            rewritten += source.substring(from: location)
+            // Without `not` or `or`, a query that needs a dark scheme is false as a whole.
+            let negates = negation.firstMatch(in: query, range: NSRange(location: 0, length: source.length)) != nil
+            if needsDark, !negates { continue }
+            queries.append(rewritten)
+        }
+        return queries.isEmpty ? nil : queries.joined(separator: ", ")
+    }
+
+    /// Resolves the light-scheme markers in a sanitized sheet. Mail that paints its own colours sits on a
+    /// light card in dark mode, so its light conditions always match; simple mail follows the reader's theme.
+    static func settleColorScheme(_ css: String, paintsOwnColors: Bool) -> String {
+        guard css.contains(lightScheme) else { return css }
+        return css.replacingOccurrences(of: lightScheme, with: paintsOwnColors ? alwaysMatches : "(prefers-color-scheme: light)")
+    }
+
+    /// Stands in for `(prefers-color-scheme: light)` until the mail's mode is known.
+    private static let lightScheme = "\u{E000}"
+    private static let alwaysMatches = "(min-width: 0px)"
+    private static let neverMatches = "(not (min-width: 0px))"
+
+    private static let colorSchemeFeature = try! NSRegularExpression(
+        pattern: #"\(\s*prefers-color-scheme\s*(?::\s*([a-z-]*)\s*)?\)"#, options: [.caseInsensitive])
+    private static let negation = try! NSRegularExpression(pattern: #"(?<![\w-])(not|or)(?![\w-])"#, options: [.caseInsensitive])
+
+    /// The reader picks the colour scheme, not the mail: a mail's `color-scheme: light dark` on `:root` (which
+    /// becomes `.tern-root`) turns every `light-dark()` colour on the light card to its dark side.
+    /// `-apple-color-filter` is Apple Mail's dark-mode colour inversion.
+    private static let colorSchemeProperties: Set<String> = ["color-scheme", "supported-color-schemes", "-apple-color-filter"]
 
     // MARK: Helpers
 
