@@ -138,14 +138,19 @@ import Testing
 
 // MARK: - SenderLogos
 
+// Waits on the fetcher's own calls, never on a clock: four fetches begin and stay held, so nothing else can begin
+// until the test lets one finish.
 @MainActor
-@Test func atMostFourFetchesRunAndTheMostRecentlyWantedGoesNext() async throws {
+@Test(.timeLimit(.minutes(1))) func atMostFourFetchesRunAndTheMostRecentlyWantedGoesNext() async throws {
     let fetcher = GatedFetcher()
     let logos = SenderLogos(isOn: { true })
     logos.start(cache: LogoCache(directory: temporaryDirectory()), fetcher: fetcher)
     for index in 0..<10 { logos.want("news@d\(index).example") }
-    #expect(await eventually { logos.runningDomains.count == 4 && logos.queuedDomains.count == 6 })
-    #expect(fetcher.started.count == 4)
+    await fetcher.started(count: 4)
+    // The other six wait once their disk lookups (misses) are back.
+    await settled { logos.queuedDomains.count == 6 }
+    #expect(logos.runningDomains.count == 4 && fetcher.started.count == 4)
+    #expect(Set(fetcher.started) == logos.runningDomains)
 
     let waiting = logos.queuedDomains
     let oldest = try #require(waiting.last)
@@ -153,11 +158,12 @@ import Testing
     #expect(logos.queuedDomains.first == oldest, "wanting it again puts it first")
 
     fetcher.release(try #require(fetcher.started.first))
-    #expect(await eventually { fetcher.started.count == 5 })
-    #expect(fetcher.started.last == oldest)
+    await fetcher.started(count: 5)
+    #expect(fetcher.started.count == 5 && fetcher.started.last == oldest)
 
     fetcher.releaseAll()
-    #expect(await eventually { logos.isIdle })
+    await fetcher.started(count: 10)
+    await settled { logos.isIdle }
     #expect(Set(fetcher.started).count == 10 && fetcher.started.count == 10)
     #expect(fetcher.maxActive == 4)
 }
