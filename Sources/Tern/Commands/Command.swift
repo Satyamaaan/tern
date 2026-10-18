@@ -38,6 +38,8 @@ struct Command: Identifiable {
     var hiddenInPalette = false
     /// While the reader has focus, bare-key handling leaves this key to the reader (e.g. `p`).
     var yieldsToReader = false
+    /// Only works while the open conversation has the keyboard, so it can share a key with a list command.
+    var readerOnly = false
     var isEnabled: @MainActor () -> Bool = { true }
     /// Title that changes with state ("Star" / "Unstar"); falls back to `title`.
     var currentTitle: (@MainActor () -> String)?
@@ -47,9 +49,18 @@ struct Command: Identifiable {
 
     @MainActor var displayTitle: String { currentTitle?() ?? title }
 
-    /// The shortcut text shown on keycaps: the chord or the primary key.
-    var shortcutText: String? { chord ?? keys.first?.display }
+    /// The shortcut text shown on keycaps: the primary key, else the chord.
+    var shortcutText: String? { keys.first?.display ?? chord }
 
     /// The key equivalent menus use: the first ⌘ shortcut (menus only fire those), else the first key.
     var menuKey: KeyShortcut? { keys.first { !$0.isBare } ?? keys.first }
+
+    /// Where the command's keys act, for shortcut conflicts.
+    var keyScope: KeyScope { yieldsToReader ? .list : readerOnly ? .reader : .anywhere }
+
+    /// Whether the command runs while the settings page covers the mail: app, window and appearance
+    /// commands, new mail and ⌘K, but nothing that acts on the mail the page hides.
+    var availableInSettings: Bool { group == .settings || Self.settingsSafe.contains(id) }
+
+    private static let settingsSafe: Set<String> = ["compose", "palette", "addAccount"]
 }

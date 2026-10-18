@@ -307,6 +307,11 @@ final class ReaderModel {
         receive(detail, for: key)
     }
 
+    /// Settings → Mail took a sender off the list: their images are blocked again in every reader.
+    static func forgetTrustedSender(_ sender: String) {
+        trustedSenders?.remove(sender.lowercased())
+    }
+
     /// "Always load from …": every message from this sender, except in Spam.
     private func trustImages(from sender: String) {
         let sender = sender.lowercased()

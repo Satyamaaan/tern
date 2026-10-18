@@ -96,6 +96,8 @@ final class AppModel {
     /// Threads waiting on a custom snooze date.
     var snoozeDateFor: [ThreadKey]?
     var toasts: [Toast] = []
+    /// The settings page, while it covers the mail (⌘,).
+    var settings: SettingsState?
 
     // MARK: Data
 
@@ -143,6 +145,8 @@ final class AppModel {
     @ObservationIgnored var searchGeneration = 0
     @ObservationIgnored var markReadTimer: Timer?
     @ObservationIgnored var cursorAnchor: ThreadKey?
+    /// Where the keyboard goes back to when the settings page closes.
+    @ObservationIgnored var settingsReturn = SettingsReturn.list
     @ObservationIgnored var cursorBeforeSearch: ThreadKey?
     /// Threads being dragged onto the sidebar.
     @ObservationIgnored var draggedKeys: [ThreadKey] = []
@@ -343,12 +347,13 @@ final class AppModel {
         clearSelection()
     }
 
-    /// Once the palette closes, the keyboard goes back to the list or the open thread, unless the
-    /// command it ran moved it somewhere (the search pill).
+    /// Once the palette closes, the keyboard goes back to the settings page, the list or the open thread,
+    /// unless the command it ran moved it somewhere (the search pill).
     private func paletteClosed() {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.palette == nil, !self.searchFieldFocused, self.projectEditor == nil else { return }
+                if let settings = self.settings { return settings.takeKeyboard() }
                 if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
             }
         }

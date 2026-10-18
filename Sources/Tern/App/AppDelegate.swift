@@ -13,8 +13,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private var mainMenu: MainMenu!
     private var palette: PaletteController!
     private var window: MainWindow?
-    private var settingsWindow: NSWindow?
-    private var settingsState: SettingsState?
     private var onboardingWindow: NSWindow?
     private var snoozeTimer: Timer?
     private var integration: Integration?
@@ -53,6 +51,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
         mainMenu = MainMenu(registry: registry)
         NSApp.mainMenu = mainMenu.build()
+        // An edited shortcut shows (and fires) in the menu bar at once.
+        NotificationCenter.default.addObserver(forName: CommandRegistry.shortcutsDidChange, object: registry, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let mainMenu = self.mainMenu else { return }
+                NSApp.mainMenu = mainMenu.build()
+            }
+        }
         model.startObservations()
 
         if CommandLine.arguments.contains("--check") {
@@ -170,26 +175,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         NSApp.activate()
     }
 
+    /// ⌘,, the gear, the menus and ⌘K: the settings page in the main window (opened again if it was
+    /// closed). ⌘, while the page is in front takes it away again.
     func showSettings(_ section: SettingsSection?) {
-        if settingsWindow == nil {
-            let state = SettingsState(model: model, shell: self)
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 760, height: 540),
-                styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
-            window.title = "Settings"
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.isReleasedWhenClosed = false
-            window.backgroundColor = Theme.bg
-            window.contentView = NSHostingView(rootView: SettingsView(state: state).environment(model).environment(services))
-            window.center()
-            window.setFrameAutosaveName("TernSettings")
-            settingsWindow = window
-            settingsState = state
-        }
-        if let section { settingsState?.section = section }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        let inFront = window?.isKeyWindow == true && model.settingsOpen
+        showMainWindow()
+        if inFront && section == nil { model.closeSettings() } else { model.openSettings(section, updater: updater) }
     }
 
     func checkForUpdates() {

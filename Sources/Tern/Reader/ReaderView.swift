@@ -138,28 +138,30 @@ struct ReaderTopBar: View {
     static var alwaysShowPosition = false
 
     @Environment(AppServices.self) private var services
+    /// Missing in the reader's own snapshot harness.
+    @Environment(AppModel.self) private var app: AppModel?
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 2) {
             if let onBack {
-                ReaderIconButton(icon: .back, help: "Back to list  Esc", action: onBack)
+                ReaderIconButton(icon: .back, help: hint("Back to list", "back"), action: onBack)
                     .padding(.trailing, 4)
             }
             if let position, hovering || Self.alwaysShowPosition, model.key != nil {
-                ReaderIconButton(icon: .chevronLeft, help: "Previous conversation  K") { position.previous?() }
+                ReaderIconButton(icon: .chevronLeft, help: hint("Previous conversation", "previous")) { position.previous?() }
                     .disabled(position.previous == nil)
                 Text("\(position.index) of \(position.total)")
                     .font(.numeric(12))
                     .foregroundStyle(Color(Theme.text3))
                     .padding(.horizontal, 4)
-                ReaderIconButton(icon: .chevronRight, help: "Next conversation  J") { position.next?() }
+                ReaderIconButton(icon: .chevronRight, help: hint("Next conversation", "next")) { position.next?() }
                     .disabled(position.next == nil)
             }
             Spacer(minLength: 0)
             if let key = model.key {
-                ReaderIconButton(icon: .done, help: "Done  E") { model.perform(.archive) }
-                ReaderMenuButton(icon: .snoozed, help: "Snooze  H") {
+                ReaderIconButton(icon: .done, help: hint("Done", "archive")) { model.perform(.archive) }
+                ReaderMenuButton(icon: .snoozed, help: hint("Snooze", "snooze")) {
                     SnoozeMenuItems(threads: [key]) { model.pickingSnoozeDate = true }
                 }
                 .popover(isPresented: $model.pickingSnoozeDate, arrowEdge: .bottom) {
@@ -176,6 +178,8 @@ struct ReaderTopBar: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
+
+    private func hint(_ title: String, _ id: String) -> String { app?.registry?.hint(title, id) ?? title }
 
     @ViewBuilder private var moreMenu: some View {
         let thread = model.detail?.thread
@@ -280,6 +284,9 @@ struct ReaderSnoozePicker: View {
 struct ReaderFindBar: View {
     @Bindable var model: ReaderModel
     @FocusState private var focused: Bool
+    @Environment(AppModel.self) private var app: AppModel?
+
+    private func hint(_ title: String, _ id: String) -> String { app?.registry?.hint(title, id) ?? title }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -302,8 +309,8 @@ struct ReaderFindBar: View {
             if model.findFailed {
                 Text("No matches").font(.ui(12)).foregroundStyle(Color(Theme.text3))
             }
-            IconButton(icon: .chevronUp, size: Theme.Control.small, iconSize: 15, help: "Previous match  ⇧⌘G") { model.find(backwards: true) }
-            IconButton(icon: .chevronDown, size: Theme.Control.small, iconSize: 15, help: "Next match  ⌘G") { model.find() }
+            IconButton(icon: .chevronUp, size: Theme.Control.small, iconSize: 15, help: hint("Previous match", "findPrevious")) { model.find(backwards: true) }
+            IconButton(icon: .chevronDown, size: Theme.Control.small, iconSize: 15, help: hint("Next match", "findNext")) { model.find() }
             IconButton(icon: .close, size: Theme.Control.small, iconSize: 15, help: "Close  Esc") { model.closeFind() }
         }
         .padding(.leading, 10)
@@ -366,6 +373,7 @@ struct ReaderReplyBar: View {
     let model: ReaderModel
     /// Shows quick replies without hovering (snapshot harness).
     static var alwaysShowQuickReplies = false
+    @Environment(AppModel.self) private var app: AppModel?
 
     @State private var hovering = false
 
@@ -385,7 +393,7 @@ struct ReaderReplyBar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Reply  R")
+            .help(app?.registry?.hint("Reply", "reply") ?? "Reply")
             if hovering || Self.alwaysShowQuickReplies {
                 ForEach(model.quickReplies, id: \.self) { reply in
                     ReaderQuickReply(text: reply) { model.quickReply(reply) }

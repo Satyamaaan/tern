@@ -8,14 +8,14 @@ struct BottomBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            BarButton(icon: .search, help: "Search  /", on: model.searchShown) {
+            BarButton(icon: .search, help: hint("Search", "search"), on: model.searchShown) {
                 if model.searchShown { model.endSearch(restoreFocus: true) } else { model.beginSearch() }
             }
-            BarButton(icon: .sidebar, help: model.prefs.sidebarOpen ? "Hide sidebar  ⌃⌘S" : "Show sidebar  ⌃⌘S",
+            BarButton(icon: .sidebar, help: hint(model.prefs.sidebarOpen ? "Hide sidebar" : "Show sidebar", "toggleSidebar"),
                       on: model.prefs.sidebarOpen) {
                 model.toggleSidebar()
             }
-            BarButton(icon: .settings, help: "Settings  ⌘,", on: false) {
+            BarButton(icon: .settings, help: hint("Settings", "settings"), on: model.settingsOpen) {
                 model.registry?.run("settings")
             }
         }
@@ -25,6 +25,9 @@ struct BottomBar: View {
         .barShadow()
         .frame(height: Self.height)
     }
+
+    /// Tooltips name the shortcut as it is now.
+    private func hint(_ title: String, _ id: String) -> String { model.registry?.hint(title, id) ?? title }
 }
 
 private struct BarButton: View {

@@ -3,7 +3,7 @@ import SwiftUI
 import TernCore
 import WebKit
 
-// The reader, search, inline replies, settings and onboarding as the shell shows them.
+// The reader, search, inline replies and onboarding as the shell shows them.
 extension Snapshotter {
     /// WebKit paints only into a window on screen: order the window in at 1 % opacity, click-through,
     /// without activating the app or taking focus.
@@ -91,19 +91,7 @@ extension Snapshotter {
         model.endSearch(restoreFocus: true)
         services.ai = ai
 
-        // Settings → Accounts with the Google client, and onboarding's first step.
-        let googleClientId = services.googleClientId
-        services.googleClientId = { "1234567890-abcdefghijklmnop.apps.googleusercontent.com" }
-        let settings = SettingsState(model: model, shell: nil)
-        settings.section = .accounts
-        for dark in [false, true] {
-            standalone(SettingsView(state: settings).environment(model).environment(services), size: NSSize(width: 760, height: 540),
-                       to: directory.appendingPathComponent("settings-google-\(dark ? "dark" : "light").png"), dark: dark)
-        }
-        settings.editsGoogleClient = true
-        standalone(SettingsView(state: settings).environment(model).environment(services), size: NSSize(width: 760, height: 640),
-                   to: directory.appendingPathComponent("settings-google-edit-light.png"), dark: false)
-        services.googleClientId = googleClientId
+        // Onboarding's first step.
         for dark in [false, true] {
             standalone(OnboardingView(onFinish: {}, onDemo: {}).environment(model).environment(services), size: NSSize(width: 640, height: 560),
                        to: directory.appendingPathComponent("onboarding-\(dark ? "dark" : "light").png"), dark: dark)

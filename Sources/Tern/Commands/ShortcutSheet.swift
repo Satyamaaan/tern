@@ -75,7 +75,7 @@ struct ShortcutKeys: View {
     }
 }
 
-/// Rows for the shortcut sheet and the Settings → Shortcuts table.
+/// Rows for the shortcut sheet, and the commands Settings → Shortcuts lists.
 enum ShortcutTable {
     struct Row: Identifiable, Hashable {
         var id: String
@@ -89,11 +89,43 @@ enum ShortcutTable {
         guard let registry else { return [] }
         return registry.commands.compactMap { command in
             guard !command.paletteOnly, command.id.hasPrefix("scope.") == false || command.id == "scope.all",
-                  let shortcut = command.chord ?? command.keys.map(\.display).joined(separator: " ").nilIfEmpty
+                  let shortcut = command.keys.map(\.display).joined(separator: " ").nilIfEmpty ?? command.chord
             else { return nil }
-            return Row(id: command.id, title: command.title, shortcut: shortcut, group: command.group)
+            return Row(id: command.id, title: title(command), shortcut: shortcut, group: command.group)
         } + [Row(id: "scope.n", title: "Account 1–9", shortcut: "⌘1–⌘9", group: .accounts)]
     }
+
+    /// Commands whose keys Settings lets the user change, in registry order: everything in the menus or
+    /// the palette, and keys-only commands like j and k. The account slots get one row of their own.
+    @MainActor
+    static func editable(_ registry: CommandRegistry) -> [Command] {
+        registry.commands.filter { command in
+            guard !command.paletteOnly, command.isVisible(), !(command.id.hasPrefix("scope.") && command.id != "scope.all") else { return false }
+            return !command.hiddenInPalette || command.chord != nil || !(registry.defaultKeys[command.id] ?? []).isEmpty
+        }
+    }
+
+    /// The command's name in shortcut lists. Toggles get one name for both directions.
+    static func title(_ command: Command) -> String { toggleTitles[command.id] ?? command.title }
+
+    /// What the shortcut filter matches: names, aliases and keys.
+    static func searchText(_ command: Command) -> String {
+        ([title(command), command.title] + command.aliases + command.keys.map(\.display) + [command.chord ?? ""])
+            .joined(separator: " ").lowercased()
+    }
+
+    private static let toggleTitles = [
+        "star": "Star or Unstar",
+        "unread": "Mark Read or Unread",
+        "needsReply": "Needs Reply",
+        "splitInbox": "Split Inbox",
+        "toggleSidebar": "Show or Hide Sidebar",
+        "readingPane": "Show or Hide Reading Pane",
+        "appearance.toggle": "Switch Light and Dark",
+        "dimRead": "Dim Old Read Mail",
+        "senderLogos": "Show or Hide Sender Logos",
+        "find": "Find in Conversation or Search",
+    ]
 }
 
 private extension String {

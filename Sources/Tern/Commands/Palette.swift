@@ -131,7 +131,7 @@ final class PaletteController {
         var byGroup: [CommandGroup: [PaletteItem]] = [:]
         var recentItems: [PaletteItem] = []
         aliases = [:]
-        let available = registry.commands.filter { !$0.hiddenInPalette && $0.isVisible() && $0.isEnabled() }
+        let available = registry.commands.filter { !$0.hiddenInPalette && $0.isVisible() && registry.canRun($0) }
         for command in available {
             aliases[command.id] = command.aliases
             let item = PaletteItem(

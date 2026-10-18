@@ -60,6 +60,13 @@ struct KeyShortcut: Hashable {
 
     // MARK: Menus
 
+    /// The modifier mask for a menu item. Uppercase letters and shifted symbols already carry Shift in the
+    /// key equivalent itself.
+    var menuModifiers: NSEvent.ModifierFlags {
+        if case .char(let c) = key, c != c.lowercased() { return modifiers.subtracting(.shift) }
+        return modifiers
+    }
+
     var keyEquivalent: String {
         switch key {
         case .char(let c): c

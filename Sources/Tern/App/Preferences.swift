@@ -82,7 +82,7 @@ enum MarkReadMode: String, CaseIterable, Identifiable {
 final class Preferences {
     static let shared = Preferences()
 
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults: UserDefaults
 
     var appearance: AppearanceMode { didSet { save("appearance", appearance.rawValue); NSApp.appearance = appearance.appearance } }
     var density: Density { didSet { save("density", density.rawValue) } }
@@ -106,8 +106,14 @@ final class Preferences {
     var recentCommands: [String] { didSet { save("recentCommands", recentCommands) } }
     var afterTriage: AfterTriage { didSet { save("afterTriage", afterTriage.rawValue) } }
     var markRead: MarkReadMode { didSet { save("markRead", markRead.rawValue) } }
+    /// The settings section shown last, as a `SettingsSection` raw value.
+    var settingsSection: String { didSet { save("settingsSection", settingsSection) } }
+    /// The user's changes to keyboard shortcuts; only commands whose keys differ from their built-in ones.
+    var shortcutOverrides: ShortcutOverrides { didSet { shortcutOverrides.save(to: defaults) } }
 
-    private init() {
+    /// The app uses `shared`; tests pass a scratch suite.
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .auto
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
@@ -123,6 +129,8 @@ final class Preferences {
         recentCommands = defaults.stringArray(forKey: "recentCommands") ?? []
         afterTriage = AfterTriage(rawValue: defaults.string(forKey: "afterTriage") ?? "") ?? .next
         markRead = MarkReadMode(rawValue: defaults.string(forKey: "markRead") ?? "") ?? .afterDelay
+        settingsSection = defaults.string(forKey: "settingsSection") ?? ""
+        shortcutOverrides = ShortcutOverrides.load(from: defaults)
     }
 
     func noteRecent(_ commandId: String) {

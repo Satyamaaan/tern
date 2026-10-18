@@ -138,11 +138,12 @@ struct TabButton: View {
     }
 
     private var help: String {
+        let title = model.title(for: tab)
         switch tab {
-        case .all: "All  ⌥1"
-        case .needsReply: "Needs reply  ⌥2"
-        case .split(let split): "\(split.title)  ⌥\((InboxSplit.allCases.firstIndex(of: split) ?? 0) + 3)"
-        default: model.title(for: tab)
+        case .all: return model.registry?.hint(title, "tab.all") ?? title
+        case .needsReply: return model.registry?.hint(title, "tab.needsReply") ?? title
+        case .split(let split): return model.registry?.hint(title, "split.\(split.rawValue)") ?? title
+        default: return title
         }
     }
 }
@@ -216,7 +217,7 @@ private struct AddTabButton: View {
         }
         if model.projects.isEmpty { projects.addItem(ClosureMenuItem("No projects yet", enabled: false) {}) }
         projects.addItem(.separator())
-        projects.addItem(ClosureMenuItem("New Project…", key: "p", modifiers: [.command, .shift]) { model.newProject() })
+        projects.addItem(ClosureMenuItem("New Project…", shortcut: model.registry?["newProject"]) { model.newProject() })
         let projectsItem = NSMenuItem(title: "Project", action: nil, keyEquivalent: "")
         projectsItem.image = Icon.folder.image(size: 14)
         projectsItem.submenu = projects
@@ -270,8 +271,8 @@ private struct MoreTabsButton: View {
             menu.addItem(ClosureMenuItem("Unpin “\(model.title(for: active))”") { model.unpin(active) })
             menu.addItem(.separator())
         }
-        menu.addItem(ClosureMenuItem("Mark All as Read", key: "u", modifiers: [.command, .shift], enabled: !model.snapshot.isEmpty) { model.markAllRead() })
-        menu.addItem(ClosureMenuItem("Select All", key: "a", modifiers: .command, enabled: !model.snapshot.isEmpty) { model.selectAll() })
+        menu.addItem(ClosureMenuItem("Mark All as Read", shortcut: model.registry?["markAllRead"], enabled: !model.snapshot.isEmpty) { model.markAllRead() })
+        menu.addItem(ClosureMenuItem("Select All", shortcut: model.registry?["selectAll"], enabled: !model.snapshot.isEmpty) { model.selectAll() })
         menu.addItem(.separator())
         let density = NSMenu()
         for option in Density.allCases {
@@ -285,7 +286,7 @@ private struct MoreTabsButton: View {
         let split = ClosureMenuItem("Split Inbox") { model.setSplitInbox(!model.prefs.splitInbox) }
         split.state = model.prefs.splitInbox ? .on : .off
         menu.addItem(split)
-        let pane = ClosureMenuItem("Reading Pane", key: "\\", modifiers: .command) { model.toggleReadingPane() }
+        let pane = ClosureMenuItem("Reading Pane", shortcut: model.registry?["readingPane"]) { model.toggleReadingPane() }
         pane.state = model.prefs.readingPane ? .on : .off
         menu.addItem(pane)
         return menu
@@ -335,7 +336,7 @@ struct AccountStack: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Switch account (⌘0–⌘9)")
+        .help("Switch account  \(model.registry?["scope.all"]?.shortcutText.map { "\($0), " } ?? "")⌘1–⌘9")
         .opacity(model.accounts.isEmpty ? 0 : 1)
     }
 
@@ -421,6 +422,6 @@ private struct ComposeButton: View {
                     .strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
         }
         .buttonStyle(IconButtonStyle())
-        .help("New message  C")
+        .help(model.registry?.hint("New message", "compose") ?? "New message")
     }
 }

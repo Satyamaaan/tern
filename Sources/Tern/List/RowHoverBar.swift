@@ -9,7 +9,7 @@ struct RowHoverBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            HoverButton(icon: .done, help: "Done (e)") { model.perform(.archive, on: keys) }
+            HoverButton(icon: .done, help: hint("Done", "archive")) { model.perform(.archive, on: keys) }
             Menu {
                 SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
             } label: {
@@ -21,7 +21,7 @@ struct RowHoverBar: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .frame(width: 26, height: 24)
-            .help("Snooze (h)")
+            .help(hint("Snooze", "snooze"))
             HoverButton(icon: .ellipsis, help: "More") {
                 guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
                 // The menu's commands act on the selection, so make the hovered row the selection first.
@@ -33,6 +33,8 @@ struct RowHoverBar: View {
         .environment(model.services)
         .frame(width: ThreadRowView.hoverWidth, height: 24, alignment: .trailing)
     }
+
+    private func hint(_ title: String, _ id: String) -> String { model.registry?.hint(title, id) ?? title }
 }
 
 private struct HoverButton: View {
@@ -74,10 +76,8 @@ enum ThreadMenu {
             let item = NSMenuItem(title: command.displayTitle, action: #selector(MenuTarget.run(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.target = target
             item.representedObject = command.id
-            if let key, case .char(let c) = key.key, c != c.lowercased() { item.keyEquivalentModifierMask = key.modifiers.subtracting(.shift) } else if let key {
-                item.keyEquivalentModifierMask = key.modifiers
-            }
-            item.isEnabled = command.isEnabled()
+            item.keyEquivalentModifierMask = key?.menuModifiers ?? []
+            item.isEnabled = registry.canRun(command)
             menu.addItem(item)
         }
         return menu
@@ -98,8 +98,9 @@ enum ThreadMenu {
         pick.target = target
         pick.representedObject = MenuTarget.Closure { model.snoozeDateFor = keys }
         submenu.addItem(pick)
-        let item = NSMenuItem(title: "Snooze", action: nil, keyEquivalent: "h")
-        item.keyEquivalentModifierMask = []
+        let key = MenuTarget.shared.registry?["snooze"]?.menuKey
+        let item = NSMenuItem(title: "Snooze", action: nil, keyEquivalent: key?.keyEquivalent ?? "")
+        item.keyEquivalentModifierMask = key?.menuModifiers ?? []
         item.submenu = submenu
         return item
     }

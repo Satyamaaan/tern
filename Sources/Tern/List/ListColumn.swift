@@ -266,6 +266,12 @@ final class ClosureMenuItem: NSMenuItem {
         isEnabled = enabled
     }
 
+    /// An item showing `command`'s key as it is now, the way the menu bar does.
+    convenience init(_ title: String, shortcut command: Command?, enabled: Bool = true, _ handler: @escaping @MainActor () -> Void) {
+        let key = command?.menuKey
+        self.init(title, key: key?.keyEquivalent ?? "", modifiers: key?.menuModifiers ?? [], enabled: enabled, handler)
+    }
+
     required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     @objc private func fire() { MainActor.assumeIsolated { handler() } }

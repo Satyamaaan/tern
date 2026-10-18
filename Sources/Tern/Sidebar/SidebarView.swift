@@ -279,7 +279,7 @@ struct SyncStatusLine: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(IconButtonStyle())
-            .help(colorScheme == .dark ? "Switch to Light Appearance (⇧⌘L)" : "Switch to Dark Appearance (⇧⌘L)")
+            .help(model.registry?.hint(colorScheme == .dark ? "Switch to Light Appearance" : "Switch to Dark Appearance", "appearance.toggle") ?? "")
         }
         .font(.ui(12))
         .padding(.leading, 18)

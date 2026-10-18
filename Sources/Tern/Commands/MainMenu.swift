@@ -1,6 +1,7 @@
 import AppKit
 
-/// The menu bar, built from the command registry so it always matches the palette and the keyboard.
+/// The menu bar, built from the command registry so it always matches the palette and the keyboard. The app
+/// builds it again whenever a shortcut changes.
 @MainActor
 final class MainMenu: NSObject, NSMenuItemValidation {
     private let registry: CommandRegistry
@@ -87,16 +88,10 @@ final class MainMenu: NSObject, NSMenuItemValidation {
             let item = NSMenuItem(title: command.title, action: #selector(runCommand(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.target = self
             item.representedObject = command.id
-            if let key { item.keyEquivalentModifierMask = key.modifiers.subtracting(Self.impliedShift(key)) }
+            if let key { item.keyEquivalentModifierMask = key.menuModifiers }
             if let chord = command.chord { item.toolTip = "Shortcut: \(chord)" }
             menu.addItem(item)
         }
-    }
-
-    /// Uppercase letters and shifted symbols already carry Shift in the key equivalent itself.
-    private static func impliedShift(_ key: KeyShortcut) -> NSEvent.ModifierFlags {
-        if case .char(let c) = key.key, c != c.lowercased() { return .shift }
-        return []
     }
 
     @objc private func runCommand(_ sender: NSMenuItem) {
@@ -109,7 +104,7 @@ final class MainMenu: NSObject, NSMenuItemValidation {
         guard let id = item.representedObject as? String, let command = registry[id] else { return true }
         item.title = command.displayTitle
         item.isHidden = !command.isVisible()
-        return command.isEnabled()
+        return registry.canRun(command)
     }
 }
 

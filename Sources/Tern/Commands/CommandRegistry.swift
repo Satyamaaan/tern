@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import TernCore
 
 /// Window-level actions the registry needs from the app delegate.
@@ -14,30 +15,61 @@ protocol ShellActions: AnyObject {
 }
 
 /// Builds every command once. Closures read the model at run time, so titles and enabled states stay current.
+/// Keys are the built-in ones with the user's overrides on top; views that show shortcuts read them from
+/// here, so they follow an edit at once.
 @MainActor
+@Observable
 final class CommandRegistry {
     private(set) var commands: [Command] = []
-    private var byId: [String: Command] = [:]
-    let model: AppModel
-    weak var shell: ShellActions?
+    /// The user's shortcut changes, applied over `defaultKeys`.
+    private(set) var overrides: ShortcutOverrides
+    @ObservationIgnored private var index: [String: Int] = [:]
+    /// Each command's built-in keys.
+    @ObservationIgnored private(set) var defaultKeys: [String: [KeyShortcut]] = [:]
+    /// Persists overrides; the app writes them to `Preferences`.
+    @ObservationIgnored var saveOverrides: (ShortcutOverrides) -> Void
+    @ObservationIgnored let model: AppModel
+    @ObservationIgnored weak var shell: ShellActions?
 
-    init(model: AppModel, shell: ShellActions?) {
+    /// Posted after any shortcut changes, so the menu bar and key routing rebuild.
+    static let shortcutsDidChange = Notification.Name("TernShortcutsDidChange")
+
+    /// `overrides` defaults to the saved ones; passing them (tests) leaves the saved ones alone.
+    init(model: AppModel, shell: ShellActions?, overrides: ShortcutOverrides? = nil) {
         self.model = model
         self.shell = shell
+        self.overrides = overrides ?? model.prefs.shortcutOverrides
+        saveOverrides = overrides == nil ? { [weak model] in model?.prefs.shortcutOverrides = $0 } : { _ in }
         commands = makeCommands()
-        byId = Dictionary(uniqueKeysWithValues: commands.map { ($0.id, $0) })
+        index = Dictionary(uniqueKeysWithValues: commands.enumerated().map { ($1.id, $0) })
+        defaultKeys = Dictionary(uniqueKeysWithValues: commands.map { ($0.id, $0.keys) })
+        applyOverrides()
     }
 
-    subscript(id: String) -> Command? { byId[id] }
+    subscript(id: String) -> Command? { index[id].map { commands[$0] } }
 
     func run(_ id: String) {
-        guard let command = byId[id], command.isEnabled() else { return }
+        guard let command = self[id], canRun(command) else { return }
         command.run()
     }
 
-    /// Commands with a bare-key shortcut, for `KeyRouter`.
-    var bareKeyCommands: [Command] { commands.filter { $0.keys.contains(where: \.isBare) } }
-    var chordCommands: [Command] { commands.filter { $0.chord != nil } }
+    /// Enabled, and not something that acts on mail while the settings page hides it.
+    func canRun(_ command: Command) -> Bool {
+        (!model.settingsOpen || command.availableInSettings) && command.isEnabled()
+    }
+
+    /// "Title  key" for a tooltip, with the command's shortcut as it is now.
+    func hint(_ title: String, _ id: String) -> String {
+        guard let shortcut = self[id]?.shortcutText else { return title }
+        return "\(title)  \(shortcut)"
+    }
+
+    private func applyOverrides() {
+        for offset in commands.indices {
+            let id = commands[offset].id
+            commands[offset].keys = overrides.keys[id] ?? defaultKeys[id] ?? []
+        }
+    }
 
     // MARK: The list
 
@@ -214,9 +246,9 @@ final class CommandRegistry {
             Command(id: "nextMessage", title: "Next Message", group: .goTo, keys: [.key("n")], menu: .go, section: 2,
                     isEnabled: reading) { reader.nextMessage() },
             Command(id: "previousMessage", title: "Previous Message", group: .goTo, keys: [.key("p")], menu: .go, section: 2,
-                    isEnabled: { reading() && m.focus == .reader }) { reader.previousMessage() },
+                    readerOnly: true, isEnabled: { reading() && m.focus == .reader }) { reader.previousMessage() },
             Command(id: "quickLook", title: "Quick Look Attachment", group: .actions, keys: [.special(.space)], menu: .message, section: 4,
-                    aliases: ["preview"], isEnabled: { reading() && m.focus == .reader }) { reader.quickLook() },
+                    aliases: ["preview"], readerOnly: true, isEnabled: { reading() && m.focus == .reader }) { reader.quickLook() },
             Command(id: "summarize", title: "Summarize", group: .actions, keys: [.command("s", shift: true)], menu: .message, section: 4,
                     aliases: ["tl;dr", "ai"], isEnabled: { reading() && m.services.ai != nil }) { reader.summarize() },
             Command(id: "showOriginal", title: "Show Original", group: .actions, menu: .message, section: 4,
@@ -252,6 +284,76 @@ final class CommandRegistry {
                                 paletteOnly: true) { [weak self] in self?.shell?.showSettings(section) })
         }
         return list
+    }
+}
+
+// MARK: - Shortcut changes
+
+extension CommandRegistry {
+    /// Whether the user changed the command's keys.
+    func isCustomized(_ id: String) -> Bool { overrides.keys[id] != nil }
+
+    /// Commands that already use `shortcut` where `id`'s keys act too.
+    func conflicts(_ shortcut: KeyShortcut, for id: String) -> [Command] {
+        guard let command = self[id] else { return [] }
+        return commands.filter { $0.id != id && $0.keys.contains(shortcut) && $0.keyScope.overlaps(command.keyScope) }
+    }
+
+    /// Puts `shortcut` in place of the key at `slot` (or after the others when `slot` is nil) and takes it
+    /// away from every command it conflicted with.
+    func assign(_ shortcut: KeyShortcut, to id: String, replacing slot: Int?) {
+        guard let command = self[id] else { return }
+        var next = overrides
+        for other in conflicts(shortcut, for: id) {
+            next.keys[other.id] = Self.delta(other.keys.filter { $0 != shortcut }, defaults: defaultKeys[other.id])
+        }
+        var keys = command.keys
+        if let slot, keys.indices.contains(slot) { keys[slot] = shortcut } else { keys.append(shortcut) }
+        next.keys[id] = Self.delta(Self.unique(keys), defaults: defaultKeys[id])
+        update(next)
+    }
+
+    /// Removes one of the command's keys. It still runs from the menus and ⌘K.
+    func removeKey(at slot: Int, from id: String) {
+        guard var keys = self[id]?.keys, keys.indices.contains(slot) else { return }
+        keys.remove(at: slot)
+        var next = overrides
+        next.keys[id] = Self.delta(keys, defaults: defaultKeys[id])
+        update(next)
+    }
+
+    /// Back to the built-in keys, taking them from any command the user gave them to since.
+    func resetKeys(for id: String) {
+        var next = overrides
+        next.keys[id] = nil
+        for key in defaultKeys[id] ?? [] {
+            for other in conflicts(key, for: id) {
+                next.keys[other.id] = Self.delta(other.keys.filter { $0 != key }, defaults: defaultKeys[other.id])
+            }
+        }
+        update(next)
+    }
+
+    func resetAllKeys() { update(ShortcutOverrides()) }
+
+    /// Puts back a whole set of changes saved earlier (snapshots and the self-check leave the user's own).
+    func restore(_ saved: ShortcutOverrides) { update(saved) }
+
+    private func update(_ next: ShortcutOverrides) {
+        guard next != overrides else { return }
+        overrides = next
+        applyOverrides()
+        saveOverrides(next)
+        NotificationCenter.default.post(name: Self.shortcutsDidChange, object: self)
+    }
+
+    /// The override to store: nil when the keys are the built-in ones.
+    private static func delta(_ keys: [KeyShortcut], defaults: [KeyShortcut]?) -> [KeyShortcut]? {
+        keys == (defaults ?? []) ? nil : keys
+    }
+
+    private static func unique(_ keys: [KeyShortcut]) -> [KeyShortcut] {
+        keys.reduce(into: []) { result, key in if !result.contains(key) { result.append(key) } }
     }
 }
 
