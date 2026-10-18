@@ -64,6 +64,7 @@ swift test                      # all tests (keep them green)
 swift run tern-seed             # (re)writes ~/Library/Application Support/Tern/Tern-Fake.sqlite
 ./build.sh --debug              # build/Tern.app
 open build/Tern.app --args --fake   # run against the fake mailbox (also TERN_FAKE=1)
+scripts/release.sh              # Developer ID signed, notarized build/Tern-<version>.dmg (see the script's header)
 ```
 
 UI work should run against the fake mailbox. Don't drive the UI with osascript clicks or keystrokes while

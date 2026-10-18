@@ -23,6 +23,11 @@ background.
   about ten minutes: [docs/google-setup.md](docs/google-setup.md).
 - Optional, for AI: the `codex` or `claude` CLI, signed in.
 
+## Download
+
+Notarized builds for Apple Silicon Macs are on the [Releases](https://github.com/dhruvalgolakiya/tern/releases) page:
+open the disk image and drag Tern to Applications. You still bring your own Google OAuth client (below).
+
 ## Build and run
 
 ```sh
@@ -39,6 +44,7 @@ swift build                           # everything
 TERN_SKIP_PERF=1 swift test           # all tests
 swift run tern-seed                   # writes a 50,000-message fake mailbox
 open build/Tern.app --args --fake     # run against it (build with ./build.sh --debug first)
+scripts/release.sh                    # notarized build/Tern-<version>.dmg (needs a Developer ID; see the script)
 ```
 
 `CLAUDE.md` describes the architecture and the rules the code follows. The visual spec is
