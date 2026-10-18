@@ -445,27 +445,27 @@
     if (hoverHref !== null) { hoverHref = null; post({ type: 'hover', href: null }); }
   });
 
+  // The keys of Next and Previous Message, Open and Quick Look as the user has them, by event.key name
+  // ("n", "Enter", "Shift+Tab"); the app sends them with Tern.setKeys.
+  let keys = {};
+
   document.addEventListener('keydown', (event) => {
     if (!state || event.metaKey || event.ctrlKey || event.altKey) return;
     const active = pathOf(event)[0];
     if (active && (active.isContentEditable || /^(input|textarea|select)$/i.test(active.localName))) return;
     const attachment = active && active.dataset && active.dataset.att ? active : null;
     if (event.key === 'Enter' && active && linkIn([active])) return;
-    switch (event.key) {
-      case 'n': move(1); break;
-      case 'p': move(-1); break;
-      case 'Enter': case 'o':
+    switch (keys[(event.shiftKey && !/^[^ ]$/.test(event.key) ? 'Shift+' : '') + event.key]) {
+      case 'next': move(1); break;
+      case 'previous': move(-1); break;
+      case 'open':
         if (attachment) { post({ type: 'attachment', action: 'open', id: attachment.dataset.att }); break; }
         if (active && active.classList && active.classList.contains('tern-quote-toggle')) { active.click(); break; }
         toggleFocused();
         break;
-      case ' ':
+      case 'quicklook':
         if (!attachment) return;
         post({ type: 'attachment', action: 'quicklook', id: attachment.dataset.att });
-        break;
-      case 'r': case 'a': case 'f':
-        if (event.shiftKey) return;
-        post({ type: 'key', key: event.key });
         break;
       default:
         return;
@@ -519,6 +519,7 @@
       }
     },
     setTheme(theme) { document.documentElement.dataset.theme = theme; },
+    setKeys(map) { keys = map || {}; },
     next() { move(1); },
     previous() { move(-1); },
     toggleFocused,

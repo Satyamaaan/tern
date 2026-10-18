@@ -137,6 +137,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         window.makeFirstResponder(table)
     }
 
+    var window: NSWindow? { table.window }
+
     func selectionDidChange(scrollTo key: ThreadKey?) {
         refreshVisibleRows()
         if let key, let index = snapshot.itemIndex[key] { reveal(index) }

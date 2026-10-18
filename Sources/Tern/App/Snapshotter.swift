@@ -3,7 +3,7 @@ import SwiftUI
 import TernCore
 
 /// `--snapshot <dir>`: renders the main window at 1320×840 (the list in light and dark, the ⌘K palette, the
-/// reader over the list, search, an inline reply, settings and onboarding) into PNGs, prints speed measurements,
+/// reader over the list, search, an inline reply, the settings page and onboarding) into PNGs, prints speed measurements,
 /// and quits. WebKit only paints into a window on screen, so after the launch and j/k measurements the
 /// window is ordered in at 1 % opacity and click-through, without activating the app: nothing shows.
 @MainActor
@@ -111,14 +111,10 @@ struct Snapshotter {
         model.toggleReadingPane()
         window.setContentSize(size)
 
+        settingsShots(window, directory)
+
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-light.png"), dark: false)
         standalone(InboxZeroView(cleared: 23), size: NSSize(width: 452, height: 560), to: directory.appendingPathComponent("inbox-zero-dark.png"), dark: true)
-        let settings = SettingsState(model: model, shell: nil)
-        for section in [SettingsSection.accounts, .ai, .appearance] {
-            settings.section = section
-            standalone(SettingsView(state: settings).environment(model).environment(model.services),
-                       size: NSSize(width: 760, height: 540), to: directory.appendingPathComponent("settings-\(section.rawValue)-light.png"), dark: false)
-        }
         standalone(OnboardingView(onFinish: {}, onDemo: {}).environment(model).environment(model.services),
                    size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("onboarding-light.png"), dark: false)
         standalone(OnboardingView(onFinish: {}, onDemo: {}).environment(model).environment(model.services),

@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Onboarding's Accounts, AI and Done steps and Settings → AI, with made-up CLI statuses: the real CLIs never run
-// in snapshots.
+// Onboarding's Accounts, AI and Done steps, with made-up CLI statuses: the real CLIs never run in snapshots.
 extension Snapshotter {
     func onboardingShots(_ directory: URL) {
         let services = model.services
@@ -27,15 +26,6 @@ extension Snapshotter {
         services.aiAvailability = Self.fakeAvailability(claude: .ready, codex: .signedOut)
         onboarding("onboarding-done", step: 3)
 
-        let settings = SettingsState(model: model, shell: nil)
-        settings.section = .ai
-        for provider in [AIProvider.claude, .codex, .off] {
-            settings.provider = provider
-            for dark in [false, true] {
-                standalone(SettingsView(state: settings).environment(model).environment(services), size: NSSize(width: 760, height: 540),
-                           to: directory.appendingPathComponent("settings-ai-\(provider.rawValue)-\(dark ? "dark" : "light").png"), dark: dark)
-            }
-        }
         services.aiAvailability = availability
     }
 

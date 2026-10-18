@@ -1,0 +1,174 @@
+import SwiftUI
+
+/// Every setting the page shows, in display order: a section lists its own, and the search field above
+/// the sections finds them across all of them.
+enum SettingsItem: String, CaseIterable, Identifiable {
+    case accounts, googleClient
+    case markRead, afterTriage, remoteImages, undoSend, signatures, sendFrom
+    case theme, density, dimRead, senderLogos
+    case readingPane, sidebar, splitInbox, pinnedTabs
+    case notifications, notifyImportant
+    case aiAbout, aiProvider, aiModel, aiProjects
+    case shortcuts
+    case updates, database, searchIndex, demoMail
+
+    var id: String { rawValue }
+
+    var section: SettingsSection {
+        switch self {
+        case .accounts, .googleClient: .accounts
+        case .markRead, .afterTriage, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
+        case .theme, .density, .dimRead, .senderLogos: .appearance
+        case .readingPane, .sidebar, .splitInbox, .pinnedTabs: .layout
+        case .notifications, .notifyImportant: .notifications
+        case .aiAbout, .aiProvider, .aiModel, .aiProjects: .ai
+        case .shortcuts: .shortcuts
+        case .updates, .database, .searchIndex, .demoMail: .advanced
+        }
+    }
+
+    /// The small caps the item sits under in its section.
+    var group: String? {
+        switch self {
+        case .markRead, .afterTriage, .remoteImages: "Reading"
+        case .undoSend, .signatures, .sendFrom: "Writing"
+        case .readingPane, .sidebar: "Window"
+        case .splitInbox, .pinnedTabs: "Tabs"
+        default: nil
+        }
+    }
+
+    /// What search matches: the row's title and the words someone might type for it.
+    var searchText: String {
+        let words: String = switch self {
+        case .accounts: "accounts gmail add remove sign in workspace"
+        case .googleClient: "google client oauth id secret cloud"
+        case .markRead: "mark as read unread open delay"
+        case .afterTriage: "after archive delete trash snooze next previous auto advance"
+        case .remoteImages: "remote images trusted senders privacy load pictures"
+        case .undoSend: "undo send delay cancel"
+        case .signatures: "signature"
+        case .sendFrom: "send new mail from default account compose"
+        case .theme: "theme light dark appearance mode"
+        case .density: "density compact comfortable rows"
+        case .dimRead: "dim old read mail fade"
+        case .senderLogos: "sender logos avatars icons favicons"
+        case .readingPane: "reading pane split view side by side"
+        case .sidebar: "sidebar mailboxes projects"
+        case .splitInbox: "split inbox categories important people newsletters"
+        case .pinnedTabs: "pinned tabs pin unpin reorder"
+        case .notifications: "notifications new mail banners alerts"
+        case .notifyImportant: "only important notifications"
+        case .aiAbout: "ai privacy provider"
+        case .aiProvider: "ai provider claude code codex"
+        case .aiModel: "ai model"
+        case .aiProjects: "suggest projects ai"
+        case .shortcuts: "shortcuts keys"
+        case .updates: "update version automatically check"
+        case .database: "database finder"
+        case .searchIndex: "search index rebuild"
+        case .demoMail: "demo mail reset"
+        }
+        return "\(words) \(section.title)".lowercased()
+    }
+
+    @MainActor
+    func isShown(in model: AppModel) -> Bool {
+        switch self {
+        case .sendFrom: model.accounts.count > 1
+        case .demoMail: model.isFake
+        default: true
+        }
+    }
+
+    @MainActor
+    static func items(in section: SettingsSection, model: AppModel) -> [SettingsItem] {
+        allCases.filter { $0.section == section && $0.isShown(in: model) }
+    }
+}
+
+/// Search across sections: every word must match.
+enum SettingsCatalog {
+    @MainActor
+    static func results(for query: String, model: AppModel) -> [SettingsItem] {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return [] }
+        return SettingsItem.allCases.filter { item in
+            item != .shortcuts && item.isShown(in: model) && words.allSatisfy { matches(String($0), in: item.searchText) }
+        }
+    }
+
+    /// A word matches when a word of `text` starts with it; keys and symbols ("⇧r", "⌘k") match anywhere.
+    static func matches(_ word: String, in text: String) -> Bool {
+        guard word.allSatisfy({ $0.isLetter || $0.isNumber }) else { return text.contains(word) }
+        return text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { $0.hasPrefix(word) }
+    }
+
+    /// Commands whose title or keys match, for the Shortcuts part of the results.
+    @MainActor
+    static func commands(for query: String, registry: CommandRegistry?) -> [Command] {
+        let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty, let registry else { return [] }
+        return ShortcutTable.editable(registry).filter { command in
+            let text = ShortcutTable.searchText(command)
+            return words.allSatisfy { matches($0, in: text) }
+        }
+    }
+}
+
+/// One item as its section shows it.
+struct SettingsItemView: View {
+    let item: SettingsItem
+    let state: SettingsState
+
+    var body: some View {
+        switch item {
+        case .accounts: AccountsItem(state: state)
+        case .googleClient: GoogleClientSection(startEditing: state.editsGoogleClient).padding(.top, 16)
+        case .markRead: MarkReadItem()
+        case .afterTriage: AfterTriageItem()
+        case .remoteImages: RemoteImagesItem(state: state)
+        case .undoSend: UndoSendItem(state: state)
+        case .signatures: SignaturesItem(state: state)
+        case .sendFrom: SendFromItem(state: state)
+        case .theme: ThemeItem()
+        case .density: DensityItem()
+        case .dimRead: DimReadItem()
+        case .senderLogos: SenderLogoSettingsRow()
+        case .readingPane: ReadingPaneItem()
+        case .sidebar: SidebarItem()
+        case .splitInbox: SplitInboxItem()
+        case .pinnedTabs: PinnedTabsItem()
+        case .notifications: NotificationsItem()
+        case .notifyImportant: NotifyImportantItem()
+        case .aiAbout: AIAboutItem()
+        case .aiProvider: AIProviderItem(state: state)
+        case .aiModel: AIModelItem(state: state)
+        case .aiProjects: AIProjectsItem(state: state)
+        case .shortcuts: ShortcutSettings(state: state)
+        case .updates: UpdateSettingsRows(updater: state.updater)
+        case .database: DatabaseItem()
+        case .searchIndex: SearchIndexItem(state: state)
+        case .demoMail: DemoMailItem(state: state)
+        }
+    }
+}
+
+/// A list of items with their group caps.
+struct SettingsItemList: View {
+    let items: [SettingsItem]
+    let state: SettingsState
+    /// Results across sections show no group caps; the section heads them.
+    var showsGroups = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element) { offset, item in
+                if showsGroups, let group = item.group, offset == 0 || items[offset - 1].group != group {
+                    SettingsGroupHeader(title: group, first: offset == 0)
+                }
+                SettingsItemView(item: item, state: state)
+            }
+        }
+    }
+}

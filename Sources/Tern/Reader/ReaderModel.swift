@@ -259,13 +259,6 @@ final class ReaderModel {
             attachmentEvent(message)
         case "summary":
             summaryClicked()
-        case "key":
-            switch message["key"] as? String {
-            case "r": reply(all: false)
-            case "a": reply(all: true)
-            case "f": forward()
-            default: break
-            }
         default:
             break
         }
@@ -305,6 +298,16 @@ final class ReaderModel {
         guard let detail, let key, let message = detail.messages.first(where: { $0.id == messageId }) else { return }
         Self.loadedMessages.insert(message.key)
         receive(detail, for: key)
+    }
+
+    /// Settings → Mail took a sender off the list: their images are blocked again in every reader.
+    static func forgetTrustedSender(_ sender: String) {
+        trustedSenders?.remove(sender.lowercased())
+    }
+
+    /// Settings → Mail couldn't save taking a sender off the list, so they stay trusted.
+    static func rememberTrustedSender(_ sender: String) {
+        trustedSenders?.insert(sender.lowercased())
     }
 
     /// "Always load from …": every message from this sender, except in Spam.
@@ -617,7 +620,8 @@ final class ReaderModel {
         if findText.isEmpty { openFind() } else { find(backwards: backwards) }
     }
 
-    /// Gives the page the keyboard, so n/p, Enter, Space and arrows work inside the conversation.
+    /// Gives the page the keyboard, so the message keys (n, p, Enter, Space as built), Tab and the arrows work
+    /// inside the conversation.
     func focusPage() {
         let webView = engine.webView
         guard let window = webView.window, window.firstResponder !== webView else { return }

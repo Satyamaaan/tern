@@ -1,6 +1,7 @@
 import AppKit
 
-/// The menu bar, built from the command registry so it always matches the palette and the keyboard.
+/// The menu bar, built from the command registry so it always matches the palette and the keyboard. The app
+/// builds it again whenever a shortcut changes.
 @MainActor
 final class MainMenu: NSObject, NSMenuItemValidation {
     private let registry: CommandRegistry
@@ -11,6 +12,7 @@ final class MainMenu: NSObject, NSMenuItemValidation {
 
     func build() -> NSMenu {
         let main = BareKeySafeMenu(title: "Main Menu")
+        main.leavesToText = { [registry] event in registry.leavesToText(event, in: event.window ?? NSApp.keyWindow) }
         for name in MenuName.allCases {
             let menu = NSMenu(title: name.rawValue)
             switch name {
@@ -87,16 +89,10 @@ final class MainMenu: NSObject, NSMenuItemValidation {
             let item = NSMenuItem(title: command.title, action: #selector(runCommand(_:)), keyEquivalent: key?.keyEquivalent ?? "")
             item.target = self
             item.representedObject = command.id
-            if let key { item.keyEquivalentModifierMask = key.modifiers.subtracting(Self.impliedShift(key)) }
+            if let key { item.keyEquivalentModifierMask = key.menuModifiers }
             if let chord = command.chord { item.toolTip = "Shortcut: \(chord)" }
             menu.addItem(item)
         }
-    }
-
-    /// Uppercase letters and shifted symbols already carry Shift in the key equivalent itself.
-    private static func impliedShift(_ key: KeyShortcut) -> NSEvent.ModifierFlags {
-        if case .char(let c) = key.key, c != c.lowercased() { return .shift }
-        return []
     }
 
     @objc private func runCommand(_ sender: NSMenuItem) {
@@ -109,16 +105,19 @@ final class MainMenu: NSObject, NSMenuItemValidation {
         guard let id = item.representedObject as? String, let command = registry[id] else { return true }
         item.title = command.displayTitle
         item.isHidden = !command.isVisible()
-        return command.isEnabled()
+        return registry.canRun(command)
     }
 }
 
 /// Main menu that leaves bare keys alone. Menu items show shortcuts like `e` or `⇧R`, but those keys
 /// must never fire while someone types in a text field, so only ⌘ and ⌃ combinations match here;
-/// `KeyRouter` handles bare keys itself.
+/// `KeyRouter` handles bare keys itself. While a text field has the keyboard, the ⌘ and ⌃ keys of commands
+/// that act on mail don't match either (`CommandRegistry.leavesToText`).
 final class BareKeySafeMenu: NSMenu {
+    var leavesToText: (NSEvent) -> Bool = { _ in false }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard !event.modifierFlags.isDisjoint(with: [.command, .control]) else { return false }
+        guard !event.modifierFlags.isDisjoint(with: [.command, .control]), !leavesToText(event) else { return false }
         return super.performKeyEquivalent(with: event)
     }
 }

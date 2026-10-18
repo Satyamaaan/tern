@@ -32,6 +32,49 @@ enum Density: String, CaseIterable, Identifiable {
     var title: String { rawValue.capitalized }
 }
 
+/// Where the cursor goes when the open conversation leaves the list (archive, delete, snooze, move).
+enum AfterTriage: String, CaseIterable, Identifiable {
+    /// The conversation below it, else the one above.
+    case next
+    /// The conversation above it, else the one below.
+    case previous
+    /// Like `next`, and the conversation open over the list closes.
+    case list
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .next: "Next"
+        case .previous: "Previous"
+        case .list: "Back to list"
+        }
+    }
+}
+
+/// When a conversation on screen counts as read.
+enum MarkReadMode: String, CaseIterable, Identifiable {
+    /// As soon as it is on screen, also when moving onto it with j or k.
+    case instantly
+    /// Opening marks it read at once; moving onto it with j or k waits a moment, so skimming doesn't.
+    case afterDelay
+    /// Never by itself; the user marks it read.
+    case manually
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .instantly: "Instantly"
+        case .afterDelay: "After a moment"
+        case .manually: "Manually"
+        }
+    }
+
+    /// How long a conversation reached with j or k stays on screen before it is marked read.
+    static let dwell: TimeInterval = 1.5
+}
+
 /// Interface preferences, stored in UserDefaults so they apply before the database opens.
 /// Mail-related settings shared with other lanes (AI) live in the database `setting` table.
 @MainActor
@@ -39,7 +82,7 @@ enum Density: String, CaseIterable, Identifiable {
 final class Preferences {
     static let shared = Preferences()
 
-    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let defaults: UserDefaults
 
     var appearance: AppearanceMode { didSet { save("appearance", appearance.rawValue); NSApp.appearance = appearance.appearance } }
     var density: Density { didSet { save("density", density.rawValue) } }
@@ -61,8 +104,16 @@ final class Preferences {
     var moreExpanded: Bool { didSet { save("moreExpanded", moreExpanded) } }
     /// Palette command ids, most recent first.
     var recentCommands: [String] { didSet { save("recentCommands", recentCommands) } }
+    var afterTriage: AfterTriage { didSet { save("afterTriage", afterTriage.rawValue) } }
+    var markRead: MarkReadMode { didSet { save("markRead", markRead.rawValue) } }
+    /// The settings section shown last, as a `SettingsSection` raw value.
+    var settingsSection: String { didSet { save("settingsSection", settingsSection) } }
+    /// The user's changes to keyboard shortcuts; only commands whose keys differ from their built-in ones.
+    var shortcutOverrides: ShortcutOverrides { didSet { shortcutOverrides.save(to: defaults) } }
 
-    private init() {
+    /// The app uses `shared`; tests pass a scratch suite.
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .auto
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
@@ -76,6 +127,10 @@ final class Preferences {
         pinnedTabs = defaults.stringArray(forKey: "pinnedTabs") ?? []
         moreExpanded = defaults.bool(forKey: "moreExpanded")
         recentCommands = defaults.stringArray(forKey: "recentCommands") ?? []
+        afterTriage = AfterTriage(rawValue: defaults.string(forKey: "afterTriage") ?? "") ?? .next
+        markRead = MarkReadMode(rawValue: defaults.string(forKey: "markRead") ?? "") ?? .afterDelay
+        settingsSection = defaults.string(forKey: "settingsSection") ?? ""
+        shortcutOverrides = ShortcutOverrides.load(from: defaults)
     }
 
     func noteRecent(_ commandId: String) {

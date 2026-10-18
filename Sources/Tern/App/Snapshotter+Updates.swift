@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-// The update card in each phase, the move-to-Applications prompt and Settings → Advanced, as release builds show
-// them. Sparkle isn't involved: the cards are fed fixed phases.
+// The update card in each phase and the move-to-Applications prompt, as release builds show them. Sparkle isn't
+// involved: the cards are fed fixed phases.
 extension Snapshotter {
     func updateShots(_ directory: URL) {
         let notes = ReleaseNotes(lines: [
@@ -42,16 +42,6 @@ extension Snapshotter {
             for dark in [false, true] {
                 card(MovePromptCard(model: model), to: directory.appendingPathComponent("\(name)-\(dark ? "dark" : "light").png"), dark: dark)
             }
-        }
-
-        let settings = SettingsState(model: model, shell: nil)
-        settings.section = .advanced
-        standalone(SettingsView(state: settings).environment(model).environment(model.services), size: NSSize(width: 760, height: 540),
-                   to: directory.appendingPathComponent("settings-advanced-dev-light.png"), dark: false)
-        settings.updater = Updater.preview()
-        for dark in [false, true] {
-            standalone(SettingsView(state: settings).environment(model).environment(model.services), size: NSSize(width: 760, height: 540),
-                       to: directory.appendingPathComponent("settings-advanced-\(dark ? "dark" : "light").png"), dark: dark)
         }
     }
 

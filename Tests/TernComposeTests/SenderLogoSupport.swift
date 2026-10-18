@@ -94,7 +94,8 @@ final class LogoWebProtocol: URLProtocol, @unchecked Sendable {
 // MARK: - A fetcher the test drives
 
 /// Fetches nothing: each call waits until the test releases its domain, then returns the domain's
-/// planned result (`.none` unless set). Records how many ran at once.
+/// planned result (`.none` unless set). Records how many ran at once, and lets a test wait for the
+/// next calls to begin (`started(count:)`) instead of for a while.
 final class GatedFetcher: LogoFetching {
     private struct State {
         var started: [String] = []
@@ -104,6 +105,7 @@ final class GatedFetcher: LogoFetching {
         var released: Set<String> = []
         var waiting: [String: CheckedContinuation<Void, Never>] = [:]
         var results: [String: LogoFetchResult] = [:]
+        var watchers: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     }
 
     private let state = Mutex(State())
@@ -119,11 +121,13 @@ final class GatedFetcher: LogoFetching {
     var maxActive: Int { state.withLock { $0.maxActive } }
 
     func fetch(_ domain: String) async -> LogoFetchResult {
-        state.withLock { state in
+        let reached = state.withLock { state in
             state.started.append(domain)
             state.active += 1
             state.maxActive = max(state.maxActive, state.active)
+            return Self.takeReached(&state)
         }
+        reached.forEach { $0.resume() }
         await withCheckedContinuation { continuation in
             let go = state.withLock { state -> Bool in
                 if state.open || state.released.contains(domain) { return true }
@@ -136,6 +140,25 @@ final class GatedFetcher: LogoFetching {
             state.active -= 1
             return state.results[domain] ?? .none
         }
+    }
+
+    /// Returns once `count` fetches have begun (at once if they have).
+    func started(count: Int) async {
+        await withCheckedContinuation { continuation in
+            let reached = state.withLock { state -> Bool in
+                if state.started.count >= count { return true }
+                state.watchers.append((count, continuation))
+                return false
+            }
+            if reached { continuation.resume() }
+        }
+    }
+
+    private static func takeReached(_ state: inout State) -> [CheckedContinuation<Void, Never>] {
+        let count = state.started.count
+        let reached = state.watchers.filter { $0.count <= count }.map(\.continuation)
+        state.watchers.removeAll { $0.count <= count }
+        return reached
     }
 
     func release(_ domain: String) {
@@ -164,6 +187,13 @@ final class LogoSwitch {
 }
 
 // MARK: - Helpers
+
+/// Returns once `condition` holds, checking again after other work has had a turn. There is no deadline to
+/// race: a test that uses this sets a time limit, which only a real hang reaches.
+@MainActor
+func settled(_ condition: () -> Bool) async {
+    while !condition() { try? await Task.sleep(for: .milliseconds(1)) }
+}
 
 @MainActor
 func eventually(_ seconds: Double = 5, _ condition: () -> Bool) async -> Bool {

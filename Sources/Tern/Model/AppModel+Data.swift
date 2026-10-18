@@ -59,21 +59,32 @@ extension AppModel {
     private func receive(accounts: [Account]) {
         self.accounts = accounts
         services.accounts = accounts
-        if let id = scope.accountId, !accounts.contains(where: { $0.id == id }) { setScope(.all) }
+        // The account in scope was removed (Settings → Accounts): all accounts, keeping the place.
+        if let id = scope.accountId, !accounts.contains(where: { $0.id == id }) { setScope(.all, keepingPlace: true) }
     }
 
     // MARK: The list
 
-    /// Starts reading a different list (mailbox, scope or split changed).
-    func reloadList() {
-        source = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
-        limit = Self.pageSize
-        hidden = [:]
+    /// Starts reading a different list (mailbox, scope or split changed), from its first row. With
+    /// `keepingPlace` (a setting changed under the open thread, like Split Inbox) the cursor and the selection
+    /// stay on the threads the new list still has, so the open thread stays open as it was, and the same list
+    /// isn't read again at all.
+    func reloadList(keepingPlace: Bool = false) {
+        let next = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
+        if keepingPlace, next == source, listLoaded { return }
+        source = next
         pendingCursor = nil
-        checked = []
-        cursor = nil
         listLoaded = false
-        observeRows(immediate: true)
+        if keepingPlace {
+            // Rows the user scrolled to stay read, and threads still being triaged stay out.
+            limit = max(limit, Self.pageSize)
+        } else {
+            limit = Self.pageSize
+            hidden = [:]
+            checked = []
+            cursor = nil
+        }
+        observeRows(immediate: true, keepingPlace: keepingPlace)
     }
 
     /// Infinite scroll: read another page when the user nears the end.
@@ -85,7 +96,7 @@ extension AppModel {
         observeRows(immediate: false)
     }
 
-    private func observeRows(immediate: Bool) {
+    private func observeRows(immediate: Bool, keepingPlace: Bool = false) {
         let source = self.source
         let limit = self.limit
         let signpost = Timing.begin("list")
@@ -99,7 +110,7 @@ extension AppModel {
             self.rawRows = rows
             if self.hasMore != (rows.count >= limit) { self.hasMore = rows.count >= limit }
             if first { self.listLoaded = true }
-            if !self.isSearching { self.rebuildSnapshot(first ? .reset : .none) }
+            if !self.isSearching { self.rebuildSnapshot(first && !keepingPlace ? .reset : .none, keepingPlace: first && keepingPlace) }
             if first, let done = self.onFirstRows { self.onFirstRows = nil; done() }
         }
         let reader = store.database.reader
@@ -109,8 +120,9 @@ extension AppModel {
     }
 
     /// Recomputes what the list shows from the latest rows, keeping hidden (just triaged) threads out
-    /// and the cursor on a sensible row.
-    func rebuildSnapshot(_ animation: ListAnimation) {
+    /// and the cursor on a sensible row. `keepingPlace` is the first rows of a list read with
+    /// `reloadList(keepingPlace:)`: a cursor the new list doesn't have goes to its first row, like a new list.
+    func rebuildSnapshot(_ animation: ListAnimation, keepingPlace: Bool = false) {
         let input = isSearching ? searchRows : rawRows
         let present = Set(input.map(\.id))
         for (key, state) in hidden where state == .committed && !present.contains(key) { hidden[key] = nil }
@@ -129,16 +141,22 @@ extension AppModel {
             newCursor = pending
             pendingCursor = nil
         } else if let current = cursor, snapshot.rows[current] == nil {
-            newCursor = Self.successor(of: current, in: old, keeping: snapshot)
-        } else if cursor == nil, animation == .reset {
+            let upward = animation == .collapse && prefs.afterTriage == .previous
+            newCursor = keepingPlace ? snapshot.order.first : Self.successor(of: current, in: old, keeping: snapshot, upward: upward)
+        } else if cursor == nil, animation == .reset || keepingPlace {
             newCursor = snapshot.order.first
         }
         let moved = newCursor != cursor
         if moved { cursor = newCursor }
         // After triage the next thread is on screen: treat it like moving onto it (opened at once when
-        // reading in the reader).
-        if moved, animation == .collapse, newCursor != nil {
-            scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true)
+        // reading in the reader), unless the user goes back to the list after triage or no thread is left
+        // to show, which closes the reader either way.
+        if moved, animation == .collapse {
+            if prefs.afterTriage == .list || newCursor == nil, readerExpanded || focus == .reader {
+                readerExpanded = false
+                focusList()
+            }
+            if newCursor != nil { scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true) }
         }
         if cursorAnchor.map({ snapshot.rows[$0] == nil }) ?? true { cursorAnchor = cursor }
 
@@ -146,12 +164,14 @@ extension AppModel {
         listView?.selectionDidChange(scrollTo: animation == .reset ? nil : newCursor)
     }
 
-    /// The row that takes a removed row's place: the next one still listed, else the previous one.
-    private static func successor(of key: ThreadKey, in old: ListSnapshot, keeping new: ListSnapshot) -> ThreadKey? {
+    /// The row that takes a removed row's place: the next one still listed, else the previous one
+    /// (`upward`: the previous one first).
+    static func successor(of key: ThreadKey, in old: ListSnapshot, keeping new: ListSnapshot, upward: Bool = false) -> ThreadKey? {
         // A thread opened from outside the list (notification, palette) stays open.
         guard let index = old.position[key] else { return key }
-        if let next = old.order[index...].first(where: { new.rows[$0] != nil }) { return next }
-        return old.order[..<index].last(where: { new.rows[$0] != nil })
+        let below = old.order[index...].first(where: { new.rows[$0] != nil })
+        let above = old.order[..<index].last(where: { new.rows[$0] != nil })
+        return upward ? above ?? below : below ?? above
     }
 
     nonisolated static func log(_ error: Error) {

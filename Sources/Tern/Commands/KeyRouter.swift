@@ -2,8 +2,13 @@ import AppKit
 import WebKit
 
 /// Keyboard handling for the main window. A local event monitor sees every key first:
-/// - while text is being typed, bare keys go straight to the text view (menus never see them);
+/// - while a shortcut is being recorded in Settings, every key goes to the recorder;
+/// - while text is being typed, bare keys go straight to the text view (menus never see them), and ⌘ and ⌃
+///   keys of commands that act on mail don't fire from the menu bar either (`CommandRegistry.leavesToText`);
 /// - while the palette is open, navigation keys drive it;
+/// - while the settings page is open, Esc, ⌘[ and the arrows drive it, and nothing reaches the mail;
+/// - while the open conversation has the keyboard, the keys of the commands it answers itself (Next and
+///   Previous Message, Open, Quick Look) go to the page, which runs them by name;
 /// - otherwise bare keys and `g` chords run registry commands. ⌘ shortcuts are left to the menu bar.
 @MainActor
 final class KeyRouter {
@@ -11,6 +16,8 @@ final class KeyRouter {
     private var model: AppModel { registry.model }
     private var monitor: Any?
     private var bare: [(KeyShortcut, Command)] = []
+    /// Keys the conversation page answers itself while it has the keyboard.
+    private var pageKeys: [KeyShortcut] = []
     private var chords: [String: Command] = [:]
     private var chordTimer: Timer?
     weak var mainWindow: NSWindow?
@@ -21,16 +28,30 @@ final class KeyRouter {
 
     init(registry: CommandRegistry) {
         self.registry = registry
-        for command in registry.bareKeyCommands {
-            for key in command.keys where key.isBare { bare.append((key, command)) }
+        rebuild()
+        NotificationCenter.default.addObserver(forName: CommandRegistry.shortcutsDidChange, object: registry, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rebuild() }
         }
-        // ⌘ shortcuts that mean something different outside text fields.
-        bare.append((.command("a"), registry["selectAll"]!))
-        bare.append((.command("z"), registry["undo"]!))
-        bare.append((.command("\\"), registry["readingPane"]!))
-        for command in registry.chordCommands {
+    }
+
+    /// Reads the keys from the registry again: bare keys, the ⌘ keys no menu item fires, the reader page's
+    /// keys and the chords.
+    func rebuild() {
+        bare = []
+        chords = [:]
+        pageKeys = Self.pageActions(registry).map(\.0)
+        for command in registry.commands {
+            for key in command.keys where key.isBare || Self.routesOutsideMenus(command, key) { bare.append((key, command)) }
             if let chord = command.chord { chords[chord] = command }
         }
+        // Outside text fields ⌘Z undoes the last mail action; while typing, Edit ▸ Undo undoes the typing.
+        if let undo = registry["undo"] { bare.append((.command("z"), undo)) }
+    }
+
+    /// ⌘ shortcuts that mean something different outside text fields (⌘A, ⌘\), and those no menu item
+    /// fires: a command that isn't in the menu bar, or a command's second ⌘ key.
+    private static func routesOutsideMenus(_ command: Command, _ key: KeyShortcut) -> Bool {
+        command.menu == nil || command.paletteOnly || command.id == "readingPane" || key != command.menuKey
     }
 
     func install() {
@@ -45,6 +66,11 @@ final class KeyRouter {
         let flags = event.modifierFlags.intersection(KeyShortcut.relevantModifiers)
         let hasCommand = flags.contains(.command) || flags.contains(.control)
 
+        if event.window === mainWindow, let settings = model.settings, settings.recording != nil {
+            settings.record(event)
+            return nil
+        }
+
         // Typing anywhere in the app: plain keys belong to the text, never to menu shortcuts, and ⌘ keys
         // keep their text meaning (⌘A selects the query, ⌘Z undoes typing).
         if let text = Self.textInput(in: event.window) {
@@ -54,34 +80,34 @@ final class KeyRouter {
             return nil
         }
         guard event.window === mainWindow, event.window?.attachedSheet == nil else { return event }
-        if model.services.isComposing && !hasCommand { return event }
+        if let settings = model.settings, model.palette == nil, settings.handleKey(event, registry: registry) { return nil }
+        if model.services.isComposing && !hasCommand && !model.settingsOpen { return event }
 
         if model.palette != nil, let palette = paletteKeys, let key = Self.paletteKey(event, flags), palette(key) { return nil }
 
         if chordTimer != nil { return finishChord(event) }
 
-        if !hasCommand, flags.subtracting(.shift).isEmpty, event.characters == "g" {
+        if !hasCommand, flags.subtracting(.shift).isEmpty, event.characters == "g", !model.settingsOpen {
             startChord()
             return nil
         }
 
-        // The conversation page has the keyboard: it moves between messages and answers Enter and Space
-        // on a focused link, attachment or quote itself.
-        if !hasCommand, Self.readerPageKeys.contains(where: { $0.matches(event) }), Self.readerHasKeyboard(event.window) {
+        // The conversation page has the keyboard: it moves between messages and answers Open and Quick Look
+        // on a focused link, attachment or quote itself, with whatever keys those commands have now.
+        if !hasCommand, pageKeys.contains(where: { $0.matches(event) }), Self.readerHasKeyboard(event.window) {
             return event
         }
 
-        for (shortcut, command) in bare where shortcut.matches(event) {
-            if command.yieldsToReader && model.focus == .reader { continue }
-            guard model.palette == nil || command.id == "back" else { return event }
-            if command.isEnabled() {
-                command.run()
-                return nil
-            }
-            // A disabled Tab or ⌘ shortcut keeps its normal meaning; a disabled letter is just ignored.
-            return shortcut.key == .tab || !shortcut.isBare ? event : nil
+        // A key can belong to a list command and a reader command (`p`); the one that can run here wins.
+        let matches = bare.filter { $0.0.matches(event) && !($0.1.yieldsToReader && model.focus == .reader) }
+        guard let (shortcut, first) = matches.first else { return event }
+        guard model.palette == nil || first.id == "back" else { return event }
+        if let command = matches.map(\.1).first(where: registry.canRun) {
+            command.run()
+            return nil
         }
-        return event
+        // A disabled Tab or ⌘ shortcut keeps its normal meaning; a disabled letter is just ignored.
+        return shortcut.key == .tab || !shortcut.isBare ? event : nil
     }
 
     /// Keys the search pill and palette field handle themselves.
@@ -90,6 +116,7 @@ final class KeyRouter {
         if model.palette != nil, let palette = paletteKeys, let key = Self.paletteKey(event, flags) {
             return palette(key)
         }
+        if let settings = model.settings, settings.handleKeyWhileTyping(event) { return true }
         if model.searchFieldFocused {
             switch event.keyCode {
             case 53:
@@ -139,7 +166,7 @@ final class KeyRouter {
     private func finishChord(_ event: NSEvent) -> NSEvent? {
         let key = event.characters ?? ""
         cancelChord()
-        if let command = chords["g \(key)"], command.isEnabled() { command.run() }
+        if let command = chords["g \(key)"], registry.canRun(command) { command.run() }
         return nil
     }
 
@@ -151,9 +178,25 @@ final class KeyRouter {
 
     // MARK: The reader
 
-    private static let readerPageKeys: [KeyShortcut] = [
-        .key("n"), .key("p"), .key("o"), .special(.returnKey), .special(.space),
+    /// The commands the reader page runs itself, by the action name it knows them by.
+    private static let pageCommands: [(id: String, action: String)] = [
+        ("nextMessage", "next"), ("previousMessage", "previous"), ("open", "open"), ("quickLook", "quicklook"),
     ]
+
+    /// The current keys of the commands the page runs itself, with the page's action for each. Only keys
+    /// the page sees as typed (no ⌘, ⌃ or ⌥); a page command with another key runs through the registry.
+    static func pageActions(_ registry: CommandRegistry) -> [(KeyShortcut, String)] {
+        pageCommands.flatMap { entry in
+            (registry[entry.id]?.keys ?? []).filter { $0.pageKeyName != nil }.map { ($0, entry.action) }
+        }
+    }
+
+    /// `pageActions` as the page reads them: `event.key` name → action ("n": "next", "Enter": "open").
+    static func pageKeyMap(_ registry: CommandRegistry) -> [String: String] {
+        pageActions(registry).reduce(into: [:]) { map, entry in
+            if let name = entry.0.pageKeyName, map[name] == nil { map[name] = entry.1 }
+        }
+    }
 
     /// Whether the reader's web view (or something inside it) is the first responder.
     static func readerHasKeyboard(_ window: NSWindow?) -> Bool {

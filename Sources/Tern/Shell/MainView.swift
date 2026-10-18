@@ -3,7 +3,8 @@ import SwiftUI
 import TernCore
 
 /// The main window, list first: the title bar's tabs over the list, the sidebar behind a toggle, and the
-/// open thread over the list (or beside it with the reading pane, ⌘\). Palette and sheets on top.
+/// open thread over the list (or beside it with the reading pane, ⌘\). Settings (⌘,) covers all of it.
+/// Palette and sheets on top.
 ///
 /// The open sidebar runs the full height of the window, traffic lights at its top, and the title bar
 /// moves over to sit above the list only.
@@ -17,6 +18,36 @@ struct MainView: View {
     static let readerMinWidth: CGFloat = 420
 
     var body: some View {
+        ZStack {
+            mail
+                .allowsHitTesting(model.settings == nil)
+                .accessibilityHidden(model.settings != nil)
+            // Settings lies over the mail like a thread over the list; the mail stays in the tree, so the
+            // list's scroll and the open thread are as they were when it closes.
+            if let settings = model.settings {
+                SettingsPage(state: settings)
+                    .transition(.opacity)
+            }
+        }
+        .background(Color(Theme.bg))
+        .tint(Color(Theme.ink))
+        .ignoresSafeArea()
+        .overlay(alignment: .top) { overlays }
+        .overlay(alignment: .bottom) { chordHUD }
+        .animation(paneAnimation, value: model.prefs.sidebarOpen)
+        .animation(paneAnimation, value: model.prefs.readingPane)
+        .animation(paneAnimation, value: model.readerExpanded)
+        .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.14), value: model.settings != nil)
+        .sheet(item: projectEditorBinding) { draft in
+            ProjectEditor(draft: draft).environment(model)
+        }
+        .sheet(isPresented: snoozePickerShown) {
+            SnoozeDateSheet().environment(model).environment(model.services)
+        }
+    }
+
+    /// The sidebar, the title bar and the list with the reader.
+    private var mail: some View {
         HStack(spacing: 0) {
             if model.prefs.sidebarOpen {
                 HStack(spacing: 0) {
@@ -36,20 +67,6 @@ struct MainView: View {
                     content(available: geometry.size.width)
                 }
             }
-        }
-        .background(Color(Theme.bg))
-        .tint(Color(Theme.ink))
-        .ignoresSafeArea()
-        .overlay(alignment: .top) { overlays }
-        .overlay(alignment: .bottom) { chordHUD }
-        .animation(paneAnimation, value: model.prefs.sidebarOpen)
-        .animation(paneAnimation, value: model.prefs.readingPane)
-        .animation(paneAnimation, value: model.readerExpanded)
-        .sheet(item: projectEditorBinding) { draft in
-            ProjectEditor(draft: draft).environment(model)
-        }
-        .sheet(isPresented: snoozePickerShown) {
-            SnoozeDateSheet().environment(model).environment(model.services)
         }
     }
 
