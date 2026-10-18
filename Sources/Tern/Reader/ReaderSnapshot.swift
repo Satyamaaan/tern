@@ -142,6 +142,7 @@ enum ReaderSnapshot {
                         continue
                     }
                     if fixture.name == "hostile" { await checkHostile() }
+                    if fixture.name == "css-escape" { await checkCSSEscape(suffix(appearance)) }
                     await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
                     if fixture.name == "reply-chain" { await focusShots(hosting, suffix(appearance)) }
                     if fixture.name == "hostile", appearance == .aqua {
@@ -327,6 +328,44 @@ enum ReaderSnapshot {
                 return count;
                 """, arguments: [:], in: nil, contentWorld: ReaderWebEngine.shared.world)
             note("hostile: page script markers = \(page.map { "\($0)" } ?? "?"), dangerous elements left = \(dangerous.map { "\($0)" } ?? "?")")
+        }
+
+        /// Proves mail CSS can't lift the card's containment: the open message's `.mbody` computes the same
+        /// `contain`, `overflow` and `position` as a fresh host without mail CSS, and its sanitized sheet never
+        /// names `:host`. As a control, the same reading must catch the old sanitizer's output for the
+        /// combining-mark reproducer.
+        func checkCSSEscape(_ suffix: String) async {
+            let control = "@media all {\u{301}, :host {\n& { contain: none !important; overflow: visible !important; "
+                + "position: absolute !important; inset: 0 !important }\n}\n"
+            let result = try? await ReaderWebEngine.shared.webView.callAsyncJavaScript("""
+                const host = document.querySelector('.msg.open .mbody');
+                if (!host || !host.shadowRoot) return 'no body';
+                const read = (element) => {
+                  const style = getComputedStyle(element);
+                  return `contain=${style.contain} overflow=${style.overflow} position=${style.position}`;
+                };
+                const fresh = (css) => {
+                  const element = document.createElement('div');
+                  element.className = host.className;
+                  element.dataset.mode = host.dataset.mode;
+                  host.after(element);
+                  if (css !== null) {
+                    const style = document.createElement('style');
+                    style.textContent = css;
+                    element.attachShadow({ mode: 'open' }).append(style);
+                  }
+                  const value = read(element);
+                  element.remove();
+                  return value;
+                };
+                const expected = fresh(null);
+                const caught = fresh(control) !== expected;
+                const sheet = [...host.shadowRoot.querySelectorAll('style')].map((style) => style.textContent).join('\\n');
+                const named = /:host|::part|::slotted/i.test(sheet);
+                return `${read(host) === expected ? 'contained' : 'ESCAPED'} (${read(host)}), :host in sheet = ${named}, `
+                  + `control caught = ${caught}`;
+                """, arguments: ["control": control], in: nil, contentWorld: ReaderWebEngine.shared.world)
+            note("css-escape (\(suffix)): \(result.map { "\($0)" } ?? "?")")
         }
 
         func save(_ hosting: NSView, name: String) async {

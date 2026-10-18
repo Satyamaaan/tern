@@ -12,6 +12,11 @@ struct CSSFindings {
 /// load remote content without permission, or reach outside the message; rewrites `html`/`body`
 /// selectors to the message wrappers; turns plain colors into `light-dark()` pairs so simple mails
 /// read well in dark mode; and keeps the mail's own dark mode out (see `lightSchemeMedia`).
+///
+/// CSS is read one Unicode scalar at a time, as the browser reads it: `{` followed by a combining mark is
+/// one character to Swift but still a `{` to WebKit. The output is written back from what was read, and every
+/// piece of mail text in it (a selector, a value, an `@supports` condition) must be `isSelfContained`, so the
+/// browser can't read the output's structure differently from the sanitizer.
 struct CSSSanitizer {
     var urlPolicy: (String) -> URLDecision
     var findings = CSSFindings()
@@ -26,16 +31,19 @@ struct CSSSanitizer {
         self.urlPolicy = urlPolicy
     }
 
+    private typealias Scalars = String.UnicodeScalarView
+
     // MARK: Declarations
 
     mutating func declarations(_ css: String) -> String {
         let text = Self.stripComments(css)
         var output: [String] = []
         for declaration in Self.split(text, on: ";") {
-            guard let colon = declaration.firstIndex(of: ":") else { continue }
-            let property = declaration[..<colon].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            var value = declaration[declaration.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !property.isEmpty, property.allSatisfy({ $0.isLetter || $0 == "-" || $0.isNumber }),
+            let scalars = declaration.unicodeScalars
+            guard let colon = scalars.firstIndex(of: ":") else { continue }
+            let property = String(scalars[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            var value = String(scalars[scalars.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !property.isEmpty, property.unicodeScalars.allSatisfy(Self.isPropertyScalar),
                   !value.isEmpty, let cleaned = clean(property: property, value: &value) else { continue }
             output.append("\(property): \(cleaned)")
         }
@@ -43,28 +51,30 @@ struct CSSSanitizer {
     }
 
     private mutating func clean(property: String, value: inout String) -> String? {
+        guard Self.isSelfContained(value), !value.unicodeScalars.contains("<") else { return nil }
         let lower = value.lowercased()
         if Self.forbiddenProperties.contains(property) || Self.colorSchemeProperties.contains(property) { return nil }
-        if value.contains("\\") || lower.contains("expression") || lower.contains("javascript:")
-            || lower.contains("vbscript:") || lower.contains("@import") || value.contains("<") {
+        if Self.has(lower, "expression") || Self.has(lower, "javascript:") || Self.has(lower, "vbscript:")
+            || Self.has(lower, "@import") || Self.reachesHost(lower) {
             return nil
         }
         if property == "position" {
-            let mode = lower.replacingOccurrences(of: "!important", with: "").trimmingCharacters(in: .whitespaces)
+            // `! important` with a space is still the important flag.
+            let mode = String(lower.unicodeScalars.filter { !Self.isSpace($0) })
+                .replacingOccurrences(of: "!important", with: "", options: .literal)
             if mode == "fixed" || mode == "sticky" { return nil }
         }
         var important = ""
-        if let range = value.range(of: "!important", options: .caseInsensitive) {
+        if let range = value.range(of: "!important", options: [.caseInsensitive, .literal]) {
             important = " !important"
             value.removeSubrange(range)
             value = value.trimmingCharacters(in: .whitespaces)
         }
         if Self.mayFetch(lower) {
-            if Self.inertFunctions.contains(where: lower.contains) { return nil }
+            if Self.inertFunctions.contains(where: { Self.has(lower, $0) }) { return nil }
             // `var()` and `attr()` could hand `src()` or `image-set()` a string the sanitizer never sees.
-            let takesStrings = lower.contains("src(") || lower.contains("image(") || lower.contains("image-set(")
-                || lower.contains("cross-fade(")
-            if takesStrings, lower.contains("var(") || lower.contains("attr(") { return nil }
+            let takesStrings = ["src(", "image(", "image-set(", "cross-fade("].contains { Self.has(lower, $0) }
+            if takesStrings, Self.has(lower, "var(") || Self.has(lower, "attr(") { return nil }
             guard let rewritten = rewriteFetches(in: value) else { return nil }
             value = rewritten
             if property.hasPrefix("background") { findings.paintsOwnColors = true }
@@ -88,7 +98,8 @@ struct CSSSanitizer {
         default:
             break
         }
-        return value + important
+        let result = value + important
+        return Self.isSelfContained(result) ? result : nil
     }
 
     /// True when a `background` shorthand sets a color or an image.
@@ -103,9 +114,8 @@ struct CSSSanitizer {
 
     /// True when a value calls a function that can load something.
     static func mayFetch(_ lowercased: String) -> Bool {
-        lowercased.contains("url(") || lowercased.contains("src(") || lowercased.contains("image(")
-            || lowercased.contains("image-set(") || lowercased.contains("cross-fade(")
-            || inertFunctions.contains(where: lowercased.contains)
+        ["url(", "src(", "image(", "image-set(", "cross-fade("].contains { has(lowercased, $0) }
+            || inertFunctions.contains { has(lowercased, $0) }
     }
 
     /// Functions mail never needs that can pull in content from elsewhere; a declaration using one is dropped.
@@ -120,78 +130,82 @@ struct CSSSanitizer {
     /// `image()` and `cross-fade()` take as images. Blocked or dropped URLs become `none`; a value that
     /// can't be read safely returns nil.
     private mutating func rewriteFetches(in value: String) -> String? {
-        var output = ""
+        let text = value.unicodeScalars
+        var output = Scalars()
         var functions: [String] = []
-        var name = ""
-        var index = value.startIndex
-        func readString(_ quote: Character) -> String? {
-            var text = ""
-            index = value.index(after: index)
-            while index < value.endIndex, value[index] != quote {
-                text.append(value[index])
-                index = value.index(after: index)
+        var name = Scalars()
+        var index = text.startIndex
+        func readString(_ quote: Unicode.Scalar) -> String? {
+            var string = Scalars()
+            text.formIndex(after: &index)
+            while index < text.endIndex, text[index] != quote {
+                string.append(text[index])
+                text.formIndex(after: &index)
             }
-            guard index < value.endIndex else { return nil }
-            index = value.index(after: index)
-            return text
+            guard index < text.endIndex else { return nil }
+            text.formIndex(after: &index)
+            return String(string)
         }
-        while index < value.endIndex {
-            let character = value[index]
-            switch character {
+        while index < text.endIndex {
+            let scalar = text[index]
+            switch scalar {
             case "(":
-                let function = name.lowercased()
-                name = ""
-                index = value.index(after: index)
+                let function = String(name).lowercased()
+                let length = name.count
+                name = Scalars()
+                text.formIndex(after: &index)
                 guard function == "url" || function == "src" else {
                     functions.append(function)
-                    output.append(character)
+                    output.append(scalar)
                     continue
                 }
                 // `url(` takes everything up to `)`, quoted or not; `src(` takes one string.
-                while index < value.endIndex, value[index].isWhitespace { index = value.index(after: index) }
+                while index < text.endIndex, Self.isSpace(text[index]) { text.formIndex(after: &index) }
                 var raw: String
-                if index < value.endIndex, value[index] == "\"" || value[index] == "'" {
-                    guard let text = readString(value[index]) else { return nil }
-                    raw = text
+                if index < text.endIndex, text[index] == "\"" || text[index] == "'" {
+                    guard let string = readString(text[index]) else { return nil }
+                    raw = string
                 } else {
                     guard function == "url" else { return nil }
-                    raw = ""
-                    while index < value.endIndex, value[index] != ")" {
-                        guard value[index] != "\"", value[index] != "'", value[index] != "(" else { return nil }
-                        raw.append(value[index])
-                        index = value.index(after: index)
+                    var unquoted = Scalars()
+                    while index < text.endIndex, text[index] != ")" {
+                        guard text[index] != "\"", text[index] != "'", text[index] != "(" else { return nil }
+                        unquoted.append(text[index])
+                        text.formIndex(after: &index)
                     }
-                    raw = raw.trimmingCharacters(in: .whitespaces)
+                    raw = String(unquoted).trimmingCharacters(in: .whitespaces)
                 }
-                while index < value.endIndex, value[index].isWhitespace { index = value.index(after: index) }
-                guard index < value.endIndex, value[index] == ")" else { return nil }
-                index = value.index(after: index)
-                output.removeLast(function.count)
-                output += replacement(for: raw)
+                while index < text.endIndex, Self.isSpace(text[index]) { text.formIndex(after: &index) }
+                guard index < text.endIndex, text[index] == ")" else { return nil }
+                text.formIndex(after: &index)
+                output.removeLast(length)
+                output.append(contentsOf: replacement(for: raw).unicodeScalars)
             case ")":
                 if !functions.isEmpty { functions.removeLast() }
-                name = ""
-                output.append(character)
-                index = value.index(after: index)
+                name = Scalars()
+                output.append(scalar)
+                text.formIndex(after: &index)
             case "\"", "'":
-                guard let text = readString(character) else { return nil }
-                name = ""
+                guard let string = readString(scalar) else { return nil }
+                name = Scalars()
                 if let function = functions.last, Self.imageFunctions.contains(function) {
-                    output += replacement(for: text)
+                    output.append(contentsOf: replacement(for: string).unicodeScalars)
                 } else {
-                    output += "\(character)\(text)\(character)"
+                    output.append(scalar)
+                    output.append(contentsOf: string.unicodeScalars)
+                    output.append(scalar)
                 }
             default:
-                if character.isLetter || character.isNumber || character == "-" || character == "_" {
-                    name.append(character)
+                if Self.isNameScalar(scalar) {
+                    name.append(scalar)
                 } else {
-                    name = ""
+                    name = Scalars()
                 }
-                output.append(character)
-                index = value.index(after: index)
+                output.append(scalar)
+                text.formIndex(after: &index)
             }
         }
-        return output
+        return String(output)
     }
 
     private mutating func replacement(for raw: String) -> String {
@@ -211,44 +225,50 @@ struct CSSSanitizer {
     /// media blocks that can't match and unknown at-rules go.
     mutating func stylesheet(_ css: String) -> String {
         // The light-scheme marker can only come from `lightSchemeMedia`.
-        let text = Self.stripComments(css).replacingOccurrences(of: Self.lightScheme, with: "")
+        let text = Self.stripComments(css).unicodeScalars.filter { $0 != Self.lightSchemeScalar }
         var output = ""
         var index = text.startIndex
         sheet(text, &index, depth: 0, into: &output)
         return output
     }
 
-    /// A `<style media>` sheet: sanitized only when its media list can match, then wrapped in `@media`.
+    /// A `<style media>` sheet: sanitized only when its media list can match, then wrapped in `@media`
+    /// written back from the parsed list.
     mutating func stylesheet(_ css: String, media: String?) -> String {
-        let list = (media ?? "").replacingOccurrences(of: Self.lightScheme, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !list.isEmpty, list.lowercased() != "all" else { return stylesheet(css) }
-        // A list the browser couldn't parse matches nothing, and neither does its sheet.
-        guard !list.contains(where: { "{};\\\"'".contains($0) }), let condition = Self.lightSchemeMedia(list) else { return "" }
-        let inner = stylesheet(css)
-        return inner.isEmpty ? "" : "@media \(condition) {\n\(inner)}\n"
+        switch media.map(Self.sheetMedia) ?? .everywhere {
+        case .everywhere:
+            return stylesheet(css)
+        case .never:
+            return ""
+        case .when(let condition):
+            let inner = stylesheet(css)
+            return inner.isEmpty ? "" : "@media \(condition) {\n\(inner)}\n"
+        }
     }
 
-    private mutating func sheet(_ text: String, _ index: inout String.Index, depth: Int, into output: inout String) {
+    private mutating func sheet(_ text: Scalars, _ index: inout Scalars.Index, depth: Int, into output: inout String) {
         while index < text.endIndex {
             skipWhitespace(text, &index)
             guard index < text.endIndex else { return }
             if text[index] == "}" {
-                index = text.index(after: index)
+                text.formIndex(after: &index)
                 return
             }
             if text[index] == "@" {
                 let prelude = readPrelude(text, &index)
-                let keyword = prelude.prefix { !$0.isWhitespace && $0 != "{" && $0 != "(" }.lowercased()
+                let head = prelude.unicodeScalars.prefix { !Self.isSpace($0) && $0 != "{" && $0 != "(" }
+                let keyword = String(head).lowercased()
+                let rest = String(prelude.unicodeScalars.dropFirst(head.count))
                 guard index < text.endIndex, text[index] == "{" else {
-                    if index < text.endIndex { index = text.index(after: index) }
+                    if index < text.endIndex { text.formIndex(after: &index) }
                     continue
                 }
-                index = text.index(after: index)
+                text.formIndex(after: &index)
                 switch keyword {
                 case "@media", "@supports":
                     let condition = keyword == "@media"
-                        ? Self.lightSchemeMedia(String(prelude.dropFirst(keyword.count))).map { "@media \($0)" }
-                        : prelude.trimmingCharacters(in: .whitespaces)
+                        ? Self.lightSchemeMedia(rest).map { "@media \($0)" }
+                        : Self.supportsCondition(rest).map { "@supports \($0)" }
                     if let condition, depth <= 4 {
                         var inner = ""
                         sheet(text, &index, depth: depth + 1, into: &inner)
@@ -259,9 +279,10 @@ struct CSSSanitizer {
                 case "@font-face":
                     let body = readBlock(text, &index)
                     let lower = body.lowercased()
-                    if !lower.contains("url(") && !lower.contains("src(") || !lower.contains("http") && !lower.contains("//") {
+                    let fetches = Self.has(lower, "url(") || Self.has(lower, "src(")
+                    if !fetches || !Self.has(lower, "http") && !Self.has(lower, "//") {
                         let cleaned = declarations(body)
-                        if cleaned.lowercased().contains("src") { output += "@font-face {\(cleaned)}\n" }
+                        if Self.has(cleaned.lowercased(), "src") { output += "@font-face {\(cleaned)}\n" }
                     }
                 default:
                     skipBlock(text, &index)
@@ -270,7 +291,7 @@ struct CSSSanitizer {
             }
             let selector = readPrelude(text, &index)
             guard index < text.endIndex, text[index] == "{" else { return }
-            index = text.index(after: index)
+            text.formIndex(after: &index)
             let body = readBlock(text, &index)
             let cleanedSelector = Self.rewriteSelector(selector)
             let cleaned = declarations(body)
@@ -280,14 +301,22 @@ struct CSSSanitizer {
         }
     }
 
+    /// An `@supports` condition is written back as the mail wrote it, so it must stand on its own. It can't
+    /// select anything, but naming the shadow host is still left out so no output ever mentions it.
+    private static func supportsCondition(_ condition: String) -> String? {
+        let trimmed = condition.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<"),
+              !reachesHost(trimmed.lowercased()) else { return nil }
+        return trimmed
+    }
+
     /// Points document-level selectors at the message's own wrappers: `html` and `:root` become
     /// `.tern-root`, `body` becomes `.tern-body`. Selectors that reach the shadow host or the reader
     /// around it (`:host`, `::part`, `::slotted`) are dropped, so mail can't move or cover Tern's UI.
     static func rewriteSelector(_ selector: String) -> String {
         let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains("<"), !trimmed.contains("\\") else { return "" }
-        let lower = trimmed.lowercased()
-        guard !lower.contains(":host"), !lower.contains("::part"), !lower.contains("::slotted") else { return "" }
+        guard !trimmed.isEmpty, isSelfContained(trimmed), !trimmed.unicodeScalars.contains("<") else { return "" }
+        guard !reachesHost(trimmed.lowercased()) else { return "" }
         let range = NSRange(trimmed.startIndex..., in: trimmed)
         var output = documentSelector.stringByReplacingMatches(in: trimmed, range: range, withTemplate: "$1\u{1}$2")
         output = output.replacingOccurrences(of: "\u{1}html", with: ".tern-root", options: .caseInsensitive)
@@ -299,131 +328,88 @@ struct CSSSanitizer {
     private static let documentSelector = try! NSRegularExpression(
         pattern: #"(^|[\s>+~,(])(html|body|:root)(?=$|[\s>+~,.#:\[)])"#, options: [.caseInsensitive])
 
-    private func readPrelude(_ text: String, _ index: inout String.Index) -> String {
+    /// Reads up to the next `{`, `;` or `}` outside a string. Like the browser, a string ends at its quote
+    /// or at the end of its line.
+    private func readPrelude(_ text: Scalars, _ index: inout Scalars.Index) -> String {
         let start = index
-        var quote: Character?
+        var quote: Unicode.Scalar?
         while index < text.endIndex {
-            let character = text[index]
+            let scalar = text[index]
             if let open = quote {
-                if character == open { quote = nil }
-            } else if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "{" || character == ";" || character == "}" {
+                if scalar == open || Self.isNewline(scalar) { quote = nil }
+            } else if scalar == "\"" || scalar == "'" {
+                quote = scalar
+            } else if scalar == "{" || scalar == ";" || scalar == "}" {
                 break
             }
-            index = text.index(after: index)
+            text.formIndex(after: &index)
         }
         return String(text[start..<index])
     }
 
     /// Reads declarations up to the matching `}`; nested blocks are skipped.
-    private func readBlock(_ text: String, _ index: inout String.Index) -> String {
-        var output = ""
-        var quote: Character?
+    private func readBlock(_ text: Scalars, _ index: inout Scalars.Index) -> String {
+        var output = Scalars()
+        var quote: Unicode.Scalar?
         while index < text.endIndex {
-            let character = text[index]
-            index = text.index(after: index)
+            let scalar = text[index]
+            text.formIndex(after: &index)
             if let open = quote {
-                if character == open { quote = nil }
-                output.append(character)
+                if scalar == open || Self.isNewline(scalar) { quote = nil }
+                output.append(scalar)
                 continue
             }
-            switch character {
+            switch scalar {
             case "\"", "'":
-                quote = character
-                output.append(character)
+                quote = scalar
+                output.append(scalar)
             case "{":
                 skipBlock(text, &index)
             case "}":
-                return output
+                return String(output)
             default:
-                output.append(character)
+                output.append(scalar)
             }
         }
-        return output
+        return String(output)
     }
 
-    private func skipBlock(_ text: String, _ index: inout String.Index) {
+    private func skipBlock(_ text: Scalars, _ index: inout Scalars.Index) {
         var depth = 1
-        var quote: Character?
+        var quote: Unicode.Scalar?
         while index < text.endIndex, depth > 0 {
-            let character = text[index]
+            let scalar = text[index]
             if let open = quote {
-                if character == open { quote = nil }
-            } else if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "{" {
+                if scalar == open || Self.isNewline(scalar) { quote = nil }
+            } else if scalar == "\"" || scalar == "'" {
+                quote = scalar
+            } else if scalar == "{" {
                 depth += 1
-            } else if character == "}" {
+            } else if scalar == "}" {
                 depth -= 1
             }
-            index = text.index(after: index)
+            text.formIndex(after: &index)
         }
     }
 
-    private func skipWhitespace(_ text: String, _ index: inout String.Index) {
-        while index < text.endIndex, text[index].isWhitespace || text[index] == ";" { index = text.index(after: index) }
+    private func skipWhitespace(_ text: Scalars, _ index: inout Scalars.Index) {
+        while index < text.endIndex, Self.isSpace(text[index]) || text[index] == ";" { text.formIndex(after: &index) }
     }
 
     // MARK: Colour scheme
-
-    /// Rewrites a media query list so the mail never sees a dark colour scheme: `(prefers-color-scheme:
-    /// dark)` never matches, in any case or spacing, after `not`, in `and`/`or` chains and in comma lists,
-    /// and a query that needs it is dropped; `(prefers-color-scheme: light)` becomes a marker that
-    /// `settleColorScheme` resolves once the mail's mode is known. Mail paints its dark mode with
-    /// `!important` white text over backgrounds that stay light on the reader's light card, so it must never
-    /// apply. Returns nil when no query in the list can match.
-    static func lightSchemeMedia(_ list: String) -> String? {
-        let trimmed = list.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.range(of: "prefers-color-scheme", options: .caseInsensitive) != nil else { return trimmed }
-        var queries: [String] = []
-        for part in split(trimmed, on: ",") {
-            let query = part.trimmingCharacters(in: .whitespacesAndNewlines)
-            let source = query as NSString
-            var rewritten = ""
-            var location = 0
-            var needsDark = false
-            for match in colorSchemeFeature.matches(in: query, range: NSRange(location: 0, length: source.length)) {
-                rewritten += source.substring(with: NSRange(location: location, length: match.range.location - location))
-                let value = match.range(at: 1).location == NSNotFound ? "" : source.substring(with: match.range(at: 1)).lowercased()
-                switch value {
-                case "": rewritten += alwaysMatches
-                case "light": rewritten += lightScheme
-                default:
-                    rewritten += neverMatches
-                    needsDark = true
-                }
-                location = NSMaxRange(match.range)
-            }
-            rewritten += source.substring(from: location)
-            // Without `not` or `or`, a query that needs a dark scheme is false as a whole.
-            let negates = negation.firstMatch(in: query, range: NSRange(location: 0, length: source.length)) != nil
-            if needsDark, !negates { continue }
-            queries.append(rewritten)
-        }
-        return queries.isEmpty ? nil : queries.joined(separator: ", ")
-    }
-
-    /// Resolves the light-scheme markers in a sanitized sheet. Mail that paints its own colours sits on a
-    /// light card in dark mode, so its light conditions always match; simple mail follows the reader's theme.
-    static func settleColorScheme(_ css: String, paintsOwnColors: Bool) -> String {
-        guard css.contains(lightScheme) else { return css }
-        return css.replacingOccurrences(of: lightScheme, with: paintsOwnColors ? alwaysMatches : "(prefers-color-scheme: light)")
-    }
-
-    /// Stands in for `(prefers-color-scheme: light)` until the mail's mode is known.
-    private static let lightScheme = "\u{E000}"
-    private static let alwaysMatches = "(min-width: 0px)"
-    private static let neverMatches = "(not (min-width: 0px))"
-
-    private static let colorSchemeFeature = try! NSRegularExpression(
-        pattern: #"\(\s*prefers-color-scheme\s*(?::\s*([a-z-]*)\s*)?\)"#, options: [.caseInsensitive])
-    private static let negation = try! NSRegularExpression(pattern: #"(?<![\w-])(not|or)(?![\w-])"#, options: [.caseInsensitive])
 
     /// The reader picks the colour scheme, not the mail: a mail's `color-scheme: light dark` on `:root` (which
     /// becomes `.tern-root`) turns every `light-dark()` colour on the light card to its dark side.
     /// `-apple-color-filter` is Apple Mail's dark-mode colour inversion.
     private static let colorSchemeProperties: Set<String> = ["color-scheme", "supported-color-schemes", "-apple-color-filter"]
+
+    /// Resolves the light-scheme markers in a sanitized sheet. Mail that paints its own colours sits on a
+    /// light card in dark mode, so its light conditions always match; simple mail follows the reader's theme.
+    static func settleColorScheme(_ css: String, paintsOwnColors: Bool) -> String {
+        guard css.unicodeScalars.contains(lightSchemeScalar) else { return css }
+        return css.replacingOccurrences(
+            of: lightScheme, with: paintsOwnColors ? alwaysMatches : "(prefers-color-scheme: light)", options: .literal)
+    }
 
     // MARK: Helpers
 
@@ -431,44 +417,125 @@ struct CSSSanitizer {
         "behavior", "-moz-binding", "-ms-behavior", "-webkit-user-modify", "zoom",
     ]
 
-    static func stripComments(_ css: String) -> String {
-        guard css.contains("/*") else { return css }
-        var output = ""
-        var rest = Substring(css)
-        while let start = rest.range(of: "/*") {
-            output += rest[..<start.lowerBound]
-            guard let end = rest[start.upperBound...].range(of: "*/") else { return output }
-            rest = rest[end.upperBound...]
+    /// True when mail text written back verbatim reads the same on its own as inside the output: strings close
+    /// on their own line, brackets balance, and outside strings nothing opens or closes a block, ends a
+    /// declaration, starts a comment, escapes a character or is a control character.
+    static func isSelfContained(_ text: String) -> Bool {
+        var brackets: [Unicode.Scalar] = []
+        var quote: Unicode.Scalar?
+        var previous: Unicode.Scalar = " "
+        for scalar in text.unicodeScalars {
+            if scalar.value < 0x20 && scalar != "\t" && !isNewline(scalar) || scalar.value == 0x7F { return false }
+            if let open = quote {
+                if scalar == open {
+                    quote = nil
+                } else if isNewline(scalar) || scalar == "\\" {
+                    return false
+                }
+                previous = scalar
+                continue
+            }
+            switch scalar {
+            case "\"", "'": quote = scalar
+            case "(", "[": brackets.append(scalar)
+            case ")": guard brackets.popLast() == "(" else { return false }
+            case "]": guard brackets.popLast() == "[" else { return false }
+            case ";": guard !brackets.isEmpty else { return false }
+            case "{", "}", "\\": return false
+            case "*" where previous == "/": return false
+            default: break
+            }
+            previous = scalar
         }
-        output += rest
-        return output
+        return quote == nil && brackets.isEmpty
     }
 
-    /// Splits on a separator outside quotes and parentheses.
-    static func split(_ text: String, on separator: Character) -> [Substring] {
-        var parts: [Substring] = []
-        var depth = 0
-        var quote: Character?
-        var start = text.startIndex
-        var index = text.startIndex
-        while index < text.endIndex {
-            let character = text[index]
-            if let open = quote {
-                if character == open { quote = nil }
-            } else if character == "\"" || character == "'" {
-                quote = character
-            } else if character == "(" {
-                depth += 1
-            } else if character == ")" {
-                depth = max(0, depth - 1)
-            } else if character == separator, depth == 0 {
-                parts.append(text[start..<index])
-                start = text.index(after: index)
+    /// Removes `/* … */` comments; an unterminated one runs to the end, as in the browser.
+    static func stripComments(_ css: String) -> String {
+        let bytes = css.utf8
+        guard bytes.contains(UInt8(ascii: "*")) else { return css }
+        let slash = UInt8(ascii: "/"), star = UInt8(ascii: "*")
+        var output: [UInt8] = []
+        output.reserveCapacity(bytes.count)
+        var iterator = bytes.makeIterator()
+        var pending: UInt8?
+        while let byte = pending ?? iterator.next() {
+            pending = nil
+            guard byte == slash, let next = iterator.next() else {
+                output.append(byte)
+                continue
             }
-            index = text.index(after: index)
+            guard next == star else {
+                output.append(byte)
+                pending = next
+                continue
+            }
+            var last: UInt8 = 0
+            var closed = false
+            while let inner = iterator.next() {
+                if last == star, inner == slash {
+                    closed = true
+                    break
+                }
+                last = inner
+            }
+            if !closed { break }
         }
-        if start < text.endIndex { parts.append(text[start...]) }
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    /// Splits on a separator outside quotes and parentheses, reading Unicode scalars.
+    static func split(_ text: String, on separator: Unicode.Scalar) -> [String] {
+        let scalars = text.unicodeScalars
+        var parts: [String] = []
+        var depth = 0
+        var quote: Unicode.Scalar?
+        var start = scalars.startIndex
+        var index = scalars.startIndex
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            if let open = quote {
+                if scalar == open || isNewline(scalar) { quote = nil }
+            } else if scalar == "\"" || scalar == "'" {
+                quote = scalar
+            } else if scalar == "(" {
+                depth += 1
+            } else if scalar == ")" {
+                depth = max(0, depth - 1)
+            } else if scalar == separator, depth == 0 {
+                parts.append(String(scalars[start..<index]))
+                start = scalars.index(after: index)
+            }
+            scalars.formIndex(after: &index)
+        }
+        if start < scalars.endIndex { parts.append(String(scalars[start...])) }
         return parts
+    }
+
+    /// True for `:host`, `::part` and `::slotted`, which reach outside the shadow tree.
+    private static func reachesHost(_ lowercased: String) -> Bool {
+        has(lowercased, ":host") || has(lowercased, "::part") || has(lowercased, "::slotted")
+    }
+
+    /// A substring search on UTF-16 units, so a combining mark after the needle can't hide it.
+    static func has(_ text: String, _ needle: String) -> Bool {
+        text.range(of: needle, options: .literal) != nil
+    }
+
+    private static func isSpace(_ scalar: Unicode.Scalar) -> Bool { scalar.properties.isWhitespace }
+
+    /// The characters that end a CSS string: line feed, carriage return and form feed.
+    private static func isNewline(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "\n" || scalar == "\r" || scalar == "\u{C}"
+    }
+
+    private static func isPropertyScalar(_ scalar: Unicode.Scalar) -> Bool {
+        ("a"..."z").contains(scalar) || ("0"..."9").contains(scalar) || scalar == "-"
+    }
+
+    /// Letters, digits, `-`, `_` and anything non-ASCII: what a CSS function name is made of.
+    private static func isNameScalar(_ scalar: Unicode.Scalar) -> Bool {
+        isPropertyScalar(scalar) || ("A"..."Z").contains(scalar) || scalar == "_" || !scalar.isASCII
     }
 }
 

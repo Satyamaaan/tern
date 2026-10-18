@@ -158,6 +158,12 @@ enum ReaderSnapshotFixtures {
                 to: [me], subject: "Your invoice is ready", minutesAgo: 56, html: darkModeSheet)
         fixtures.append(Fixture(name: "dark-mode-sheet", key: key("fx-dark-sheet")))
 
+        // Mail CSS that hides `{`, `}` and comment starts behind combining marks or in strings that run past their
+        // line, to reach the shadow host and lift the card's containment.
+        message("fx-css-escape", thread: "fx-css-escape", from: Participant(name: "Account Notices", email: "notices@account-alerts.example"),
+                to: [me], subject: "Your statement is available", minutesAgo: 57, html: cssEscape)
+        fixtures.append(Fixture(name: "css-escape", key: key("fx-css-escape")))
+
         try store.upsertMessages(messages, attachments: attachments)
         try store.database.writer.write { db in for item in ai { try item.upsert(db) } }
         try store.setProject("proj-lumen", on: [key("fx-chain")], assigned: true)
@@ -269,6 +275,25 @@ enum ReaderSnapshotFixtures {
         <tr><td style="padding:4px 36px">Storage, October · 1.2 TB</td></tr>
         <tr><td class="total" style="padding:4px 36px 28px">Total due: $24.00</td></tr>
         </table></td></tr></table></body></html>
+        """
+
+    /// `ReaderSnapshot.checkCSSEscape` reads the card's containment after this renders.
+    static let cssEscape = """
+        <html><head>
+        <style media="all {&#x301;, :host">
+        & { contain:none !important; overflow:visible !important; position:absolute !important; inset:0 !important }
+        </style>
+        <style>p { font-family: Helvetica }\u{301}, :host {\u{301}; contain: none !important; overflow: visible !important }</style>
+        <style>.note { content: "a
+        } :host { contain: none !important; overflow: visible !important } .x { content: "b" }</style>
+        <style>.y /*\u{301} { color: red }
+        .z { content: "*/, :host { contain: none !important; overflow: visible !important } x{" }</style>
+        </head><body>
+        <div style="font:15px/1.6 Helvetica,Arial,sans-serif">
+        <p style="margin:0 0 8px;font-weight:600">Your October statement is ready.</p>
+        <p class="note" style="margin:0">Sign in to view it. The red panel above this text covers the reader only if mail CSS escapes the card.</p>
+        <div style="position:absolute;left:0;top:-400px;width:100%;height:400px;background:#d92d20"></div>
+        </div></body></html>
         """
 
     static let bigNewsletter: String = {
