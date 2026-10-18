@@ -75,10 +75,13 @@ final class SettingsState {
     var indexStatus: String?
     /// Opens the Google client editor at once (snapshots).
     var editsGoogleClient = false
+    /// Auto-update; nil in development builds.
+    var updater: Updater?
 
     init(model: AppModel, shell: ShellActions?) {
         self.model = model
         self.shell = shell
+        updater = shell?.updater
         let store = model.store
         let enabled = (try? store.setting(SettingKey.aiEnabled)) ?? nil
         let provider = ((try? store.setting(SettingKey.aiProvider)) ?? nil).flatMap(AIProvider.init(rawValue:))
@@ -417,6 +420,7 @@ private struct AdvancedSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            UpdateSettingsRows(updater: state.updater)
             SettingsRow(title: "Database", detail: model.databaseURL.path) {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.databaseURL]) }
                     .buttonStyle(TernButtonStyle(.secondary))

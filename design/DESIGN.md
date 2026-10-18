@@ -231,6 +231,16 @@ hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
 
+### Update card and prompts
+Tern's own small floating card, never Sparkle's or a stock alert: 380 pt wide, `raised`, radius 10, 1 px
+`hairlineStrong`, the overlay shadow, borderless and movable by its background. The app icon (44 pt) sits at the
+top left beside the title (Inter 14 semibold) and one line of `text2` detail; content below aligns with the text: a
+3 pt `ink` progress line on `inkSoft` while something runs, "What's new" (caps label, Inter 12.5 bullets, scrolling
+with a soft bottom edge past 168 pt). At most two buttons on the right, secondary then primary; Return and Esc work.
+Errors are one quiet `text2` line with OK. States: checking, available (auto-update off), downloading, preparing,
+ready ("Tern 0.2.1 is ready" · Later · Restart to update), installing, up to date (manual checks only), error. The
+move-to-Applications prompt is the same card: "Move Tern to Applications?" · Not now · Move to Applications.
+
 ### Settings, onboarding
 Settings is its own window with a section sidebar (Accounts, AI, Appearance, Shortcuts, Notifications,
 Advanced), flat rows with hairlines, the button system, segmented controls. Onboarding: one 640×560 window,
@@ -254,5 +264,6 @@ out after 1 s and show a small HUD.
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
---snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, settings and
-onboarding in light and dark; `--check` drives the shell through its behaviour and timings.
+--snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, settings,
+onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
+behaviour and timings.

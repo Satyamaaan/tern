@@ -1,0 +1,184 @@
+import AppKit
+import SwiftUI
+
+/// The small floating card Tern uses for its own prompts (updates, moving to Applications): a `raised` surface
+/// with 10 pt corners, a hairline edge and the overlay shadow; the app icon at the top left beside a title and a
+/// line of detail; optional content below, aligned with the text; buttons on the right. A `quiet` card (errors)
+/// sets its title as plain `text2` instead of a semibold heading.
+struct AppCard<Content: View, Buttons: View>: View {
+    static var width: CGFloat { 380 }
+    /// Where text starts: past the 44 pt icon and its 12 pt gap.
+    static var textInset: CGFloat { 56 }
+
+    let title: String
+    var detail: String?
+    var quiet = false
+    /// False drops the button row (a card that only reports progress).
+    var hasButtons = true
+    @ViewBuilder var content: () -> Content
+    @ViewBuilder var buttons: () -> Buttons
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(nsImage: AppIcon.image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 44, height: 44)
+                    .padding(-2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(quiet ? .ui(13) : .ui(14, .semibold))
+                        .lineSpacing(quiet ? 2 : 0)
+                        .foregroundStyle(Color(quiet ? Theme.text2 : Theme.text1))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail {
+                        Text(detail)
+                            .font(.ui(12.5))
+                            .lineSpacing(2)
+                            .foregroundStyle(Color(Theme.text2))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                // A lone line sits level with the icon's centre; more lines start at its top.
+                .frame(minHeight: 40, alignment: .leading)
+            }
+            content()
+                .padding(.leading, Self.textInset)
+            if hasButtons {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    buttons()
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: Self.width, alignment: .leading)
+        .background(shape.fill(Color(Theme.raised)))
+        .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
+        .overlayShadow()
+    }
+}
+
+extension AppCard where Content == EmptyView {
+    init(title: String, detail: String? = nil, quiet: Bool = false, @ViewBuilder buttons: @escaping () -> Buttons) {
+        self.init(title: title, detail: detail, quiet: quiet, hasButtons: true, content: { EmptyView() }, buttons: buttons)
+    }
+}
+
+/// A thin `ink` progress line on an `inkSoft` track. Nil animates a short segment back and forth.
+struct ThinProgress: View {
+    var fraction: Double?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color(Theme.inkSoft))
+                if let fraction {
+                    Capsule().fill(Color(Theme.ink))
+                        .frame(width: max(2, width * min(max(fraction, 0), 1)))
+                        .animation(.easeOut(duration: 0.2), value: fraction)
+                } else {
+                    TimelineView(.animation) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                        let travel = (1 - cos(phase * 2 * .pi)) / 2
+                        Capsule().fill(Color(Theme.ink))
+                            .frame(width: width * 0.28)
+                            .offset(x: (width * 0.72) * travel)
+                    }
+                }
+            }
+        }
+        .frame(height: 3)
+        .clipShape(Capsule())
+    }
+}
+
+/// The app's icon: the bundle's AppIcon.icns, or build/AppIcon.icns when running unbundled from
+/// `swift build` (snapshots).
+enum AppIcon {
+    @MainActor static let image: NSImage = {
+        if let icon = Bundle.main.image(forResource: "AppIcon") { return icon }
+        let built = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../build/AppIcon.icns").standardized
+        return NSImage(contentsOf: built) ?? NSApp.applicationIconImage
+    }()
+}
+
+/// A borderless, transparent window that floats an `AppCard`: it can take the keyboard (Return and Esc reach the
+/// card's buttons), moves by its background, keeps the card's top edge in place as the card grows or shrinks,
+/// and leaves room around the card for its shadow.
+@MainActor
+final class CardPanel: NSPanel {
+    /// Room for the overlay shadow (radius 15, 8 down) around the card.
+    static let margin = NSEdgeInsets(top: 24, left: 32, bottom: 44, right: 32)
+
+    init<V: View>(_ view: V) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        isMovableByWindowBackground = true
+        isReleasedWhenClosed = false
+        hidesOnDeactivate = false
+        collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        animationBehavior = .alertPanel
+        let margin = Self.margin
+        let root = view
+            .padding(EdgeInsets(top: margin.top, leading: margin.left, bottom: margin.bottom, trailing: margin.right))
+            .fixedSize()
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
+                self?.fit(size)
+            }
+        let hosting = NSHostingView(rootView: root)
+        hosting.sizingOptions = []
+        contentView = hosting
+        fit(hosting.fittingSize)
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    /// Esc closes the card the way its quiet button would.
+    var onCancel: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    /// Resizes to the card, keeping the top edge where it is.
+    private func fit(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        let top = frame.maxY
+        setFrame(NSRect(x: frame.minX, y: top - size.height, width: size.width, height: size.height), display: true)
+    }
+
+    /// Puts the card near the top of the main window, riding above it as a child window (so clicking the window
+    /// doesn't bury it), or in the upper middle of the screen when no window is up.
+    private func place() {
+        let size = frame.size
+        if let host = NSApp.windows.first(where: { $0 is MainWindow && $0.isVisible && !$0.isMiniaturized }) {
+            let area = host.frame
+            setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.maxY - 96 - size.height))
+            host.addChildWindow(self, ordered: .above)
+        } else if let screen = NSScreen.main?.visibleFrame {
+            setFrameOrigin(NSPoint(x: screen.midX - size.width / 2, y: screen.minY + screen.height * 0.62 - size.height / 2))
+        }
+    }
+
+    /// Shows the card. `takesFocus` only for something the user just asked for (a check, a prompt at launch): a
+    /// card that arrives on its own must not catch the keys of someone typing, where Return would press its
+    /// primary button.
+    func present(takesFocus: Bool) {
+        if !isVisible { place() }
+        if takesFocus && NSApp.isActive { makeKeyAndOrderFront(nil) } else { orderFront(nil) }
+    }
+
+    /// Hides the card and lets it go.
+    func dismiss() {
+        parent?.removeChildWindow(self)
+        orderOut(nil)
+    }
+}

@@ -64,8 +64,14 @@ swift test                      # all tests (keep them green)
 swift run tern-seed             # (re)writes ~/Library/Application Support/Tern/Tern-Fake.sqlite
 ./build.sh --debug              # build/Tern.app
 open build/Tern.app --args --fake   # run against the fake mailbox (also TERN_FAKE=1)
-scripts/release.sh              # Developer ID signed, notarized build/Tern-<version>.dmg (see the script's header)
+scripts/release.sh              # notarized DMG + signed update zip + appcast for the version in version.env
+scripts/publish.sh <version>    # uploads them to dhruvalgolakiya/tern-releases (only when asked)
 ```
+
+Updates: Sparkle 2 with Tern's own window (`Sources/Tern/Updates`). Only release builds (`TERN_RELEASE=1`, set by
+release.sh) get the feed URL and public key in Info.plist; dev builds, `--check`, `--snapshot` and tests never start
+the updater or the move-to-Applications prompt (`Sources/Tern/Install`). Raise `TERN_BUILD` in version.env every
+release. The EdDSA private key is a file outside the repo (see release.sh); never commit or print it.
 
 UI work should run against the fake mailbox. Don't drive the UI with osascript clicks or keystrokes while
 the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to check them.

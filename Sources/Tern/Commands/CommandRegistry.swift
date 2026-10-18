@@ -8,6 +8,9 @@ protocol ShellActions: AnyObject {
     func addAccount()
     func showMainWindow()
     func showAbout()
+    /// Auto-update; nil in development builds, which hide "Check for Updates…".
+    var updater: Updater? { get }
+    func checkForUpdates()
 }
 
 /// Builds every command once. Closures read the model at run time, so titles and enabled states stay current.
@@ -233,9 +236,13 @@ final class CommandRegistry {
 
         // App and settings
         list += [
-            Command(id: "settings", title: "Settings…", group: .settings, keys: [.command(",")], menu: .app,
-                    aliases: ["preferences"]) { [weak self] in self?.shell?.showSettings(nil) },
             Command(id: "about", title: "About Tern", group: .settings, menu: .app, hiddenInPalette: true) { [weak self] in self?.shell?.showAbout() },
+            Command(id: "checkForUpdates", title: "Check for Updates…", group: .settings, menu: .app,
+                    aliases: ["update", "upgrade", "new version", "install"],
+                    isEnabled: { [weak self] in self?.shell?.updater?.canCheck ?? false },
+                    isVisible: { [weak self] in self?.shell?.updater != nil }) { [weak self] in self?.shell?.checkForUpdates() },
+            Command(id: "settings", title: "Settings…", group: .settings, keys: [.command(",")], menu: .app, section: 1,
+                    aliases: ["preferences"]) { [weak self] in self?.shell?.showSettings(nil) },
             Command(id: "mainWindow", title: "Tern", group: .settings, menu: .window, section: 1, hiddenInPalette: true) { [weak self] in
                 self?.shell?.showMainWindow()
             },

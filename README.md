@@ -25,8 +25,10 @@ background.
 
 ## Download
 
-Notarized builds for Apple Silicon Macs are on the [Releases](https://github.com/dhruvalgolakiya/tern/releases) page:
-open the disk image and drag Tern to Applications. You still bring your own Google OAuth client (below).
+Notarized builds for Apple Silicon Macs are on the [Releases](https://github.com/dhruvalgolakiya/tern-releases/releases)
+page: open the disk image and drag Tern to Applications. From 0.2.0 Tern keeps itself up to date: new versions
+download in the background and install when Tern restarts (Settings → Advanced → Update automatically). You still
+bring your own Google OAuth client (below).
 
 ## Build and run
 
@@ -44,8 +46,12 @@ swift build                           # everything
 TERN_SKIP_PERF=1 swift test           # all tests
 swift run tern-seed                   # writes a 50,000-message fake mailbox
 open build/Tern.app --args --fake     # run against it (build with ./build.sh --debug first)
-scripts/release.sh                    # notarized build/Tern-<version>.dmg (needs a Developer ID; see the script)
+scripts/release.sh                    # notarized DMG, signed update zip and appcast (needs a Developer ID; see the script)
+scripts/publish.sh <version>          # uploads them to a GitHub release in dhruvalgolakiya/tern-releases
 ```
+
+The version lives in `version.env`; raise `TERN_BUILD` by one for every release (Sparkle compares it). Only builds
+made by `scripts/release.sh` carry the update feed, so development builds never update themselves.
 
 `CLAUDE.md` describes the architecture and the rules the code follows. The visual spec is
 `design/DESIGN.md`.
@@ -60,6 +66,10 @@ scripts/release.sh                    # notarized build/Tern-<version>.dmg (need
 - The Claude and OpenAI marks come from [Simple Icons](https://simpleicons.org) (path data CC0 1.0).
   `scripts/brandlogos.py` turns them into `Sources/Tern/Shared/BrandLogos.swift`. The marks are trademarks of
   Anthropic and OpenAI; Tern shows them only to name the AI provider it runs through.
+
+- [Sparkle](https://sparkle-project.org) for auto-update, under the MIT License
+  ([Resources/Licenses/Sparkle-LICENSE.txt](Resources/Licenses/Sparkle-LICENSE.txt)). Tern draws its own update window.
+- [dmgbuild](https://github.com/dmgbuild/dmgbuild) (MIT) lays out the disk image at release time; it isn't shipped.
 
 ## License
 

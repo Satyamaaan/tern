@@ -43,7 +43,8 @@ struct Snapshotter {
     }
 
     /// More states for visual review: hover + toast, the waterline, wide one-line rows, search, one
-    /// account with labels, collapsed sidebar, inbox zero, settings, onboarding and the project editor.
+    /// account with labels, collapsed sidebar, inbox zero, settings, onboarding, the project editor, and the
+    /// update card, move prompt and update settings.
     private func extras(_ window: MainWindow, _ directory: URL) {
         func shot(_ name: String, dark: Bool = false) {
             render(window, appearance: dark ? .darkAqua : .aqua, to: directory.appendingPathComponent("\(name).png"))
@@ -132,6 +133,7 @@ struct Snapshotter {
                            to: directory.appendingPathComponent("project-editor-\(dark ? "dark" : "light").png"), dark: dark)
             }
         }
+        updateShots(directory)
     }
 
     func standalone<V: View>(_ view: V, size: NSSize, to url: URL, dark: Bool) {
