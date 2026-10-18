@@ -117,6 +117,13 @@ extension AppModel {
 
     func isPinned(_ tab: ListTab) -> Bool { tab.pinKey.map(prefs.pinnedTabs.contains) ?? false }
 
+    /// Moves a pinned tab one place left (-1) or right (+1) among the pinned tabs.
+    func movePinnedTab(_ tab: ListTab, by step: Int) {
+        guard let key = tab.pinKey, let index = prefs.pinnedTabs.firstIndex(of: key),
+              prefs.pinnedTabs.indices.contains(index + step) else { return }
+        prefs.pinnedTabs.swapAt(index, index + step)
+    }
+
     /// The number next to a tab: unread threads, or what waits on you.
     func count(for tab: ListTab) -> Int? {
         let value: Int

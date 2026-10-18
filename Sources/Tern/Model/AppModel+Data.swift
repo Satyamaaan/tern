@@ -129,16 +129,23 @@ extension AppModel {
             newCursor = pending
             pendingCursor = nil
         } else if let current = cursor, snapshot.rows[current] == nil {
-            newCursor = Self.successor(of: current, in: old, keeping: snapshot)
+            let upward = animation == .collapse && prefs.afterTriage == .previous
+            newCursor = Self.successor(of: current, in: old, keeping: snapshot, upward: upward)
         } else if cursor == nil, animation == .reset {
             newCursor = snapshot.order.first
         }
         let moved = newCursor != cursor
         if moved { cursor = newCursor }
         // After triage the next thread is on screen: treat it like moving onto it (opened at once when
-        // reading in the reader).
+        // reading in the reader), unless the user goes back to the list after triage.
         if moved, animation == .collapse, newCursor != nil {
-            scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true)
+            if prefs.afterTriage == .list, readerExpanded || focus == .reader {
+                readerExpanded = false
+                focusList()
+                scheduleMarkRead(open: false, changed: true)
+            } else {
+                scheduleMarkRead(open: focus == .reader || readerExpanded, changed: true)
+            }
         }
         if cursorAnchor.map({ snapshot.rows[$0] == nil }) ?? true { cursorAnchor = cursor }
 
@@ -146,12 +153,14 @@ extension AppModel {
         listView?.selectionDidChange(scrollTo: animation == .reset ? nil : newCursor)
     }
 
-    /// The row that takes a removed row's place: the next one still listed, else the previous one.
-    private static func successor(of key: ThreadKey, in old: ListSnapshot, keeping new: ListSnapshot) -> ThreadKey? {
+    /// The row that takes a removed row's place: the next one still listed, else the previous one
+    /// (`upward`: the previous one first).
+    static func successor(of key: ThreadKey, in old: ListSnapshot, keeping new: ListSnapshot, upward: Bool = false) -> ThreadKey? {
         // A thread opened from outside the list (notification, palette) stays open.
         guard let index = old.position[key] else { return key }
-        if let next = old.order[index...].first(where: { new.rows[$0] != nil }) { return next }
-        return old.order[..<index].last(where: { new.rows[$0] != nil })
+        let below = old.order[index...].first(where: { new.rows[$0] != nil })
+        let above = old.order[..<index].last(where: { new.rows[$0] != nil })
+        return upward ? above ?? below : below ?? above
     }
 
     nonisolated static func log(_ error: Error) {

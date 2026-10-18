@@ -328,7 +328,7 @@ final class AppModel {
         if openDraft(cursor) { return }
         focus = .reader
         if listOnly { readerExpanded = true }
-        markRead([cursor])
+        if prefs.markRead != .manually { markRead([cursor]) }
         recordSearch()
         services.reader.focus()
     }
@@ -372,14 +372,16 @@ final class AppModel {
     // MARK: Mark read on open
 
     /// Opening a thread (click, Enter) marks it read at once; moving onto it with j/k marks it read
-    /// after it has been on screen for a moment, so skimming past doesn't. Moving through the list while
-    /// no thread is on screen (the reader closed over it) marks nothing.
+    /// after it has been on screen for a moment, so skimming past doesn't (at once with "Instantly", never
+    /// with "Manually"). Moving through the list while no thread is on screen (the reader closed over it)
+    /// marks nothing.
     func scheduleMarkRead(open: Bool, changed: Bool) {
         markReadTimer?.invalidate()
-        guard let key = cursor, checked.count <= 1 else { return }
+        guard let key = cursor, checked.count <= 1, prefs.markRead != .manually else { return }
         if open { markRead([key]); return }
         guard changed, readerVisible else { return }
-        markReadTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+        if prefs.markRead == .instantly { markRead([key]); return }
+        markReadTimer = Timer.scheduledTimer(withTimeInterval: MarkReadMode.dwell, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.cursor == key, self.checked.count <= 1 else { return }
                 self.markRead([key])
