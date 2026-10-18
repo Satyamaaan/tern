@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private var onboardingWindow: NSWindow?
     private var snoozeTimer: Timer?
     private var integration: Integration?
+    /// Auto-update; nil in development builds.
+    private(set) var updater: Updater?
+    private var movePrompt: MovePrompt?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Timing.appStarted = Timing.sinceProcessStart()
@@ -83,6 +86,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
             if options.isFake { seedDemoMail(database) } else { showOnboarding() }
         }
         startSnoozeTimer()
+        startUpdates()
+    }
+
+    /// Release builds: the updater, and the offer to move to Applications when Tern runs from elsewhere.
+    private func startUpdates() {
+        guard ReleaseBuild.isCurrent, !options.isHeadless else { return }
+        let location = AppLocation.current()
+        updater = Updater.start(options: options, location: location)
+        movePrompt = MovePrompt.offerIfNeeded(options: options, location: location)
     }
 
     /// Brings snoozed threads back to the inbox when their time comes. Checked every minute and on wake.
@@ -178,6 +190,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         if let section { settingsState?.section = section }
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    func checkForUpdates() {
+        updater?.checkForUpdates()
     }
 
     func showAbout() {
