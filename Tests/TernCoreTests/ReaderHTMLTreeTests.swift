@@ -240,3 +240,19 @@ func deepNestingParsesWithoutWalkingTheStack() {
         #expect(sanitize < 75, "\(name) took \(sanitize) ms to sanitize")
     }
 }
+
+@Test func depthCapNestingSanitizesOffTheMainThread() async {
+    // The reader sanitizes off the main thread through `onDeepStack`. On a 512 KB task or Dispatch thread a debug build
+    // runs out of stack writing a body nested to `HTMLDocument.maxDepth`, finding its quotes and freeing its tree.
+    let depth = HTMLDocument.maxDepth + 50
+    let cases = [
+        String(repeating: "<div>", count: depth) + "deep" + String(repeating: "</div>", count: depth),
+        "<style>p { color: #333 }</style>" + String(repeating: "<span style=\"color: #111\">", count: depth) + "deep",
+        "<p>Reply</p><div>On Mon, A wrote:</div>" + String(repeating: "<blockquote type=\"cite\"><div>", count: depth / 2) + "deep",
+        String(repeating: "<table><tr><td>", count: depth / 3) + "deep",
+    ]
+    for html in cases {
+        let mail = await MailSanitizer.onDeepStack { MailSanitizer.sanitize(html: html) }
+        #expect(mail.html.contains("deep"))
+    }
+}

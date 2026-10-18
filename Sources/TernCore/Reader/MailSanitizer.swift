@@ -68,6 +68,24 @@ public enum MailSanitizer {
             hasCollapsedQuote: collapsed)
     }
 
+    /// Stack for sanitizing: writing a body out recurses once per element level, up to `HTMLDocument.maxDepth`, and
+    /// so do the quote finder and freeing the parsed tree. Dispatch and Swift concurrency threads have 512 KB, which a
+    /// debug build overruns at the depth cap; the main thread has 8 MB.
+    public static let stackSize = 8 << 20
+
+    /// Runs `work` on a thread of its own with `stackSize` of stack and returns its result. Sanitizing off the main
+    /// thread goes through here.
+    public static func onDeepStack<Value: Sendable>(
+        qualityOfService: QualityOfService = .userInitiated, _ work: @escaping @Sendable () -> Value
+    ) async -> Value {
+        await withCheckedContinuation { continuation in
+            let thread = Thread { continuation.resume(returning: work()) }
+            thread.stackSize = stackSize
+            thread.qualityOfService = qualityOfService
+            thread.start()
+        }
+    }
+
     /// A URL for an inline `cid:` part, served by the reader's scheme handler.
     public static func contentIdURL(accountId: String, messageId: String, contentId: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
