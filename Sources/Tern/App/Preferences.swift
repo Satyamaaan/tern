@@ -75,6 +75,23 @@ enum MarkReadMode: String, CaseIterable, Identifiable {
     static let dwell: TimeInterval = 1.5
 }
 
+/// Whether remote images in mail load when a message opens.
+enum ImagesInMail: String, CaseIterable, Identifiable {
+    /// Every message's images load through Tern, except in Spam.
+    case automatic
+    /// Images stay hidden until loaded in a message, or the sender is on the always-load list.
+    case ask
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: "Load automatically"
+        case .ask: "Ask first"
+        }
+    }
+}
+
 /// Interface preferences, stored in UserDefaults so they apply before the database opens.
 /// Mail-related settings shared with other lanes (AI) live in the database `setting` table.
 @MainActor
@@ -106,6 +123,7 @@ final class Preferences {
     var recentCommands: [String] { didSet { save("recentCommands", recentCommands) } }
     var afterTriage: AfterTriage { didSet { save("afterTriage", afterTriage.rawValue) } }
     var markRead: MarkReadMode { didSet { save("markRead", markRead.rawValue) } }
+    var imagesInMail: ImagesInMail { didSet { save("imagesInMail", imagesInMail.rawValue) } }
     /// The settings section shown last, as a `SettingsSection` raw value.
     var settingsSection: String { didSet { save("settingsSection", settingsSection) } }
     /// The user's changes to keyboard shortcuts; only commands whose keys differ from their built-in ones.
@@ -129,6 +147,7 @@ final class Preferences {
         recentCommands = defaults.stringArray(forKey: "recentCommands") ?? []
         afterTriage = AfterTriage(rawValue: defaults.string(forKey: "afterTriage") ?? "") ?? .next
         markRead = MarkReadMode(rawValue: defaults.string(forKey: "markRead") ?? "") ?? .afterDelay
+        imagesInMail = ImagesInMail(rawValue: defaults.string(forKey: "imagesInMail") ?? "") ?? .automatic
         settingsSection = defaults.string(forKey: "settingsSection") ?? ""
         shortcutOverrides = ShortcutOverrides.load(from: defaults)
     }

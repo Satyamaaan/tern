@@ -643,3 +643,25 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
     // Several accounts are needed before "Send new mail from" shows.
     #expect(!SettingsItem.items(in: .mail, model: model).contains(.sendFrom))
 }
+
+@MainActor
+@Test func imagesLoadAutomaticallyUnlessTheUserAsks() throws {
+    let defaults = scratchDefaults()
+    #expect(Preferences(defaults: defaults).imagesInMail == .automatic, "mail looks the way its sender made it")
+    Preferences(defaults: defaults).imagesInMail = .ask
+    #expect(Preferences(defaults: defaults).imagesInMail == .ask)
+
+    // The always-load list shows, and is found, only while images wait for a click.
+    let model = try makeModel()
+    let saved = model.prefs.imagesInMail
+    defer { model.prefs.imagesInMail = saved }
+    model.prefs.imagesInMail = .automatic
+    #expect(SettingsItem.items(in: .mail, model: model).contains(.imagesInMail))
+    #expect(!SettingsItem.items(in: .mail, model: model).contains(.remoteImages))
+    #expect(SettingsCatalog.results(for: "images", model: model) == [.imagesInMail])
+    #expect(SettingsCatalog.results(for: "tracking pixels", model: model) == [.imagesInMail])
+    model.prefs.imagesInMail = .ask
+    let mail = SettingsItem.items(in: .mail, model: model)
+    #expect(mail.firstIndex(of: .imagesInMail).map { $0 + 1 } == mail.firstIndex(of: .remoteImages), "the list sits under the choice")
+    #expect(SettingsCatalog.results(for: "images", model: model) == [.imagesInMail, .remoteImages])
+}

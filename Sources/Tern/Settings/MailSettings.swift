@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-// Settings → Mail: how reading and triage behave, the senders whose images load, and sending.
+// Settings → Mail: how reading and triage behave, how images in mail load, and sending.
 
 struct MarkReadItem: View {
     @Environment(AppModel.self) private var model
@@ -42,16 +42,34 @@ struct AfterTriageItem: View {
     }
 }
 
-/// Remote images stay blocked until loaded in a message; "Always load from…" in the reader adds a sender
-/// here, and this is the one place to take them off again.
+struct ImagesInMailItem: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var prefs = model.prefs
+        SettingsRow(title: "Images in mail", detail: detail(prefs.imagesInMail)) {
+            SegmentedPicker(options: ImagesInMail.allCases, selection: $prefs.imagesInMail) { $0.title }
+        }
+    }
+
+    private func detail(_ choice: ImagesInMail) -> String {
+        switch choice {
+        case .automatic: "Senders can see when you open their mail. Tracking pixels are always blocked."
+        case .ask: "Images stay hidden until you load them, and senders can see when you do. Tracking pixels are always blocked."
+        }
+    }
+}
+
+/// With "Ask first", "Always load from…" in the reader adds a sender here, and this is the one place to take
+/// them off again.
 struct RemoteImagesItem: View {
     let state: SettingsState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Remote images", detail: state.imageSendersError ?? (state.imageSenders.isEmpty
-                ? "Blocked until you load them in a message. Senders you always load from show here."
-                : "Blocked until you load them in a message, except from these senders.")) { EmptyView() }
+            SettingsRow(title: "Always load images from", detail: state.imageSendersError ?? (state.imageSenders.isEmpty
+                ? "Choose Always load from… in a message, and its sender shows here."
+                : "Images from these senders load without asking, except in Spam.")) { EmptyView() }
             ForEach(state.imageSenders, id: \.self) { sender in
                 ImageSenderRow(sender: sender) { state.forgetImages(from: sender) }
             }

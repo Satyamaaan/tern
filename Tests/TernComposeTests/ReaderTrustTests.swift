@@ -60,6 +60,56 @@ private func mail(_ id: String, from: String, labels: [String], fromMe: Bool = f
     #expect(![sent, newsletter, stranger].contains(where: trust.allows), "no remote images when the blocker isn't installed")
 }
 
+@Test func loadAutomaticallyCoversEveryMessageButSpam() {
+    var trust = ReaderTrust(automatic: true)
+    let stranger = mail("1", from: "news@shop.example", labels: ["INBOX"])
+    let spam = mail("2", from: "news@shop.example", labels: ["SPAM"])
+    #expect(trust.allows(stranger))
+    #expect(!trust.allows(spam), "mail in Spam still asks")
+    trust.messages.insert(spam.key)
+    trust.messages.insert(stranger.key)
+    #expect(trust.allows(spam), "Load images still works there")
+    #expect(!trust.loadedOnce(stranger) && !trust.loadedOnce(spam), "no Always load offer in this mode")
+    trust.remoteImages = false
+    #expect(!trust.allows(stranger), "no remote images when the blocker isn't installed")
+}
+
+@Test func changingTheImagesSettingRendersFreshBodies() throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    let account = Account(email: "me@example.com")
+    try store.upsertAccount(account)
+    let html = #"<p>Deployed</p><img src="https://res.cloudinary.com/acme/logo.png" width="250" alt="Logo">"#
+        + #"<img src="https://notifylink.example.app/e/o/ZXhhbXBsZS10b2tlbg" alt="">"#
+    try store.upsertMessages([
+        MailMessage(accountId: account.id, id: "m1", threadId: "t1", date: Date(), fromName: "Railway", fromEmail: "team@railway.example",
+                    subject: "Deployed", snippet: "Deployed", bodyHtml: html, bodyState: .full, labelIds: ["INBOX"]),
+    ])
+    let detail = try #require(try store.threadDetail(ThreadKey(accountId: account.id, threadId: "t1")))
+    func context(_ automatic: Bool) -> ReaderContext {
+        ReaderContext(accountEmails: [account.email], labelNames: [:], trust: ReaderTrust(automatic: automatic), summary: [:])
+    }
+    func message(_ automatic: Bool) throws -> [String: Any] {
+        try #require((ReaderPayload.make(detail, context: context(automatic)).payload["messages"] as? [[String: Any]])?.first)
+    }
+    #expect(ReaderPayload.signature(detail, context: context(true)) != ReaderPayload.signature(detail, context: context(false)))
+    let shown = try message(true), asked = try message(false)
+    #expect(shown["bodyVersion"] as? String != asked["bodyVersion"] as? String, "the page doesn't keep the body it had")
+    let shownBody = try #require(shown["body"] as? [String: Any]), askedBody = try #require(asked["body"] as? [String: Any])
+    #expect(shownBody["blocked"] as? Int == 0 && askedBody["blocked"] as? Int == 1)
+    let shownHTML = try #require(shownBody["html"] as? String)
+    #expect(shownHTML.contains("src=\"tern-remote://i/") && !shownHTML.contains("cloudinary") && !shownHTML.contains("notifylink"))
+    #expect(shown["imagesAllowed"] as? Bool == true && shown["imagesOnce"] as? Bool == false)
+
+    // Without the content blocker, Load automatically loads nothing: the body is sanitized as blocked.
+    let unguarded = ReaderContext(accountEmails: [account.email], labelNames: [:],
+                                  trust: ReaderTrust(remoteImages: false, automatic: true), summary: [:])
+    let blocked = try #require((ReaderPayload.make(detail, context: unguarded).payload["messages"] as? [[String: Any]])?.first)
+    let blockedBody = try #require(blocked["body"] as? [String: Any])
+    #expect(blocked["imagesAllowed"] as? Bool == false && blocked["imagesOnce"] as? Bool == false)
+    #expect(blockedBody["blocked"] as? Int == 1 && (blockedBody["html"] as? String)?.contains("tern-remote") == false)
+    #expect(ReaderPayload.signature(detail, context: unguarded) == ReaderPayload.signature(detail, context: context(false)))
+}
+
 @MainActor
 @Test func showOriginalLetsClosedWindowsGo() {
     weak var closedWindow: NSWindow?

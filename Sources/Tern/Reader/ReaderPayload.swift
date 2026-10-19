@@ -1,9 +1,10 @@
 import AppKit
 import TernCore
 
-/// Which messages may load remote images. The From header can be forged, so it never decides alone:
-/// your own mail is recognised by Gmail's SENT label, a sender you chose never counts in Spam, and
-/// "Load images" on a message covers only that message.
+/// Which messages may load remote images. With "Load automatically" every message does, except in Spam.
+/// With "Ask first" the From header, which can be forged, never decides alone: your own mail is recognised
+/// by Gmail's SENT label, a sender you chose never counts in Spam, and "Load images" on a message covers
+/// only that message. Tracking pixels are dropped by the sanitizer either way.
 struct ReaderTrust: Sendable {
     /// Lowercased senders the user chose "Always load images" for.
     var senders: Set<String> = []
@@ -11,15 +12,18 @@ struct ReaderTrust: Sendable {
     var messages: Set<MessageKey> = []
     /// False when the reader can't block remote loads; then no message gets its images.
     var remoteImages = true
+    /// "Load automatically": images load in every message outside Spam.
+    var automatic = false
 
     func allows(_ message: MailMessage) -> Bool {
         guard remoteImages else { return false }
+        if automatic, !message.labelIds.contains(SystemLabel.spam) { return true }
         return Self.isOwn(message) || messages.contains(message.key) || trustsSender(of: message)
     }
 
     /// Images load for this message only, so the reader offers to always load them from its sender.
     func loadedOnce(_ message: MailMessage) -> Bool {
-        remoteImages && messages.contains(message.key) && !Self.isOwn(message) && !trustsSender(of: message)
+        !automatic && remoteImages && messages.contains(message.key) && !Self.isOwn(message) && !trustsSender(of: message)
             && !message.labelIds.contains(SystemLabel.spam)
     }
 
@@ -195,7 +199,8 @@ enum ReaderPayload {
             "draft": message.isDraft,
             "imagesAllowed": isTrusted(message, context),
             "imagesOnce": context.trust.loadedOnce(message),
-            "bodyVersion": "\(message.bodyState.rawValue):\(bodyLength(message))",
+            // A body sanitized with the other trust is a different body: the page mustn't keep it.
+            "bodyVersion": "\(message.bodyState.rawValue):\(bodyLength(message)):\(isTrusted(message, context))",
             "attachments": attachments,
         ]
     }

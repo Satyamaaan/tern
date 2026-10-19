@@ -147,6 +147,7 @@ final class Integration {
                     try store.removeAccount(account.id).delete(draftFilesDirectory: drafts, folders: [cache])
                 }.value
             }
+            await ReaderRemoteImages.clearCache()
             await self.googleAccounts?.signOut(account.email)
         }
     }
