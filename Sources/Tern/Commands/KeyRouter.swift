@@ -1,10 +1,12 @@
 import AppKit
 import WebKit
 
-/// Keyboard handling for the main window. A local event monitor sees every key first:
+/// Keyboard handling for the main window. A local event monitor sees every key first, and a key it handles
+/// goes no further:
 /// - while a shortcut is being recorded in Settings, every key goes to the recorder;
-/// - while text is being typed, bare keys go straight to the text view (menus never see them), and ⌘ and ⌃
-///   keys of commands that act on mail don't fire from the menu bar either (`CommandRegistry.leavesToText`);
+/// - while text is being typed, keys take their normal way to the text view (input methods and Press and
+///   Hold included); the menu bar never fires a bare key (`BareKeySafeMenu`), nor the ⌘ and ⌃ keys of
+///   commands that act on mail (`CommandRegistry.leavesToText`);
 /// - while the palette is open, navigation keys drive it;
 /// - while the settings page is open, Esc, ⌘[ and the arrows drive it, and nothing reaches the mail;
 /// - while the open conversation has the keyboard, the keys of the commands it answers itself (Next and
@@ -56,7 +58,11 @@ final class KeyRouter {
 
     func install() {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated { self?.handle(event) ?? event }
+            MainActor.assumeIsolated {
+                // nil from `handle` means the key was handled: AppKit must not deliver it again.
+                guard let self else { return event }
+                return self.handle(event)
+            }
         }
     }
 
@@ -71,13 +77,11 @@ final class KeyRouter {
             return nil
         }
 
-        // Typing anywhere in the app: plain keys belong to the text, never to menu shortcuts, and ⌘ keys
-        // keep their text meaning (⌘A selects the query, ⌘Z undoes typing).
-        if let text = Self.textInput(in: event.window) {
-            if event.window === mainWindow, handleWhileTyping(event, in: text) { return nil }
-            guard !hasCommand, Self.isPrintable(event) else { return event }
-            text.keyDown(with: event)
-            return nil
+        // Typing anywhere in the app: keys belong to the text, never to list commands, and ⌘ keys keep their
+        // text meaning (⌘A selects the query, ⌘Z undoes typing).
+        if Self.textInput(in: event.window) != nil {
+            if event.window === mainWindow, handleWhileTyping(event) { return nil }
+            return event
         }
         guard event.window === mainWindow, event.window?.attachedSheet == nil else { return event }
         if let settings = model.settings, model.palette == nil, settings.handleKey(event, registry: registry) { return nil }
@@ -111,7 +115,7 @@ final class KeyRouter {
     }
 
     /// Keys the search pill and palette field handle themselves.
-    private func handleWhileTyping(_ event: NSEvent, in text: NSTextView) -> Bool {
+    private func handleWhileTyping(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(KeyShortcut.relevantModifiers)
         if model.palette != nil, let palette = paletteKeys, let key = Self.paletteKey(event, flags) {
             return palette(key)
@@ -205,11 +209,6 @@ final class KeyRouter {
     }
 
     // MARK: Text input
-
-    private static func isPrintable(_ event: NSEvent) -> Bool {
-        guard let scalar = event.characters?.unicodeScalars.first else { return false }
-        return scalar.value >= 0x20 && scalar.value != 0x7F && !(0xF700...0xF8FF).contains(scalar.value)
-    }
 
     /// The text view receiving typing in the window, if any (field editors included).
     static func textInput(in window: NSWindow?) -> NSTextView? {
