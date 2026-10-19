@@ -3,8 +3,8 @@ import SwiftUI
 import TernCore
 import UniformTypeIdentifiers
 
-/// The sidebar behind the bottom bar's toggle (⌃⌘S): mailboxes, projects, accounts, the sync line and
-/// the light/dark switch.
+/// The sidebar behind the bottom bar's toggle (⌃⌘S): mailboxes, projects, accounts, the sync line,
+/// the light/dark switch and Settings.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
 
@@ -264,7 +264,7 @@ private struct ProjectRow: View {
 // MARK: - Sync status
 
 /// One quiet line pinned to the bottom: "Up to date", "Syncing 1,204 of 8,330", "Offline — changes will
-/// sync", or a "Sign in again" link.
+/// sync", or a "Sign in again" link, then the light/dark switch and Settings.
 struct SyncStatusLine: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
@@ -273,13 +273,18 @@ struct SyncStatusLine: View {
         HStack(spacing: 7) {
             content
             Spacer(minLength: 0)
-            // Light/dark switch, shown on hover only so the footer stays one quiet line.
             Button { model.prefs.appearance = AppearanceMode.flipped } label: {
                 IconView(icon: colorScheme == .dark ? .sun : .moon, size: 15, color: Color(Theme.text2))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(IconButtonStyle())
             .help(model.registry?.hint(colorScheme == .dark ? "Switch to Light Appearance" : "Switch to Dark Appearance", "appearance.toggle") ?? "")
+            Button { model.registry?.run("settings") } label: {
+                IconView(icon: .settings, size: 15, color: Color(model.settingsOpen ? Theme.text1 : Theme.text2))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(IconButtonStyle())
+            .help(model.registry?.hint("Settings", "settings") ?? "Settings")
         }
         .font(.ui(12))
         .padding(.leading, 18)
