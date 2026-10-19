@@ -8,6 +8,9 @@ public enum MailAction: Codable, Hashable, Sendable {
     case removeLabel(String)
     /// Archive and add a label, like Gmail's "Move to".
     case moveToLabel(String)
+    /// Files the conversation under one of Gmail's tabs: its category label replaces any other, so Gmail
+    /// files it there too.
+    case moveToTab(InboxTab)
     case snooze(until: Date)
     case unsnooze
 
@@ -26,17 +29,26 @@ public enum MailAction: Codable, Hashable, Sendable {
         case .addLabel: "addLabel"
         case .removeLabel: "removeLabel"
         case .moveToLabel: "moveToLabel"
+        case .moveToTab: "moveToTab"
         case .snooze: "snooze"
         case .unsnooze: "unsnooze"
         }
     }
 
-    /// Adds or removes a user label, which project rules may look at.
-    var changesUserLabels: Bool {
+    /// Adds or removes a label project rules may look at: a user label, or Gmail's category.
+    var changesRuleLabels: Bool {
         switch self {
-        case .addLabel, .removeLabel, .moveToLabel: true
+        case .addLabel, .removeLabel, .moveToLabel, .moveToTab: true
         default: false
         }
+    }
+
+    /// Its labels must hold whatever the messages gain or lose before the op reaches Gmail: Move to tab's
+    /// category replaces every other, also one Gmail files a message under meanwhile. Its changes carry that
+    /// intent (`LabelChange.intentAdd`, `intentRemove`) apart from what they changed here.
+    var keepsIntent: Bool {
+        if case .moveToTab = self { return true }
+        return false
     }
 
     /// True when the thread leaves the current list (the UI then selects the next one).
@@ -64,6 +76,9 @@ struct QueuedChanges: Sendable, Hashable {
     let accountId: String
     let changes: [LabelChange]
     let labelsAfter: [String: [String]]
+    /// Move to tab: the Gmail category each message had before it (absent: none), which its undo moves it back
+    /// to. Nil for other actions.
+    var tabsBefore: [String: InboxTab]?
 }
 
 extension LabelChange {
@@ -89,19 +104,30 @@ extension MailStore {
             var newLabels: [String: [String]] = [:]
 
             for (threadId, threadMessages) in Dictionary(grouping: messages, by: \.threadId) {
+                var threadChanges: [LabelChange] = []
+                var intentOnly: [LabelChange] = []
                 for change in labelChanges(for: action, messages: threadMessages) {
                     guard let message = threadMessages.first(where: { $0.id == change.messageId }) else { continue }
                     var labels = Set(message.labelIds)
                     labels.subtract(change.remove)
                     labels.formUnion(change.add)
-                    let effective = LabelChange(
+                    var effective = LabelChange(
                         messageId: change.messageId,
                         add: change.add.filter { !message.labelIds.contains($0) },
                         remove: change.remove.filter { message.labelIds.contains($0) })
-                    guard !effective.add.isEmpty || !effective.remove.isEmpty else { continue }
+                    if action.keepsIntent {
+                        effective.intentAdd = change.add
+                        effective.intentRemove = change.remove
+                    }
+                    guard !effective.add.isEmpty || !effective.remove.isEmpty else {
+                        if action.keepsIntent { intentOnly.append(effective) }
+                        continue
+                    }
                     newLabels[message.id] = labels.sorted()
-                    changes.append(effective)
+                    threadChanges.append(effective)
                 }
+                // Messages already as asked carry the intent too, so a label one gains meanwhile can't undo the move.
+                if !threadChanges.isEmpty { changes += threadChanges + intentOnly }
                 let key = ThreadKey(accountId: accountId, threadId: threadId)
                 switch action {
                 case .snooze(let until):
@@ -120,12 +146,21 @@ extension MailStore {
                 let payload = LabelOpPayload(action: action.name, threadIds: threadIds, changes: changes)
                 let op = PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload))
                 try op.insert(db)
-                ops.append(QueuedChanges(opId: db.lastInsertedRowID, accountId: accountId, changes: changes, labelsAfter: newLabels))
+                var queued = QueuedChanges(opId: db.lastInsertedRowID, accountId: accountId, changes: changes, labelsAfter: newLabels)
+                if case .moveToTab = action {
+                    let moved = Set(changes.map(\.messageId))
+                    var tabsBefore: [String: InboxTab] = [:]
+                    for message in messages where moved.contains(message.id) {
+                        tabsBefore[message.id] = InboxTab.allCases.first { message.labelIds.contains($0.labelId) }
+                    }
+                    queued.tabsBefore = tabsBefore
+                }
+                ops.append(queued)
             }
         }
 
         // Gmail echoes the change back unchanged, so sync won't re-run label-based project rules.
-        if action.changesUserLabels { try ProjectRules.apply(db, keys: Set(threads)) }
+        if action.changesRuleLabels { try ProjectRules.apply(db, keys: Set(threads)) }
         return UndoToken(action: action, threads: threads, ops: ops, previousSnoozes: previousSnoozes)
     }
 
@@ -153,12 +188,18 @@ extension MailStore {
     /// Puts threads back by taking each message's exact change back from its current labels, so changes
     /// made since (another action, sync) survive. A queued op is dropped only when Gmail can't have
     /// seen it (it was never dispatched) and nothing has changed its messages since; otherwise the
-    /// exact reverse goes to Gmail after it, as one op per account.
+    /// exact reverse goes to Gmail after it, as one op per account. Move to tab is taken back by moving
+    /// each message back (`movingBack`).
     public func undo(_ token: UndoToken) throws {
         try database.writer.write { db in
             var reverse: [String: [LabelChange]] = [:]
+            var movesBack: [String: [LabelChange]] = [:]
             // Newest first, so each op is checked against the labels it left behind.
             for queued in token.ops.reversed() {
+                if let tabsBefore = queued.tabsBefore {
+                    movesBack[queued.accountId, default: []] += try Self.movingBack(db, queued, to: tabsBefore)
+                    continue
+                }
                 let current = try Self.messageLabels(db, accountId: queued.accountId, messageIds: Array(queued.labelsAfter.keys))
                 let muted = try Setting.fetchOne(db, key: Self.muteLabelKey(queued.accountId))?.value
                 let changes = queued.changes.map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
@@ -185,8 +226,13 @@ extension MailStore {
                 let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: net)
                 try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
             }
+            for (accountId, changes) in movesBack where !changes.isEmpty {
+                let threadIds = token.threads.filter { $0.accountId == accountId }.map(\.threadId)
+                let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: changes)
+                try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
+            }
 
-            if token.action.changesUserLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
+            if token.action.changesRuleLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
 
             for (key, until) in token.previousSnoozes {
                 if let until {
@@ -196,6 +242,36 @@ extension MailStore {
                 }
             }
         }
+    }
+
+    /// Move to tab's undo, a move back like the move itself: each message goes back to the Gmail category it had
+    /// when the user acted, whatever Gmail filed it under since, with every other category off (all of them for
+    /// one that had none). So no message is left with two categories, nor with none unless it had none, and this
+    /// works the same whether the move is queued, on its way, done or failed. The move's op is dropped when Gmail
+    /// can't have seen it or it failed; the move back is sent either way, since Gmail may have refiled the
+    /// messages meanwhile. Returns the changes to send.
+    private static func movingBack(_ db: Database, _ queued: QueuedChanges, to tabsBefore: [String: InboxTab]) throws -> [LabelChange] {
+        if let op = try PendingOp.fetchOne(db, key: queued.opId), (op.state == .pending && !op.dispatched) || op.state == .failed {
+            try op.delete(db)
+        }
+        let ids = queued.changes.map(\.messageId)
+        let current = try messageLabels(db, accountId: queued.accountId, messageIds: ids)
+        var changes: [LabelChange] = []
+        var restore: [String: [String]] = [:]
+        for id in ids {
+            guard var labels = current[id].map(Set.init) else { continue }
+            let before = tabsBefore[id]
+            let add = before.map { [$0.labelId] } ?? []
+            let remove = InboxTab.allCases.filter { $0 != before }.map(\.labelId)
+            changes.append(LabelChange(
+                messageId: id, add: add.filter { !labels.contains($0) }, remove: remove.filter { labels.contains($0) },
+                intentAdd: add, intentRemove: remove))
+            labels.subtract(remove)
+            labels.formUnion(add)
+            restore[id] = labels.sorted()
+        }
+        try setLabels(db, accountId: queued.accountId, restore)
+        return changes
     }
 
     /// Returns snoozed threads whose time has come to the inbox, unread. Returns their keys.
@@ -316,6 +392,8 @@ extension MailStore {
             return all(remove: [id])
         case .moveToLabel(let id):
             return all(add: [id], remove: [SystemLabel.inbox])
+        case .moveToTab(let tab):
+            return all(add: [tab.labelId], remove: InboxTab.allCases.filter { $0 != tab }.map(\.labelId))
         case .unsnooze:
             return all(add: [SystemLabel.inbox])
         }

@@ -13,7 +13,7 @@ extension SelfCheck {
         services.muteThreads = { keys in try AccountSync.mute(keys, in: store) }
         defer { services.muteThreads = previous }
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         guard let key = model.cursor else { return check("mute: a row to mute", false) }
 

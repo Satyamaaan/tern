@@ -21,7 +21,7 @@ extension MailThread {
             snippet: String(text.prefix(200)), lastDate: draft.updatedAt, lastInboundDate: nil, messageCount: 1,
             unreadCount: 0, isStarred: false, isImportant: false, hasAttachments: !draft.attachments.isEmpty,
             hasDraft: true, participants: [Participant(email: draft.accountId)] + draft.toList,
-            labelIds: [SystemLabel.draft])
+            labelIds: [SystemLabel.draft], gmailTab: nil)
     }
 }
 

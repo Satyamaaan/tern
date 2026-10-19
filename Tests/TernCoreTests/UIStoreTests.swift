@@ -29,34 +29,29 @@ private func seededStore() throws -> MailStore {
     return store
 }
 
-@Test func inboxFilterSplitsByCategoryAndFlag() throws {
+@Test func inboxFilterReadsATabByItsFallback() throws {
     let store = try seededStore()
-    let important = InboxFilter(categories: [.people], includeUncategorized: true, includeNeedsReply: true)
-    let ids = try store.database.reader.read { db in
-        try MailStore.fetchInboxRows(db, important, limit: 10).map(\.thread.id)
+    func ids(_ tab: InboxTab?) throws -> [String] {
+        try store.database.reader.read { db in try MailStore.fetchInboxRows(db, InboxFilter(tab: tab), limit: 10).map(\.thread.id) }
     }
-    #expect(ids == ["fresh", "reply", "people"])
-
-    var rest = important
-    rest.needsReply = .exclude
-    let restIds = try store.database.reader.read { db in try MailStore.fetchInboxRows(db, rest, limit: 10).map(\.thread.id) }
-    #expect(restIds == ["fresh", "people"])
-
-    let newsletters = InboxFilter(categories: [.newsletter])
-    let newsIds = try store.database.reader.read { db in try MailStore.fetchInboxRows(db, newsletters, limit: 10).map(\.thread.id) }
-    #expect(newsIds == ["news"])
+    // No Gmail category on any of them: people and unclassified mail are in Primary, a newsletter in
+    // Promotions, a notification (needs reply or not) in Updates.
+    #expect(try ids(nil) == ["fresh", "reply", "news", "people"])
+    #expect(try ids(.primary) == ["fresh", "people"])
+    #expect(try ids(.promotions) == ["news"])
+    #expect(try ids(.updates) == ["reply"])
+    #expect(try ids(.social).isEmpty)
 }
 
-@Test func scopeCountsMatchFilters() throws {
+@Test func scopeCountsCountTabs() throws {
     let store = try seededStore()
     let counts = try store.scopeCounts(accountId: me.id)
     #expect(counts.inboxUnread == 3)
     #expect(counts.needsReply == 1)
     #expect(counts.allAccountsInboxUnread == 3)
-    let important = InboxFilter(categories: [.people], includeUncategorized: true, includeNeedsReply: true)
-    #expect(counts.unread(in: important) == 2)
-    #expect(counts.needingAction(in: important) == 3)
-    #expect(counts.unread(in: InboxFilter(categories: [.newsletter])) == 1)
+    #expect(counts.tabThreads == [.primary: 2, .promotions: 1, .updates: 1])
+    #expect(counts.tabUnread == [.primary: 2, .promotions: 1])
+    #expect(try store.scopeCounts(accountId: "other@example.com").tabThreads.isEmpty)
 }
 
 @Test func needsReplyToggleCreatesAndRestores() throws {

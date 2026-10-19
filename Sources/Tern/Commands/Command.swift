@@ -43,7 +43,7 @@ struct Command: Identifiable {
     /// Its ⌘ or ⌃ key may fire while a text field has the keyboard. Off unless the command never acts on mail and
     /// belongs to every moment: ⌘K, new mail, Settings, find, print, New Project, ⌘0–⌘9, view and appearance, the
     /// app's own items. Any other command's key keeps its meaning in the text (⌃G beeps, ⌃H deletes back) and the
-    /// menu bar leaves it alone; so does Split Inbox, which rebuilds the tabs and the list.
+    /// menu bar leaves it alone; so does Inbox Tabs, which rebuilds the tabs and the list.
     var isTextSafe = false
     var isEnabled: @MainActor () -> Bool = { true }
     /// Title that changes with state ("Star" / "Unstar"); falls back to `title`.

@@ -59,8 +59,17 @@ enum Theme {
         }
     }
 
-    /// The Important tab's purple tag.
-    static let importantColor = dynamic(light: 0x7C5CDB, dark: 0xA78BFA)
+    /// The small hue of a Gmail tab's icon: Primary, Promotions and Updates share People's, Promotion's and
+    /// Notification's; Social is violet, Forums teal (Receipt's).
+    static func tabColor(_ tab: InboxTab) -> NSColor {
+        switch tab {
+        case .primary: categoryColor(.people)
+        case .promotions: categoryColor(.promotion)
+        case .social: dynamic(light: 0x7C5CDB, dark: 0xA78BFA)
+        case .updates: categoryColor(.notification)
+        case .forums: categoryColor(.receipt)
+        }
+    }
 
     /// Avatar tint for an account in the unified view: the account hue, soft, readable in both themes.
     static func accountTint(_ index: Int) -> (fill: NSColor, text: NSColor) {

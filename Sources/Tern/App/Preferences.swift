@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import TernCore
 
 enum AppearanceMode: String, CaseIterable, Identifiable {
     case system, light, dark
@@ -132,6 +133,7 @@ final class Preferences {
     /// The app uses `shared`; tests pass a scratch suite.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        Self.migrateInboxTabs(defaults)
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .auto
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
@@ -150,6 +152,37 @@ final class Preferences {
         imagesInMail = ImagesInMail(rawValue: defaults.string(forKey: "imagesInMail") ?? "") ?? .automatic
         settingsSection = defaults.string(forKey: "settingsSection") ?? ""
         shortcutOverrides = ShortcutOverrides.load(from: defaults)
+    }
+
+    /// The commands of the split-inbox tabs before Gmail's (Important, People, Notifications, Newsletters, Other)
+    /// and the Gmail tab's command that took each one's place; People and Other have none.
+    static let renamedTabCommands = [
+        "split.important": "tab.primary", "split.newsletters": "tab.promotions", "split.notifications": "tab.updates",
+    ]
+
+    /// Moves what was saved for the old tab commands to the Gmail tabs': a changed key goes to its new command
+    /// unless that one has its own, and recent palette commands follow (People and Other drop out). A Gmail tab
+    /// whose built-in key the user has given another command starts without one (⌥5 was Notifications', is
+    /// Social's), since registry validation would otherwise take the key back. Does nothing once nothing names an
+    /// old command.
+    static func migrateInboxTabs(_ defaults: UserDefaults) {
+        let old = { (id: String) in id.hasPrefix("split.") }
+        if var stored = defaults.dictionary(forKey: ShortcutOverrides.defaultsKey) as? [String: [String]], stored.keys.contains(where: old) {
+            for id in stored.keys.filter(old) {
+                let keys = stored.removeValue(forKey: id)
+                if let new = renamedTabCommands[id], stored[new] == nil { stored[new] = keys }
+            }
+            let claimed = Set(stored.values.joined().compactMap(KeyShortcut.init(stored:)))
+            for tab in InboxTab.allCases where stored["tab.\(tab.rawValue)"] == nil && claimed.contains(CommandRegistry.defaultKey(tab)) {
+                stored["tab.\(tab.rawValue)"] = []
+            }
+            if stored.isEmpty { defaults.removeObject(forKey: ShortcutOverrides.defaultsKey) } else { defaults.set(stored, forKey: ShortcutOverrides.defaultsKey) }
+        }
+        if let recent = defaults.stringArray(forKey: "recentCommands"), recent.contains(where: old) {
+            var seen = Set<String>()
+            let renamed = recent.compactMap { old($0) ? renamedTabCommands[$0] : $0 }.filter { seen.insert($0).inserted }
+            defaults.set(renamed, forKey: "recentCommands")
+        }
     }
 
     func noteRecent(_ commandId: String) {

@@ -204,6 +204,14 @@ struct ReaderTopBar: View {
                         set: { model.setProject(project.id, on: $0) }))
                 }
             }
+            if app?.prefs.splitInbox == true {
+                let current = thread.gmailTab ?? InboxTab(fallback: model.detail?.ai?.category)
+                Menu("Move to Tab") {
+                    ForEach(InboxTab.allCases) { tab in
+                        Toggle(tab.title, isOn: Binding(get: { current == tab }, set: { if $0 { model.perform(.moveToTab(tab)) } }))
+                    }
+                }
+            }
             Button(thread.isStarred ? "Unstar" : "Star") { model.perform(thread.isStarred ? .unstar : .star) }
         }
         Button("Mark Unread") { model.perform(.markUnread) }

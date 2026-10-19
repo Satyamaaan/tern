@@ -37,10 +37,18 @@ design/               research and the visual spec (DESIGN.md)
 - `TernCore/Models.swift` — records. Dates are seconds since 1970 (see `TernRecord`).
 - `MailStore` — the only code that writes messages, threads, `thread_label` and the search index.
   `MailThread` rows are derived; never write them yourself, call `refreshThreads`. Sync code that needs
-  its own transaction uses the `static func …(_ db: Database, …)` variants.
+  its own transaction uses the `static func …(_ db: Database, …)` variants. Each thread's Gmail tab is derived
+  too (`MailThread.gmailTab`, copied to its `thread_label` rows for the inbox tab indexes): the category label
+  of its newest message from someone else (`InboxTab.gmailTab`); threads without one fall back to
+  `thread_ai.category` (`InboxTab(fallback:)`, unclassified → Primary). Move to tab is `MailAction.moveToTab`.
 - `MailStore.perform(_:on:)` / `undo(_:)` — optimistic actions. Each writes one `PendingOp` per account
-  with a `LabelOpPayload` of exact per-message label changes.
-- `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads.
+  with a `LabelOpPayload` of exact per-message label changes. Move to tab also records what it asks of Gmail
+  (`LabelChange.intentAdd`/`intentRemove`: every other category comes off): that is what is sent and what sync
+  replays over Gmail's newer labels. Its undo is a move back, not a reverse: each message to the category it had
+  when the user acted (none: all off), with the same intent, whatever Gmail filed it under meanwhile.
+- `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads. Scope counts
+  (`fetchScopeCounts`) are a pass over the scope's whole inbox, so they are only ever read off the main thread;
+  the tab bar's Gmail tabs come from a bounded probe (`fetchTabsWithMail`) when the scope is set.
 - `SearchService.search(_:accountId:limit:) -> [ThreadRow]`.
 - `TernSync/GmailAPI.swift` — protocol + DTOs mirroring Gmail API v1 JSON. The engine is tested against an
   in-memory fake implementation; the app uses the HTTP client.
@@ -104,8 +112,8 @@ the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to
   rebuilt when shortcuts change. While a text field has the keyboard the menu bar also leaves alone the ⌘/⌃ keys
   of commands that aren't `isTextSafe` (`registry.leavesToText`), so they keep their text meaning. Commands aren't
   text-safe unless they set `isTextSafe: true`: ⌘K, new mail, Settings, find, print, New Project, ⌘0–⌘9, view and
-  appearance, and the app's own items. Don't add one that acts on mail or rebuilds the tabs or the list (Split
-  Inbox isn't text-safe).
+  appearance, and the app's own items. Don't add one that acts on mail or rebuilds the tabs or the list (Inbox
+  Tabs isn't text-safe).
 - A command that only makes sense in one place sets `yieldsToReader` (list) or `readerOnly`, so it can share a
   bare key with a command of the other scope (`ShortcutRules.canShare`); ⌘/⌃ keys are never shared. Reserved keys
   (macOS, fixed menu items, text-editing Control keys) and locked commands are in `ShortcutRules`. Saved overrides
@@ -113,7 +121,7 @@ the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to
   Launch reads no file for this: the Control keys of the system's and the user's key bindings files
   (`KeyBindingFiles`) are read once in the background after the window is up (and when the recorder starts), and
   `CommandRegistry.loadKeyBindings` then cleans the saved overrides again.
-- A setting that changes how the list is read under the open thread (Split Inbox) reloads with
+- A setting that changes how the list is read under the open thread (Inbox Tabs) reloads with
   `reloadList(keepingPlace: true)`, which keeps the cursor, the selection and the open thread.
 - The reader page runs Next/Previous Message, Open and Quick Look itself by action name; `KeyRouter.pageKeyMap`
   sends their current keys to `reader.js` (`ReaderWebEngine.keyActions`). Don't hard-code keys in the page.

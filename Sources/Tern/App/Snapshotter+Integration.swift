@@ -42,8 +42,7 @@ extension Snapshotter {
         let services = model.services
 
         // A conversation of several messages, opened from the list.
-        model.show(.inbox)
-        model.showSplit(.important)
+        model.showInboxTab(.primary)
         settle(window)
         let thread = model.snapshot.order.first { (model.row($0)?.thread.messageCount ?? 0) >= 3 } ?? model.snapshot.order.first
         if let thread {

@@ -14,8 +14,7 @@ extension Snapshotter {
         // Preferences persist between runs: set the pane explicitly, and put it back after.
         let readingPane = model.prefs.readingPane
         model.prefs.readingPane = false
-        model.showSplit(nil)
-        model.show(.inbox)
+        model.showInboxTab(nil)
         settle(window)
         let order = model.snapshot.order
         guard order.count > 40 else { return }

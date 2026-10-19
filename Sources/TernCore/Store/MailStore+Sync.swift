@@ -177,11 +177,13 @@ extension MailStore {
         try setLabels(db, accountId: accountId, updates)
     }
 
+    /// Each change as asked (`LabelChange.requestAdd`, `requestRemove`): Move to tab keeps its category over one
+    /// Gmail filed the message under before the op landed.
     private static func applying(_ changes: [LabelChange], to labels: [String]) -> Set<String> {
         var result = Set(labels)
         for change in changes {
-            result.subtract(change.remove)
-            result.formUnion(change.add)
+            result.subtract(change.requestRemove)
+            result.formUnion(change.requestAdd)
         }
         return result
     }

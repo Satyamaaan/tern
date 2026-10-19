@@ -184,6 +184,8 @@ final class PaletteController {
         "go.label": .label, "go.project": .folder, "newProject": .plus, "addAccount": .plus,
         "settings": .settings, "shortcuts": .keyboard, "toggleSidebar": .sidebar, "listOnly": .readingPane,
         "splitInbox": .inbox, "appearance.toggle": .sun,
+        "moveToTab.primary": .tab(.primary), "moveToTab.promotions": .tab(.promotions), "moveToTab.social": .tab(.social),
+        "moveToTab.updates": .tab(.updates), "moveToTab.forums": .tab(.forums),
     ]
 
     private func threadItem(_ row: ThreadRow) -> PaletteItem {

@@ -11,7 +11,7 @@ struct EmptyListView: View {
                 EmptyLine(text: "Setting up the demo mailbox…")
             } else if model.isSearching {
                 EmptyLine(text: "Nothing matches “\(model.searchText.trimmingCharacters(in: .whitespaces))”.")
-            } else if case .inbox = model.kind, model.split == nil {
+            } else if case .inbox = model.kind, model.inboxTab == nil || model.inboxTab == .primary {
                 InboxZeroView(cleared: model.prefs.clearedToday)
             } else if case .inbox = model.kind {
                 EmptyLine(text: "Nothing in this tab.")

@@ -31,7 +31,7 @@ extension SelfCheck {
 
     private func readerWiring() {
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         settle(0.2)
         let order = model.snapshot.order
         guard let index = order.indices.dropFirst().dropLast().first(where: { (model.row(order[$0])?.thread.unreadCount ?? 0) > 0 }) else {
@@ -95,7 +95,7 @@ extension SelfCheck {
     // MARK: Composer
 
     private func inlineReplies() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         settle(0.2)
         guard let key = model.snapshot.order.dropFirst(2).first else { return check("reply: a thread", false) }
         model.click(key, command: false, shift: false)
@@ -133,7 +133,7 @@ extension SelfCheck {
 
     private func sendAndArchive() {
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         settle(0.2)
         let order = model.snapshot.order
         guard order.count > 3, let archiveSent = services.archiveSent else { return check("send and archive: rows", false) }
@@ -297,8 +297,8 @@ extension SelfCheck {
 
     // MARK: Sync
 
-    /// A real SyncCoordinator against FakeGmail in an in-memory database: the first sync fills the store,
-    /// the sidebar line goes quiet, and the draft encoder threads a reply.
+    /// A real SyncCoordinator against FakeGmail in an in-memory database: the first sync fills the store and
+    /// files Gmail's categories under their tabs, the sidebar line goes quiet, and the draft encoder threads a reply.
     private func offlineSync() {
         guard let database = try? AppDatabase.inMemory() else { return check("sync: database", false) }
         let store = MailStore(database)
@@ -307,9 +307,12 @@ extension SelfCheck {
         let gmail = FakeGmail(email: account.email)
         var seeded = false
         Task {
+            // Every Gmail category in turn, and every sixth message none, like mail Gmail hasn't categorised.
+            let categories = InboxTab.allCases.map(\.labelId).map { [$0] } + [[]]
             for index in 0..<20 {
                 await gmail.deliver(FakeEmail(from: "Maya Chen <maya@example.com>", to: [account.email], subject: "Offline check \(index)",
-                                              text: "Body \(index)", date: Date().addingTimeInterval(Double(index - 40) * 60)))
+                                              text: "Body \(index)", date: Date().addingTimeInterval(Double(index - 40) * 60),
+                                              labels: [SystemLabel.inbox, SystemLabel.unread] + categories[index % categories.count]))
             }
             seeded = true
         }
@@ -329,6 +332,9 @@ extension SelfCheck {
             wait(0.05)
         }
         check("sync against an offline Gmail fills the store", threads == 20)
+        let tabs = (try? store.scopeCounts(accountId: nil).tabThreads) ?? [:]
+        check("synced mail is filed under each of Gmail's tabs", InboxTab.allCases.allSatisfy { tabs[$0, default: 0] > 0 }
+                && tabs.values.reduce(0, +) == 20)
         let line = SyncSummary.line(Array(coordinator.statuses.values), now: Date())
         check("the sync line is quiet once the inbox is in", line == nil || line?.tone == .quiet)
         print("  sync: first sync of 20 messages in \(Int(Date().timeIntervalSince(started) * 1000)) ms; line: \(line?.text ?? "Up to date")")

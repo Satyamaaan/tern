@@ -79,8 +79,33 @@ enum ThreadMenu {
             item.keyEquivalentModifierMask = key?.menuModifiers ?? []
             item.isEnabled = registry.canRun(command)
             menu.addItem(item)
+            if command.id == "project", model.prefs.splitInbox { menu.addItem(moveToTabItem(registry: registry, model: model)) }
         }
         return menu
+    }
+
+    /// "Move to Tab" ▸ Gmail's tabs, the selection's own ticked. Each runs its `moveToTab.*` command, so
+    /// the keys the user gave one show here.
+    static func moveToTabItem(registry: CommandRegistry, model: AppModel) -> NSMenuItem {
+        let target = MenuTarget.shared
+        let current = Set(model.targets.compactMap { model.row($0)?.inboxTab })
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for tab in InboxTab.allCases {
+            guard let command = registry["moveToTab.\(tab.rawValue)"] else { continue }
+            let key = command.menuKey
+            let item = NSMenuItem(title: tab.title, action: #selector(MenuTarget.run(_:)), keyEquivalent: key?.keyEquivalent ?? "")
+            item.keyEquivalentModifierMask = key?.menuModifiers ?? []
+            item.target = target
+            item.representedObject = command.id
+            item.image = Icon.tab(tab).tinted(Theme.tabColor(tab), size: 14)
+            item.state = current == [tab] ? .on : .off
+            item.isEnabled = registry.canRun(command)
+            submenu.addItem(item)
+        }
+        let item = NSMenuItem(title: "Move to Tab", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     private static func snoozeItem(model: AppModel) -> NSMenuItem {

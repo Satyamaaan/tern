@@ -308,13 +308,16 @@ public struct MailThread: TernRecord, Hashable, Identifiable {
     public var participants: [Participant]
     /// Union of all message labels.
     public var labelIds: [String]
+    /// The Gmail tab its category labels put it in (`InboxTab.gmailTab`); nil when Gmail hasn't categorised it.
+    public var gmailTab: InboxTab?
 
     public var key: ThreadKey { ThreadKey(accountId: accountId, threadId: id) }
 }
 
 // MARK: - AI classification, projects, snooze
 
-/// Split-inbox buckets. Assigned by rules first, refined by the AI classifier.
+/// What Tern's classifier makes of a thread: the row's chip, and the inbox tab of threads Gmail hasn't
+/// categorised (`InboxTab.init(fallback:)`). Assigned by rules first, refined by the AI classifier.
 public enum MailCategory: String, Codable, Sendable, CaseIterable, DatabaseValueConvertible {
     /// A real person wrote to you.
     case people
@@ -585,14 +588,26 @@ public struct Contact: TernRecord, Hashable, Identifiable {
 /// Label edits for one message, computed at the moment the user acted.
 public struct LabelChange: Codable, Hashable, Sendable {
     public var messageId: String
+    /// What the message's labels changed by here: what undo takes back (Move to tab's undo moves it back instead).
     public var add: [String]
     public var remove: [String]
+    /// What the action asks of Gmail when that is more than it changed here: Move to tab (and its undo) takes off
+    /// every other category, also one the message gains before the op reaches Gmail. Nil when it is `add` and `remove`.
+    public var intentAdd: [String]?
+    public var intentRemove: [String]?
 
-    public init(messageId: String, add: [String], remove: [String]) {
+    public init(messageId: String, add: [String], remove: [String], intentAdd: [String]? = nil, intentRemove: [String]? = nil) {
         self.messageId = messageId
         self.add = add
         self.remove = remove
+        self.intentAdd = intentAdd
+        self.intentRemove = intentRemove
     }
+
+    /// The labels the op adds when it is sent, and when sync replays it over newer labels from Gmail.
+    public var requestAdd: [String] { intentAdd ?? add }
+    /// The labels the op removes when it is sent, and when sync replays it over newer labels from Gmail.
+    public var requestRemove: [String] { intentRemove ?? remove }
 }
 
 /// A user action already applied locally, waiting to reach Gmail. Written by `MailStore`,

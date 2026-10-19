@@ -7,8 +7,8 @@ enum ListTab: Hashable, Identifiable {
     /// The whole inbox.
     case all
     case needsReply
-    /// A category slice of the inbox (split inbox).
-    case split(InboxSplit)
+    /// One of Gmail's tabs of the inbox (inbox tabs on).
+    case category(InboxTab)
     case project(String)
     /// A Gmail label of the account in scope.
     case label(String)
@@ -20,7 +20,7 @@ enum ListTab: Hashable, Identifiable {
         switch self {
         case .all: "all"
         case .needsReply: "needsReply"
-        case .split(let split): "split:\(split.rawValue)"
+        case .category(let tab): "tab:\(tab.rawValue)"
         case .project(let id): "project:\(id)"
         case .label(let id): "label:\(id)"
         case .search(let query): "search:\(query)"
@@ -51,11 +51,16 @@ enum ListTab: Hashable, Identifiable {
 }
 
 extension AppModel {
-    /// The tabs in order: All, Needs reply, the category tabs (split inbox), then pinned tabs that
-    /// still exist. Labels show only while their account is in scope.
+    /// The tabs in order: All, Needs reply, Gmail's tabs (inbox tabs on), then pinned tabs that still exist.
+    /// A Gmail tab other than Primary shows only while the scope's inbox has mail in it, or while it is open.
+    /// Labels show only while their account is in scope.
     var tabs: [ListTab] {
         var tabs: [ListTab] = [.all, .needsReply]
-        if prefs.splitInbox { tabs += InboxSplit.allCases.map(ListTab.split) }
+        if prefs.splitInbox {
+            tabs += InboxTab.allCases
+                .filter { $0 == .primary || tabsWithMail.contains($0) || (kind == .inbox && inboxTab == $0) }
+                .map(ListTab.category)
+        }
         for key in prefs.pinnedTabs {
             guard let tab = ListTab(pinKey: key) else { continue }
             switch tab {
@@ -71,7 +76,7 @@ extension AppModel {
     var activeTab: ListTab {
         if isSearching { return .search(trimmedSearch) }
         switch kind {
-        case .inbox: return split.map(ListTab.split) ?? .all
+        case .inbox: return inboxTab.map(ListTab.category) ?? .all
         case .needsReply: return .needsReply
         case .project(let id): return .project(id)
         case .label(let id): return .label(id)
@@ -82,9 +87,9 @@ extension AppModel {
     /// Shows a tab's list.
     func select(_ tab: ListTab) {
         switch tab {
-        case .all: showSplit(nil)
+        case .all: showInboxTab(nil)
         case .needsReply: show(.needsReply)
-        case .split(let split): showSplit(split)
+        case .category(let tab): showInboxTab(tab)
         case .project(let id): show(.project(id))
         case .label(let id): show(.label(id))
         case .mailbox(let kind): show(kind)
@@ -124,13 +129,15 @@ extension AppModel {
         prefs.pinnedTabs.swapAt(index, index + step)
     }
 
-    /// The number next to a tab: unread threads, or what waits on you.
+    /// The number next to a tab: unread threads, or what waits on you. With inbox tabs on, All and Primary
+    /// show none, like Gmail: their unread mail is the list itself (and the sidebar's Inbox count).
     func count(for tab: ListTab) -> Int? {
         let value: Int
         switch tab {
+        case .all where prefs.splitInbox, .category(.primary): return nil
         case .all: value = counts.inboxUnread
         case .needsReply: value = counts.needsReply
-        case .split(let split): value = unreadCount(split)
+        case .category(let tab): value = counts.tabUnread[tab, default: 0]
         case .project(let id): value = counts.projectUnread[id] ?? 0
         case .mailbox(.snoozed): value = counts.snoozed
         case .mailbox(.drafts): value = counts.drafts
@@ -143,7 +150,7 @@ extension AppModel {
         switch tab {
         case .all: "All"
         case .needsReply: "Needs reply"
-        case .split(let split): split.title
+        case .category(let tab): tab.title
         case .project(let id): project(id)?.name ?? "Project"
         case .label(let id): labels.first { $0.id == id }?.name ?? "Label"
         case .search(let query): query

@@ -25,16 +25,21 @@ extension AppModel {
         reloadList()
     }
 
-    /// Counts and labels depend on the account in scope.
+    /// Counts and labels depend on the account in scope. Which of Gmail's tabs have mail is read here first, a
+    /// bounded probe (`fetchTabsWithMail`), so the tab bar is right in the first frame; the counts, one pass over
+    /// the scope's inbox, always arrive off the main thread and then keep it up to date.
     func observeScope() {
         let reader = store.database.reader
         let accountId = scope.accountId
+        tabsWithMail = (try? reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: accountId) }) ?? []
         countsObservation = ValueObservation
             .tracking { db in try MailStore.fetchScopeCounts(db, accountId: accountId) }
             .removeDuplicates()
             .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
                 guard let self else { return }
                 self.counts = counts
+                let tabs = Set(InboxTab.allCases.filter { counts.tabThreads[$0, default: 0] > 0 })
+                if tabs != self.tabsWithMail { self.tabsWithMail = tabs }
                 let badge = counts.allAccountsInboxUnread
                 NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
             }
@@ -65,12 +70,12 @@ extension AppModel {
 
     // MARK: The list
 
-    /// Starts reading a different list (mailbox, scope or split changed), from its first row. With
-    /// `keepingPlace` (a setting changed under the open thread, like Split Inbox) the cursor and the selection
+    /// Starts reading a different list (mailbox, scope or tab changed), from its first row. With
+    /// `keepingPlace` (a setting changed under the open thread, like Inbox Tabs) the cursor and the selection
     /// stay on the threads the new list still has, so the open thread stays open as it was, and the same list
     /// isn't read again at all.
     func reloadList(keepingPlace: Bool = false) {
-        let next = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
+        let next = ListSource(mailbox: mailbox, tab: kind == .inbox && prefs.splitInbox ? inboxTab : nil)
         if keepingPlace, next == source, listLoaded { return }
         source = next
         pendingCursor = nil
