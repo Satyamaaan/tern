@@ -136,7 +136,7 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     registry.removeKey(at: 0, from: "archive")
     #expect(registry["archive"]?.keys == [])
     #expect(registry.overrides.keys["archive"] == [])
-    #expect(registry.hint("Done", "archive") == "Done")
+    #expect(registry.hint("Archive", "archive") == "Archive")
 }
 
 @MainActor
@@ -145,7 +145,56 @@ private func key(_ characters: String, keyCode: UInt16, modifiers: NSEvent.Modif
     #expect(registry["archive"]?.keys == [.key("y")])
     #expect(registry["star"]?.keys == [.key("s")])
     #expect(registry.defaultKeys["archive"] == [.key("e")])
-    #expect(registry.hint("Done", "archive") == "Done  y")
+    #expect(registry.hint("Archive", "archive") == "Archive  y")
+}
+
+@MainActor
+@Test func keysSavedForTheOldDoneChordMoveToGoToArchive() throws {
+    var saved: ShortcutOverrides?
+    let model = try makeModel()
+    let registry = CommandRegistry(
+        model: model, shell: nil, overrides: ShortcutOverrides(keys: ["go.done": [.command("e", shift: true)]]),
+        save: { saved = $0 }, keyBindings: KeyBindingFiles(urls: []))
+    #expect(registry["go.done"] == nil)
+    #expect(registry["go.archive"]?.chord == "g e")
+    #expect(registry["go.archive"]?.keys == [.command("e", shift: true)])
+    #expect(saved?.keys == ["go.archive": [.command("e", shift: true)]])
+
+    // Keys of its own win over the old ones.
+    let both = CommandRegistry(
+        model: model, shell: nil,
+        overrides: ShortcutOverrides(keys: ["go.done": [.command("e", shift: true)], "go.archive": [.option("9")]]),
+        keyBindings: KeyBindingFiles(urls: []))
+    #expect(both["go.archive"]?.keys == [.option("9")])
+}
+
+@MainActor
+@Test func theArchiveListMovesThreadsBackToTheInbox() throws {
+    let registry = try makeRegistry(threads: 3)
+    let model = registry.model
+    model.reloadList()
+    let key = try #require(model.snapshot.order.first)
+    try model.store.perform(.archive, on: [key])
+
+    model.show(.archive)
+    #expect(model.inArchive && model.snapshot.order == [key] && model.cursor == key)
+    #expect(!registry.canRun(registry["archive"]!), "everything here is archived already")
+    #expect(registry.canRun(registry["moveToInbox"]!))
+    #expect(registry.hint("Move to Inbox", "moveToInbox") == "Move to Inbox  ⇧I")
+
+    registry.run("moveToInbox")
+    #expect(model.snapshot.rows[key] == nil, "the row leaves in the same frame")
+    #expect(model.toasts.last?.title == "Moved to Inbox" && model.toasts.last?.undo != nil)
+    model.writes.sync {}
+    #expect(try model.store.threadRows(in: .unifiedInbox).map(\.id).contains(key))
+
+    model.undoLast()
+    model.writes.sync {}
+    #expect(try !model.store.threadRows(in: .unifiedInbox).map(\.id).contains(key))
+    #expect(try model.store.threadRows(in: Mailbox(.archive)).map(\.id) == [key])
+
+    model.searchText = "Thread"
+    #expect(!model.inArchive, "search results can hold inbox threads")
 }
 
 @MainActor

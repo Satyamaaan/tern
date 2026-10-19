@@ -29,6 +29,10 @@ extension AppModel {
         }
     }
 
+    /// The Archive list is on screen: its threads are archived already, so archive buttons move them back to
+    /// the inbox instead.
+    var inArchive: Bool { kind == .archive && !isSearching }
+
     /// Whether the action takes threads out of the list on screen.
     func leavesList(_ action: MailAction) -> Bool {
         if isSearching { return false }
@@ -46,7 +50,7 @@ extension AppModel {
              (.needsReply, .archive), (.needsReply, .snooze), (.needsReply, .moveToLabel):
             return true
         case (.starred, .unstar), (.snoozed, .unsnooze), (.trash, .untrash), (.trash, .moveToInbox),
-             (.spam, .notSpam), (.spam, .moveToInbox):
+             (.spam, .notSpam), (.spam, .moveToInbox), (.archive, .moveToInbox), (.archive, .snooze):
             return true
         case (.label(let id), .removeLabel(let removed)):
             return id == removed
@@ -125,7 +129,7 @@ extension AppModel {
         }
     }
 
-    private func writeFailed(_ error: Error, unhide keys: [ThreadKey], entry: UndoEntry) {
+    func writeFailed(_ error: Error, unhide keys: [ThreadKey], entry: UndoEntry) {
         undoStack.removeAll { $0.id == entry.id }
         toasts.removeAll { $0.undo?.id == entry.id }
         for key in keys { hidden[key] = nil }
@@ -144,7 +148,8 @@ extension AppModel {
         let toast = Toast(title: title, undo: undo)
         toasts.append(toast)
         if toasts.count > 3 { toasts.removeFirst(toasts.count - 3) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        // Wall-clock time, so a Mac that slept through the toast doesn't offer an undo whose window has passed.
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + duration) { [weak self] in
             MainActor.assumeIsolated {
                 self?.toasts.removeAll { $0.id == toast.id }
                 if let undo { self?.undoStack.removeAll { $0.id == undo.id && $0.expires } }

@@ -189,9 +189,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
     radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
-    replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus`
-    while the list has the keyboard in the key window, so focus shows without a ring. Selected neighbours
-    join into one block.
+    replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`; on a draft row Discard
+    and `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus` while the list has the keyboard in the
+    key window, so focus shows without a ring. Selected neighbours join into one block.
 - A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
   selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label (every
   other category comes off, also one Gmail adds before the move lands), so Gmail files it there too, and like
@@ -199,8 +199,17 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   when you moved it, also in Gmail.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
-- Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a
-  `text3` tally; other lists one Display 17 line in `text2`.
+- Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in, and notes you
+  sent yourself, that aren't in the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons
+  become Move to Inbox (⇧I), with the same toast and undo, and `e` does nothing.
+- Drafts: on a draft row (the Drafts mailbox, a local draft, a thread of nothing but drafts) the trash keys and the
+  `⋯` menu's Move to Trash become **Discard Draft**; a conversation with your draft in it keeps Move to Trash and
+  gets Discard Draft in `⋯` and ⌘K. "Draft discarded · Undo" (5 s, wall-clock) brings it back exactly: Gmail's
+  copy is deleted only after the undo window, and an undo too late for that says so. A selection of draft rows and
+  conversations is discarded and trashed together ("Trash and Discard Drafts", one toast, one undo). A draft
+  being sent is never discarded; the toast counts only the drafts that were.
+- Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
+  other lists one Display 17 line in `text2`.
 
 ### Bottom bar
 A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
@@ -222,11 +231,13 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
   `raised`. Remembered (Settings → Layout).
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
-  Done, Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox tabs on).
+  Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox
+  tabs on).
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
-  disclosure, date in tabular `text3`. The focused message (n/p) and a selected attachment get the `selected`
+  disclosure, date in tabular `text3`. Your draft in the conversation shows Edit · Discard on its line (`text2`
+  links); Discard takes the draft alone. The focused message (n/p) and a selected attachment get the `selected`
   fill, no ring. Bodies in the WKWebView (transparent before first paint, sanitized,
   remote images blocked until "Load images"; Tern's own avatars come as `data:` URLs, which the CSP allows while
   it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always
@@ -238,10 +249,11 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
 title bar; remembered; Reduce Motion crossfades). Mailboxes (Inbox, Needs reply, Snoozed, Starred, Drafts,
-Sent, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover; drag rows
-onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and pinned at
-the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when something
-needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts tabular.
+Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover;
+drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
+pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
+something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts
+tabular.
 
 ### ⌘K palette
 Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).

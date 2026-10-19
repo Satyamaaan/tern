@@ -175,6 +175,7 @@ extension Mailbox.Kind {
         case .drafts: .drafts
         case .sent: .sent
         case .allMail: .allMail
+        case .archive: .archive
         case .spam: .spam
         case .trash: .trash
         case .important: .important

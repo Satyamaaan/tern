@@ -287,6 +287,10 @@ final class ReaderModel {
             attachmentEvent(message)
         case "summary":
             summaryClicked()
+        case "editDraft":
+            if let id = message["id"] as? String { editDraft(messageId: id) }
+        case "discardDraft":
+            if let id = message["id"] as? String { discardDraft(messageId: id) }
         default:
             break
         }
@@ -624,6 +628,24 @@ final class ReaderModel {
     }
 
     func setLabel(_ id: String, on: Bool) { perform(on ? .addLabel(id) : .removeLabel(id)) }
+
+    /// Edit beside a draft in the conversation: a reply being written here continues inline, any other
+    /// draft opens in the composer.
+    func editDraft(messageId: String) {
+        guard let key, let services else { return }
+        if let draft = try? services.drafts.editingDraft(inThread: key), draft.gmailMessageId == messageId,
+           draft.kind == .reply || draft.kind == .replyAll {
+            composing = .draft(id: draft.id)
+        } else {
+            services.openDraftMessage(MessageKey(accountId: key.accountId, messageId: messageId))
+        }
+    }
+
+    /// Discard beside a draft in the conversation: that draft goes, the conversation stays.
+    func discardDraft(messageId: String) {
+        guard let key else { return }
+        services?.discardDraft(MessageKey(accountId: key.accountId, messageId: messageId), key)
+    }
 
     func setProject(_ id: String, on: Bool) {
         guard let key, let store = services?.store else { return }

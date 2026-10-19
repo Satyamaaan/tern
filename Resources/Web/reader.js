@@ -80,7 +80,14 @@
     const draft = m.draft ? '<span class="draft">Draft</span>' : '';
     return `<div class="line" data-act="toggle">${avatarHTML(m)}` +
       `<span class="from">${esc(m.from)}</span>${draft}<span class="snip">${esc(m.snippet)}</span>` +
-      `<time class="date">${esc(m.date)}</time></div>`;
+      `${m.draft ? draftActionsHTML('dacts') : ''}<time class="date">${esc(m.date)}</time></div>`;
+  }
+
+  /// Your draft in the conversation: Edit opens it, Discard deletes it and nothing else.
+  function draftActionsHTML(kind) {
+    const lead = kind === 'draftnote' ? '<span>Your draft</span><span>·</span>' : '';
+    return `<span class="${kind}">${lead}<span class="dact" data-act="edit-draft" role="button">Edit</span>` +
+      `<span>·</span><span class="dact" data-act="discard-draft" role="button">Discard</span></span>`;
   }
 
   function headHTML(m) {
@@ -134,7 +141,7 @@
     if (m.unread) classes.push('unread');
     if (extraClass) classes.push(extraClass);
     return `<article class="${classes.join(' ')}" data-id="${esc(m.id)}">${lineHTML(m)}${headHTML(m)}` +
-      `${imageNoteHTML(m, m.body)}<div class="mbody" data-mode="${esc(m.body ? m.body.mode : 'plain')}"></div>${attachmentsHTML(m)}</article>`;
+      `${m.draft ? draftActionsHTML('draftnote') : ''}${imageNoteHTML(m, m.body)}<div class="mbody" data-mode="${esc(m.body ? m.body.mode : 'plain')}"></div>${attachmentsHTML(m)}</article>`;
   }
 
   /// Long runs of collapsed messages show the first one, a "N more" row, then the last two.
@@ -416,6 +423,12 @@
         break;
       case 'summary':
         post({ type: 'summary' });
+        break;
+      case 'edit-draft':
+        post({ type: 'editDraft', id });
+        break;
+      case 'discard-draft':
+        post({ type: 'discardDraft', id });
         break;
     }
   });

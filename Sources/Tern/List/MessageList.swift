@@ -24,6 +24,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var hoveredRow: Int?
     private var footerHovered: Int?
     private let hoverBar: NSHostingView<RowHoverBar>
+    /// The rows the hover bar acts on while it shows (the self-check reads it).
+    var hoveredKeys: [ThreadKey] { hoverBar.isHidden ? [] : hoverBar.rootView.keys }
     private var lastWidth: CGFloat = 0
     /// True while a new list replaces the old one; scroll changes then aren't the user's.
     private var resetting = false

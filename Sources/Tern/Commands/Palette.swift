@@ -174,13 +174,13 @@ final class PaletteController {
     }
 
     private static let icons: [String: Icon] = [
-        "archive": .archive, "snooze": .snoozed, "trash": .trash, "spam": .spam, "moveToInbox": .inbox,
+        "archive": .archive, "snooze": .snoozed, "trash": .trash, "discardDraft": .trash, "spam": .spam, "moveToInbox": .inbox,
         "star": .star, "needsReply": .needsReply, "label": .label, "project": .folder, "unread": .unread,
         "mute": .mute, "undo": .undo, "reply": .reply, "replyAll": .replyAll, "forward": .forward,
         "compose": .compose, "search": .search, "summarize": .sparkles, "print": .print, "quickLook": .eye,
         "find": .search, "markAllRead": .done, "palette": .command,
         "go.inbox": .inbox, "go.needsReply": .needsReply, "go.snoozed": .snoozed, "go.starred": .starred,
-        "go.drafts": .drafts, "go.sent": .sent, "go.allMail": .allMail, "go.spam": .spam, "go.trash": .trash,
+        "go.drafts": .drafts, "go.sent": .sent, "go.archive": .archive, "go.allMail": .allMail, "go.spam": .spam, "go.trash": .trash,
         "go.label": .label, "go.project": .folder, "newProject": .plus, "addAccount": .plus,
         "settings": .settings, "shortcuts": .keyboard, "toggleSidebar": .sidebar, "listOnly": .readingPane,
         "splitInbox": .inbox, "appearance.toggle": .sun,

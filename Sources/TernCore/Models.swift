@@ -690,12 +690,21 @@ public struct DraftOpPayload: Codable, Hashable, Sendable {
     /// but Sent didn't show the message: how many times Sent has been checked again since. The send
     /// is never tried again from then on.
     public var confirmChecks: Int?
+    /// Set on `deleteDraft`: the draft's DRAFT message. Sync doesn't store it again while the deletion
+    /// waits, and a draft written in Gmail, whose draft id Tern never learned, is found by it.
+    public var gmailMessageId: String?
+    /// Set on `deleteDraft` with `gmailMessageId`: that message's Message-ID header, which finds its
+    /// Gmail draft in one drafts.list call.
+    public var rfcMessageId: String?
 
-    public init(draftId: String, gmailDraftId: String? = nil, sendingDraftId: String? = nil, confirmChecks: Int? = nil) {
+    public init(draftId: String, gmailDraftId: String? = nil, sendingDraftId: String? = nil, confirmChecks: Int? = nil,
+                gmailMessageId: String? = nil, rfcMessageId: String? = nil) {
         self.draftId = draftId
         self.gmailDraftId = gmailDraftId
         self.sendingDraftId = sendingDraftId
         self.confirmChecks = confirmChecks
+        self.gmailMessageId = gmailMessageId
+        self.rfcMessageId = rfcMessageId
     }
 }
 

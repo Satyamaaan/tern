@@ -396,7 +396,8 @@ extension AccountSync {
 
     /// Creates or updates the Gmail copy of a draft being written and records its ids on the row.
     /// When the draft was discarded or moved to another account meanwhile, the copy just saved
-    /// isn't wanted: its deletion is queued.
+    /// isn't wanted: its deletion is queued, or, while a discard's undo window lasts, the deletion
+    /// waiting for it takes the copy's ids, so it deletes this copy and undo finds it.
     private func saveDraft(_ op: PendingOp) async throws {
         guard let opId = op.id, let draftId = AccountSync.draftId(of: op) else {
             if let id = op.id { try await deleteOp(id) }
@@ -434,6 +435,17 @@ extension AccountSync {
                 if let messageId = saved.message?.id { row.gmailMessageId = messageId }
                 row.lastError = nil
                 try row.update(db)
+            } else if var held = try PendingOp
+                .filter(Column("accountId") == accountId && Column("kind") == PendingOp.Kind.deleteDraft.rawValue)
+                .filter(Column("state") == PendingOp.State.pending.rawValue && Column("dispatched") == false)
+                .filter(sql: "json_extract(payload, '$.draftId') = ?", arguments: [draftId])
+                .fetchOne(db),
+                var payload = try? JSONDecoder().decode(DraftOpPayload.self, from: Data(held.payload.utf8)) {
+                payload.gmailDraftId = saved.id
+                payload.gmailMessageId = saved.message?.id ?? payload.gmailMessageId
+                payload.rfcMessageId = nil
+                held.payload = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+                try held.update(db)
             } else {
                 var cleanup = PendingOp(accountId: accountId, kind: .deleteDraft,
                                         payload: try String(decoding: JSONEncoder().encode(DraftOpPayload(draftId: draftId, gmailDraftId: saved.id)), as: UTF8.self))
@@ -448,21 +460,41 @@ extension AccountSync {
     }
 
     /// Deletes a Gmail draft. `DraftStore` has already removed the local draft (discard) or moved
-    /// it to another account, so only Gmail's copy goes; history then removes its message here.
+    /// it to another account, so only Gmail's copy goes; history then removes its message here. When the
+    /// op names the draft's message (`gmailMessageId`), a draft changed on another device during the undo
+    /// window has a new message and stays, and history brings it in. Gmail has no conditional delete, so a
+    /// change landing between that check and the delete (one round trip) still goes. A draft written in
+    /// Gmail, whose draft id Tern never learned, is found by its message; while it can't be found but its
+    /// message is still a draft, the op fails and retries, and in the end Tern shows the draft again
+    /// (`rollBack`); without drafts.list it can't ever be found, so that happens at once.
+    /// Once it's gone, so are the files of a discarded draft.
+    ///
+    /// Not handled: a draft discarded while its first save (a create) is on its way, when Tern quits before
+    /// the create returns. Tern never learns the new draft's ids, so its deletion has nothing to delete; the
+    /// draft stays in Gmail and comes back as a Gmail draft Tern has no row for.
     private func deleteDraft(_ op: PendingOp) async throws {
         guard let opId = op.id,
               let payload = try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)) else {
             if let id = op.id { try await deleteOp(id) }
             return
         }
+        let accountId = self.accountId
         var gmailDraftId = payload.gmailDraftId
         if gmailDraftId == nil {
-            let accountId = self.accountId
             gmailDraftId = try await read { db in
                 try Draft.fetchOne(db, key: payload.draftId).flatMap { $0.accountId == accountId ? $0.gmailDraftId : nil }
             }
         }
         guard try claimOp(opId) != nil else { return }
+        if let messageId = payload.gmailMessageId {
+            if try await !isDraftMessage(messageId) {
+                // Sent, deleted or changed elsewhere since: nothing of what was discarded is left to delete.
+                gmailDraftId = nil
+            } else if gmailDraftId == nil {
+                gmailDraftId = try await gmailDraft(withMessage: messageId, rfcMessageId: payload.rfcMessageId)
+                if gmailDraftId == nil { throw DraftNotFound(final: draftListUnsupported) }
+            }
+        }
         if let gmailDraftId {
             do {
                 try await api.deleteDraft(id: gmailDraftId)
@@ -471,13 +503,59 @@ extension AccountSync {
             }
         }
         try deleteOpNow(opId)
+        if try await read({ db in try Draft.exists(db, key: payload.draftId) }) == false {
+            try? FileManager.default.removeItem(at: DraftStore.folder(for: payload.draftId, in: configuration.draftFilesDirectory))
+        }
+    }
+
+    /// A Gmail draft whose message still exists but which drafts.list doesn't show (yet). `final` when the
+    /// account has no drafts.list at all, so trying again can't find it.
+    struct DraftNotFound: LocalizedError {
+        var final = false
+        var errorDescription: String? { "Gmail still has this draft, but it couldn't be found to delete" }
+    }
+
+    /// Whether Gmail still has `messageId` as a draft (5 units).
+    private func isDraftMessage(_ messageId: String) async throws -> Bool {
+        do {
+            let found = try await withRetry { [api] in try await api.messages(ids: [messageId], format: .minimal) }
+            return found.first { $0.id == messageId }?.labelIds?.contains(SystemLabel.draft) ?? false
+        } catch GmailAPIError.notFound {
+            return false
+        }
+    }
+
+    /// The Gmail draft whose message is `messageId`: looked up by the message's Message-ID (5 units), then,
+    /// when search doesn't know it (yet) or there is no Message-ID, by going through the drafts, 100 at a time
+    /// up to 2,000. Nil when it wasn't found there, or drafts.list isn't available.
+    private func gmailDraft(withMessage messageId: String, rfcMessageId: String?) async throws -> String? {
+        let query = rfcMessageId.map { "rfc822msgid:" + $0.trimmingCharacters(in: CharacterSet(charactersIn: "<> ")) }
+        for search in (query.map { [$0, nil] } ?? [nil]) {
+            var pageToken: String?
+            for _ in 0..<(search == nil ? 20 : 1) {
+                guard !draftListUnsupported else { return nil }
+                let page: GmailDraftPage
+                do {
+                    page = try await withRetry { [api, pageToken] in
+                        try await api.drafts(query: search, pageToken: pageToken, maxResults: search == nil ? 100 : 5)
+                    }
+                } catch GmailAPIError.server(501, GmailDraftPage.unsupported) {
+                    draftListUnsupported = true
+                    return nil
+                }
+                if let match = page.drafts?.first(where: { $0.message?.id == messageId }) { return match.id }
+                guard let next = page.nextPageToken else { break }
+                pageToken = next
+            }
+        }
+        return nil
     }
 
     // MARK: Failures
 
     /// Unauthorized pauses the account; offline and rate limits wait without using up attempts;
-    /// anything else backs off exponentially and fails for good after `maxOpAttempts`, rolling the
-    /// local change back to what Gmail has.
+    /// anything else backs off exponentially and fails for good after `maxOpAttempts` (at once when it
+    /// can't succeed, `DraftNotFound.final`), rolling the local change back to what Gmail has.
     private func failed(_ op: PendingOp, _ error: Error) async throws -> OpOutcome {
         guard let opId = op.id else { return .done }
         let now = clock.now()
@@ -506,7 +584,8 @@ extension AccountSync {
             // (Send again could then deliver it twice); it keeps retrying, at most every few minutes.
             let transient: Bool
             if case .server(let status, _)? = error as? GmailAPIError, status >= 500 { transient = true } else { transient = false }
-            if attempts >= configuration.maxOpAttempts, !(transient && AccountSync.isStaged(op)) {
+            let hopeless = (error as? DraftNotFound)?.final == true
+            if attempts >= configuration.maxOpAttempts || hopeless, !(transient && AccountSync.isStaged(op)) {
                 try await updateOp(opId) {
                     $0.state = .failed
                     $0.attempts = attempts
@@ -543,8 +622,17 @@ extension AccountSync {
             }
         case .sendDraft:
             try? await restoreDraftState(op, state: .failed, error: error)
-        case .saveDraft, .deleteDraft:
+        case .saveDraft:
             try? await restoreDraftState(op, state: nil, error: error)
+        case .deleteDraft:
+            // Gmail kept the draft: its message, taken out when it was discarded, shows again.
+            guard let messageId = (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.gmailMessageId,
+                  let fetched = try? await api.messages(ids: [messageId], format: .full), !fetched.isEmpty else { return }
+            let email = account.email
+            let parsed = fetched.map { GmailMessageParser.parse($0, accountId: accountId, accountEmail: email, format: .full) }
+            _ = try? await writeServer { db in
+                try MailStore.upsertServerMessages(db, parsed.map(\.message), attachments: parsed.flatMap(\.attachments))
+            }
         }
     }
 

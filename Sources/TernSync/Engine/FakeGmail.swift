@@ -114,6 +114,7 @@ public actor FakeGmail: GmailAPI {
     private var rejectsUnknownIds = false
     /// Ids the search index knows while it's stalled; nil when search is current.
     private var indexedIds: Set<String>?
+    private var unlistedDrafts: Set<String> = []
     private var quota: GmailQuota?
     private var quotaClock: (any SyncClock)?
     private var quotaLedger: [(at: Date, units: Int)] = []
@@ -199,6 +200,11 @@ public actor FakeGmail: GmailAPI {
     public func stallSearchIndex() { indexedIds = Set(store.keys) }
     public func resumeSearchIndex() { indexedIds = nil }
 
+    /// drafts.list stops showing a draft (or shows it again), while its message stays a draft.
+    public func setListed(_ listed: Bool, draft id: String) {
+        if listed { unlistedDrafts.remove(id) } else { unlistedDrafts.insert(id) }
+    }
+
     public func callCount(_ operation: Operation) -> Int { callCounts[operation] ?? 0 }
 
     public func resetCallLog() {
@@ -250,6 +256,8 @@ public actor FakeGmail: GmailAPI {
     public func labels(of id: String) -> [String]? { store[id]?.labelIds }
     public var allMessageIds: [String] { sortedMessages().map(\.id) }
     public var draftIds: [String] { Array(drafts.keys) }
+    /// The message a draft holds now.
+    public func draftMessageId(_ id: String) -> String? { drafts[id] }
 
     public func ids(inThread threadId: String) -> [String] {
         sortedMessages().filter { $0.threadId == threadId }.map(\.id)
@@ -435,8 +443,12 @@ public actor FakeGmail: GmailAPI {
     public func drafts(query: String?, pageToken: String?, maxResults: Int) async throws -> GmailDraftPage {
         try await begin(.drafts, units: GmailQuota().listDrafts)
         let matching = drafts.compactMap { draftId, messageId -> (draftId: String, message: GmailMessage)? in
-            guard let message = store[messageId] else { return nil }
-            if let query, !query.isEmpty, !matchesQuery(query, message) { return nil }
+            guard let message = store[messageId], !unlistedDrafts.contains(draftId) else { return nil }
+            if let query, !query.isEmpty {
+                // Search, like messages.list's, only knows what the index has caught up with.
+                if let indexedIds, !indexedIds.contains(message.id) { return nil }
+                if !matchesQuery(query, message) { return nil }
+            }
             return (draftId, message)
         }.sorted { lhs, rhs in
             let left = Int64(lhs.message.internalDate ?? "0") ?? 0, right = Int64(rhs.message.internalDate ?? "0") ?? 0

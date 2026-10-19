@@ -5,6 +5,9 @@ import GRDB
 public struct Mailbox: Hashable, Codable, Sendable {
     public enum Kind: Hashable, Codable, Sendable {
         case inbox, starred, important, snoozed, sent, drafts, allMail, spam, trash
+        /// Archived conversations: someone else wrote in them, or they hold a note you sent this account, and
+        /// they aren't in the inbox, snoozed, spam or trash.
+        case archive
         /// A Gmail label id; needs an account.
         case label(String)
         /// A project across all accounts; `accountId` is ignored.
@@ -36,7 +39,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case .spam: SystemLabel.spam
         case .trash: SystemLabel.trash
         case .label(let id): id
-        case .snoozed, .allMail, .project: nil
+        case .snoozed, .allMail, .archive, .project: nil
         }
     }
 }
@@ -148,6 +151,21 @@ public struct MailStore: Sendable {
           AND x.labelId IN ('TRASH', 'SPAM'))
         """
 
+    /// Archived: not in the inbox, and not in spam or trash.
+    static let notInInboxTrashOrSpam = """
+        NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId = t.accountId AND x.threadId = t.id
+          AND x.labelId IN ('INBOX', 'TRASH', 'SPAM'))
+        """
+
+    /// The thread has a message you sent to the thread's own account (`searchRecipients` lists names and
+    /// addresses separated by spaces). Mail to another of your accounts arrived there, not here. Send-as
+    /// aliases aren't stored, so a note sent to an alias isn't recognised.
+    static let holdsNoteToSelf = """
+        EXISTS (SELECT 1 FROM message m JOIN account a ON a.id = m.accountId
+          WHERE m.accountId = t.accountId AND m.threadId = t.id AND m.isDraft = 0 AND m.isFromMe = 1
+          AND instr(' ' || lower(m.searchRecipients) || ' ', ' ' || lower(a.email) || ' ') > 0)
+        """
+
     public static func fetchThreadRows(_ db: Database, in mailbox: Mailbox, limit: Int, before: Date?) throws -> [ThreadRow] {
         var arguments: StatementArguments = []
         var sql: String
@@ -176,6 +194,19 @@ public struct MailStore: Sendable {
 
         case .allMail:
             sql = "SELECT \(rowColumns) FROM thread t \(rowJoins) WHERE \(notTrashOrSpam)"
+            if let accountId = mailbox.accountId { sql += " AND t.accountId = ?"; _ = arguments.append(contentsOf: [accountId]) }
+            if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
+            sql += " ORDER BY t.lastDate DESC LIMIT ?"
+
+        case .archive:
+            // lastInboundDate is set once a message someone else sent is in the thread, so sent-only
+            // conversations and drafts stay out; a note to yourself (sent to this account's address) comes in
+            // through message_by_thread. Snoozed ones show in Snoozed. Reads thread_by_date, or
+            // thread_by_account_date for one account.
+            sql = """
+                SELECT \(rowColumns) FROM thread t \(rowJoins)
+                WHERE (t.lastInboundDate IS NOT NULL OR \(holdsNoteToSelf)) AND s.threadId IS NULL AND \(notInInboxTrashOrSpam)
+                """
             if let accountId = mailbox.accountId { sql += " AND t.accountId = ?"; _ = arguments.append(contentsOf: [accountId]) }
             if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
             sql += " ORDER BY t.lastDate DESC LIMIT ?"

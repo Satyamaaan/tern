@@ -44,8 +44,8 @@ struct Snapshotter {
     }
 
     /// More states for visual review: hover + toast, the waterline, wide one-line rows, search, one
-    /// account with labels, collapsed sidebar, inbox zero, settings, onboarding, the project editor, and the
-    /// update card, move prompt and update settings.
+    /// account with labels, collapsed sidebar, the Archive mailbox, inbox zero, settings, onboarding, the
+    /// project editor, and the update card, move prompt and update settings.
     private func extras(_ window: MainWindow, _ directory: URL) {
         func shot(_ name: String, dark: Bool = false) {
             render(window, appearance: dark ? .darkAqua : .aqua, to: directory.appendingPathComponent("\(name).png"))
@@ -92,7 +92,16 @@ struct Snapshotter {
         model.prefs.sidebarOpen = true
         shot("sidebar-open-light")
         shot("sidebar-open-dark", dark: true)
+        // The Archive mailbox, a row hovered: Move to Inbox stands where Archive does elsewhere.
+        model.show(.archive)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        list?.setHovered(2)
+        shot("archive-sidebar-light")
+        shot("archive-sidebar-dark", dark: true)
+        list?.setHovered(nil)
+        model.show(.inbox)
         model.prefs.sidebarOpen = false
+        draftShots(window, directory)
 
         // The search field revealed above the list, before typing: suggestions only.
         model.beginSearch()

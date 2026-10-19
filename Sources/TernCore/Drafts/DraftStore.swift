@@ -333,7 +333,8 @@ public struct DraftStore: Sendable {
             try Self.deleteOps(db, draftId: draftId, kinds: [.saveDraft, .sendDraft])
             if let gmailDraftId = draft.gmailDraftId {
                 try Self.queueOp(db, .deleteDraft, accountId: draft.accountId,
-                                 payload: DraftOpPayload(draftId: draftId, gmailDraftId: gmailDraftId), now: Date())
+                                 payload: DraftOpPayload(draftId: draftId, gmailDraftId: gmailDraftId,
+                                                         gmailMessageId: draft.gmailMessageId), now: Date())
             }
             if let messageId = draft.gmailMessageId {
                 try MailStore.deleteMessages(db, accountId: draft.accountId, ids: [messageId])

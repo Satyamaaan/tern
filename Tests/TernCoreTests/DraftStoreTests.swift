@@ -290,7 +290,7 @@ private func typed(_ content: DraftContent, _ text: String) -> Draft {
     #expect(try await store.discard(synced.draft.id))
     let queued = try ops(store)
     #expect(queued.map(\.kind) == [.deleteDraft])
-    #expect(try payload(queued[0]) == DraftOpPayload(draftId: synced.draft.id, gmailDraftId: "r-9"))
+    #expect(try payload(queued[0]) == DraftOpPayload(draftId: synced.draft.id, gmailDraftId: "r-9", gmailMessageId: "d1"))
     #expect(!FileManager.default.fileExists(atPath: attachment.path))
     // The local DRAFT message is gone too, so the thread no longer shows a draft.
     let detail = try MailStore(store.database).threadDetail(thread)
