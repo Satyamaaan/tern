@@ -5,8 +5,8 @@ import GRDB
 public struct Mailbox: Hashable, Codable, Sendable {
     public enum Kind: Hashable, Codable, Sendable {
         case inbox, starred, important, snoozed, sent, drafts, allMail, spam, trash
-        /// Archived conversations: someone else wrote in them, or they hold a note you sent yourself, and they
-        /// aren't in the inbox, snoozed, spam or trash.
+        /// Archived conversations: someone else wrote in them, or they hold a note you sent this account, and
+        /// they aren't in the inbox, snoozed, spam or trash.
         case archive
         /// A Gmail label id; needs an account.
         case label(String)
@@ -157,13 +157,13 @@ public struct MailStore: Sendable {
           AND x.labelId IN ('INBOX', 'TRASH', 'SPAM'))
         """
 
-    /// The thread has a message you sent to one of your own addresses (`searchRecipients` lists names and
-    /// addresses separated by spaces).
+    /// The thread has a message you sent to the thread's own account (`searchRecipients` lists names and
+    /// addresses separated by spaces). Mail to another of your accounts arrived there, not here. Send-as
+    /// aliases aren't stored, so a note sent to an alias isn't recognised.
     static let holdsNoteToSelf = """
-        EXISTS (SELECT 1 FROM message m WHERE m.accountId = t.accountId AND m.threadId = t.id
-          AND m.isDraft = 0 AND m.isFromMe = 1
-          AND EXISTS (SELECT 1 FROM account a
-            WHERE instr(' ' || lower(m.searchRecipients) || ' ', ' ' || lower(a.email) || ' ') > 0))
+        EXISTS (SELECT 1 FROM message m JOIN account a ON a.id = m.accountId
+          WHERE m.accountId = t.accountId AND m.threadId = t.id AND m.isDraft = 0 AND m.isFromMe = 1
+          AND instr(' ' || lower(m.searchRecipients) || ' ', ' ' || lower(a.email) || ' ') > 0)
         """
 
     public static func fetchThreadRows(_ db: Database, in mailbox: Mailbox, limit: Int, before: Date?) throws -> [ThreadRow] {
@@ -200,7 +200,7 @@ public struct MailStore: Sendable {
 
         case .archive:
             // lastInboundDate is set once a message someone else sent is in the thread, so sent-only
-            // conversations and drafts stay out; a note to yourself (sent to one of your addresses) comes in
+            // conversations and drafts stay out; a note to yourself (sent to this account's address) comes in
             // through message_by_thread. Snoozed ones show in Snoozed. Reads thread_by_date, or
             // thread_by_account_date for one account.
             sql = """

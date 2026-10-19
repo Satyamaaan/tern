@@ -65,15 +65,18 @@ private func archive(_ store: MailStore, accountId: String? = nil, limit: Int = 
     }
     try store.upsertMessages([
         sent("note", to: [Participant(name: "Me", email: me.email)], date: 100),
-        sent("toWork", to: [Participant(email: "Me@Work.dev")], date: 200),
+        sent("toMe", to: [Participant(email: "Me@Example.com")], date: 200),
+        // Another of your accounts got it: it's in that account's mail, not a note here.
+        sent("toWork", to: [Participant(email: work.email)], date: 250),
         sent("toAnn", to: [Participant(email: "ann@example.com")], date: 300),
         // An address that only contains yours isn't yours.
         sent("lookalike", to: [Participant(email: "notme@example.com")], date: 400),
         sent("noteInInbox", to: [Participant(email: me.email)], date: 500, labels: ["SENT", "INBOX"]),
         sent("draftNote", to: [Participant(email: me.email)], date: 600, labels: ["DRAFT"]),
     ])
-    #expect(try archive(store) == ["toWork", "note"])
+    #expect(try archive(store) == ["toMe", "note"])
     #expect(try archive(store, accountId: me.id, before: Date(timeIntervalSince1970: 200)) == ["note"])
+    #expect(try archive(store, accountId: work.id).isEmpty)
 }
 
 @Test func archiveFollowsTheScopeAndPages() throws {
