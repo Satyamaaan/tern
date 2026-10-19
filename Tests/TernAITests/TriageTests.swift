@@ -329,6 +329,57 @@ private func key(_ thread: String) -> ThreadKey {
     #expect(await triage.currentStatus.state == .idle)
 }
 
+@Test func triageFindsEligibleMailBehindMoreThanTwoThousandSetAside() async throws {
+    let database = try makeDatabase((0..<2_050).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: 1 + Double($0) * 0.01) })
+    let state = TestState()
+    state.isOn = true
+    // While the switch is on the model answers for the first thread of a call only: 2,008 of the newest
+    // threads are remembered as sent, unchanged, ahead of 40 older threads that still need sorting.
+    let provider = FakeProvider { request, _ in
+        guard state.isOn else { return triageAnswer(request) }
+        return #"{"items":[{"threadKey":"1","category":"people","needsReply":false,"priority":1,"summary":"One"}]}"#
+    }
+    let triage = queue(database, provider, batchSize: 1_005)
+    #expect(try await triage.processBatch() == .init(sent: 1_005, classified: 1))
+    #expect(try await triage.processBatch() == .init(sent: 1_005, classified: 1))
+    #expect(await triage.remembered.sent == 2_010)
+
+    state.isOn = false
+    #expect(try await triage.processBatch() == .init(sent: 40, classified: 40))
+    #expect(subjectsIn(provider.requests[2].input).count == 40)
+    #expect(try await triage.processBatch().sent == 0)
+    #expect(try aiRows(database).count == 42)
+}
+
+@Test func triageForgetsThreadsItNoLongerNeeds() async throws {
+    let database = try makeDatabase((0..<6).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: 1 + Double($0)) })
+    let state = TestState()
+    let provider = FakeProvider { request, attempt in
+        if attempt == 1 { throw AIError.timedOut }
+        // Later calls answer for the first thread only; the rest are remembered as sent.
+        return #"{"items":[{"threadKey":"1","category":"people","needsReply":false,"priority":1,"summary":"One"}]}"#
+    }
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), batchSize: 4, now: { state.now })
+    await #expect(throws: AIError.timedOut) { try await triage.processBatch() }
+    #expect(await triage.remembered == (sent: 0, failed: 4, retries: 2))
+    // A retry that comes back settles its threads, failures and all.
+    try await triage.processBatch()
+    #expect(await triage.remembered == (sent: 2, failed: 2, retries: 1))
+    try await triage.processBatch()
+    #expect(await triage.remembered == (sent: 4, failed: 0, retries: 0))
+
+    // Each pass first forgets classified threads (t0 and t2; t4 is classified in this pass)...
+    await triage.runPass()
+    #expect(try aiRows(database).keys.sorted() == ["t0", "t2", "t4"])
+    #expect(await triage.remembered.sent == 4)
+    await triage.runPass()
+    #expect(await triage.remembered.sent == 3)
+    // ...and threads that fell out of the window.
+    state.now = testNow.addingTimeInterval(40 * 86_400)
+    await triage.runPass()
+    #expect(await triage.remembered == (sent: 0, failed: 0, retries: 0))
+}
+
 @Test func triageCancelsQueuedAndRunningCallsWhenAIIsTurnedOff() async throws {
     let database = try makeDatabase((0..<20).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
     let gate = CLIGate(limit: 2, backgroundLimit: 2)

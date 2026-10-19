@@ -236,6 +236,7 @@ public actor TriageQueue {
     /// One pass. Returns false when it stopped early (AI off, a failure, cancellation). A settings change
     /// cancels its calls and asks for a new pass with the new settings.
     private func pass() async -> Bool {
+        await prune()
         passSettled = 0
         var stop: Error?
         let (signals, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -399,18 +400,17 @@ public actor TriageQueue {
             let busy = inFlight
             let failing = failures
             let retry = retries.first ?? []
+            // Failed threads go out only as retries; threads sent (or set aside) wait until they change.
+            let open = Exclusions(busy: busy, sent: skip, failed: failing)
             let pick = try await database.reader.read { db -> Pick in
                 let failed = { (candidate: Candidate) in failing[candidate.key]?.messageCount == candidate.messageCount }
-                let open = { (candidate: Candidate) in
-                    skip[candidate.key] != candidate.messageCount && !busy.contains(candidate.key) && !failed(candidate)
-                }
-                let all = try Self.candidates(db, since: since, limit: Self.scanLimit).filter(open)
+                let all = try Self.candidates(db, since: since, limit: Self.scanLimit, excluding: open)
                 var kind = Pick.Kind.backlog
                 var picked = Array(all.prefix(size))
                 if !screen.isEmpty {
                     let order = Dictionary(screen.enumerated().map { ($1, $0) }) { first, _ in first }
-                    let onScreen = try Self.candidates(db, since: since, limit: screen.count, keys: screen)
-                        .filter(open).sorted { order[$0.key, default: 0] < order[$1.key, default: 0] }
+                    let onScreen = try Self.candidates(db, since: since, limit: screen.count, keys: screen, excluding: open)
+                        .sorted { order[$0.key, default: 0] < order[$1.key, default: 0] }
                     if !onScreen.isEmpty {
                         let share = (onScreen.count + max(1, free) - 1) / max(1, free)
                         picked = Array(onScreen.prefix(min(size, max(Self.minimumScreenBatch, share))))
@@ -418,8 +418,9 @@ public actor TriageQueue {
                     }
                 }
                 if kind != .screen, !retry.isEmpty {
-                    picked = try Self.candidates(db, since: since, limit: retry.count, keys: retry)
-                        .filter { failed($0) && !busy.contains($0.key) && skip[$0.key] != $0.messageCount }
+                    picked = try Self.candidates(
+                        db, since: since, limit: retry.count, keys: retry, excluding: Exclusions(busy: busy, sent: skip)
+                    ).filter(failed)
                     kind = .retry
                 }
                 let threads = try PromptData.threads(
@@ -545,16 +546,69 @@ public actor TriageQueue {
 
     /// These threads aren't sent again until they change.
     private func markSent(_ candidates: [Candidate]) {
-        for candidate in candidates { attempted[candidate.key] = candidate.messageCount }
+        for candidate in candidates {
+            attempted[candidate.key] = candidate.messageCount
+            failures[candidate.key] = nil
+        }
         passSettled += candidates.count
+    }
+
+    /// Forgets threads that aren't candidates any more (classified, deleted, older than the window, in the
+    /// trash): what the queue remembers about them can't matter now, and would only grow.
+    private func prune() async {
+        let keys = Array(Set(attempted.keys).union(failures.keys).subtracting(inFlight))
+        guard !keys.isEmpty else { return }
+        let since = now().addingTimeInterval(-window)
+        guard let still = try? await database.reader.read({ db in
+            var still = Set<ThreadKey>()
+            for start in stride(from: 0, to: keys.count, by: 400) {
+                let chunk = Array(keys[start..<min(start + 400, keys.count)])
+                still.formUnion(try Self.candidates(db, since: since, limit: chunk.count, keys: chunk).map(\.key))
+            }
+            return still
+        }) else { return }
+        for key in keys where !still.contains(key) && !inFlight.contains(key) {
+            attempted[key] = nil
+            failures[key] = nil
+        }
+        retries = retries.map { $0.filter { failures[$0] != nil } }.filter { !$0.isEmpty }
+    }
+
+    /// What the queue remembers, for tests: threads sent or set aside, failed threads, retry halves.
+    var remembered: (sent: Int, failed: Int, retries: Int) {
+        (attempted.count, failures.count, retries.count)
     }
 
     func isCurrent(_ generation: Int) -> Bool {
         generation == self.generation
     }
 
-    /// Threads that need an AI verdict, inbox first, newest first. `keys` limits it to those threads.
-    static func candidates(_ db: Database, since: Date, limit: Int, keys: [ThreadKey]? = nil) throws -> [Candidate] {
+    /// Threads `candidates` leaves out before its limit: those in a call now, and those still at the message
+    /// count they were sent or set aside with. Passed to SQLite as JSON lists of "account␟thread" and
+    /// "account␟thread␟messageCount".
+    struct Exclusions: Sendable {
+        static let none = Exclusions()
+
+        var threads = "[]"
+        var versions = "[]"
+
+        init(busy: Set<ThreadKey> = [], sent: [ThreadKey: Int] = [:], failed: [ThreadKey: Failure] = [:]) {
+            threads = Self.json(busy.map { "\($0.accountId)\u{1F}\($0.threadId)" })
+            versions = Self.json(
+                sent.map { "\($0.key.accountId)\u{1F}\($0.key.threadId)\u{1F}\($0.value)" }
+                    + failed.map { "\($0.key.accountId)\u{1F}\($0.key.threadId)\u{1F}\($0.value.messageCount)" })
+        }
+
+        private static func json(_ values: [String]) -> String {
+            (try? JSONEncoder().encode(values)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
+        }
+    }
+
+    /// Threads that need an AI verdict, inbox first, newest first, without `excluding`. `keys` limits it to
+    /// those threads.
+    static func candidates(
+        _ db: Database, since: Date, limit: Int, keys: [ThreadKey]? = nil, excluding: Exclusions = .none
+    ) throws -> [Candidate] {
         var arguments: StatementArguments = [since.timeIntervalSince1970]
         var only = ""
         if let keys {
@@ -562,11 +616,13 @@ public actor TriageQueue {
             only = "AND (t.accountId, t.id) IN (VALUES \(keys.map { _ in "(?, ?)" }.joined(separator: ", ")))"
             for key in keys { _ = arguments.append(contentsOf: [key.accountId, key.threadId]) }
         }
-        _ = arguments.append(contentsOf: [limit])
+        _ = arguments.append(contentsOf: [excluding.threads, excluding.versions, limit])
         return try Row.fetchAll(db, sql: """
             SELECT t.accountId, t.id, t.messageCount FROM thread t
             LEFT JOIN thread_ai ai ON ai.accountId = t.accountId AND ai.threadId = t.id
             WHERE t.lastDate >= ? AND t.lastInboundDate IS NOT NULL \(only)
+              AND (t.accountId || char(31) || t.id) NOT IN (SELECT value FROM json_each(?))
+              AND (t.accountId || char(31) || t.id || char(31) || t.messageCount) NOT IN (SELECT value FROM json_each(?))
               AND (ai.threadId IS NULL OR ai.messageCount < t.messageCount
                    OR (ai.source = 'rules' AND ai.category IN ('people', 'other')))
               AND NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId = t.accountId AND x.threadId = t.id
