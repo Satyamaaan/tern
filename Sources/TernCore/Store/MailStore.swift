@@ -5,6 +5,8 @@ import GRDB
 public struct Mailbox: Hashable, Codable, Sendable {
     public enum Kind: Hashable, Codable, Sendable {
         case inbox, starred, important, snoozed, sent, drafts, allMail, spam, trash
+        /// Archived conversations: someone else wrote in them, and they aren't in the inbox, snoozed, spam or trash.
+        case archive
         /// A Gmail label id; needs an account.
         case label(String)
         /// A project across all accounts; `accountId` is ignored.
@@ -36,7 +38,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case .spam: SystemLabel.spam
         case .trash: SystemLabel.trash
         case .label(let id): id
-        case .snoozed, .allMail, .project: nil
+        case .snoozed, .allMail, .archive, .project: nil
         }
     }
 }
@@ -148,6 +150,12 @@ public struct MailStore: Sendable {
           AND x.labelId IN ('TRASH', 'SPAM'))
         """
 
+    /// Archived: not in the inbox, and not in spam or trash.
+    static let notInInboxTrashOrSpam = """
+        NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId = t.accountId AND x.threadId = t.id
+          AND x.labelId IN ('INBOX', 'TRASH', 'SPAM'))
+        """
+
     public static func fetchThreadRows(_ db: Database, in mailbox: Mailbox, limit: Int, before: Date?) throws -> [ThreadRow] {
         var arguments: StatementArguments = []
         var sql: String
@@ -176,6 +184,18 @@ public struct MailStore: Sendable {
 
         case .allMail:
             sql = "SELECT \(rowColumns) FROM thread t \(rowJoins) WHERE \(notTrashOrSpam)"
+            if let accountId = mailbox.accountId { sql += " AND t.accountId = ?"; _ = arguments.append(contentsOf: [accountId]) }
+            if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
+            sql += " ORDER BY t.lastDate DESC LIMIT ?"
+
+        case .archive:
+            // lastInboundDate is set once a message someone else sent is in the thread, so sent-only
+            // conversations and drafts stay out; snoozed ones show in Snoozed. Reads thread_by_date, or
+            // thread_by_account_date for one account.
+            sql = """
+                SELECT \(rowColumns) FROM thread t \(rowJoins)
+                WHERE t.lastInboundDate IS NOT NULL AND s.threadId IS NULL AND \(notInInboxTrashOrSpam)
+                """
             if let accountId = mailbox.accountId { sql += " AND t.accountId = ?"; _ = arguments.append(contentsOf: [accountId]) }
             if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
             sql += " ORDER BY t.lastDate DESC LIMIT ?"
