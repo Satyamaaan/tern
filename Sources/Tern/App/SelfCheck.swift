@@ -36,6 +36,7 @@ final class SelfCheck {
         triage()
         multiSelect()
         archiveMailbox()
+        discardDrafts()
         clicks()
         paging()
         dropOnProject()

@@ -100,6 +100,7 @@ struct Snapshotter {
         list?.setHovered(nil)
         model.show(.inbox)
         model.prefs.sidebarOpen = false
+        draftShots(window, directory)
 
         // The search field revealed above the list, before typing: suggestions only.
         model.beginSearch()
