@@ -24,6 +24,11 @@ final class AppServices {
     var loadAttachment: (MailAttachment) async throws -> URL = { _ in throw CocoaError(.featureUnsupported) }
     /// AI helpers; nil when AI is off or unavailable.
     var ai: AIActions?
+    /// What AI sorting is doing, for Settings → AI. Set by the integration; nil until it starts.
+    var aiSorting: AISorting?
+    /// Tells AI sorting which threads are on screen (the rows in view and the open thread), so they are
+    /// sorted before the rest. Each call replaces the last.
+    var aiPrioritize: (([ThreadKey]) -> Void)?
     /// Checks whether Claude Code or Codex is installed and signed in, for onboarding and Settings → AI.
     /// Wired to TernAI's providers by the integration; nil leaves the status unknown (snapshots inject
     /// their own).

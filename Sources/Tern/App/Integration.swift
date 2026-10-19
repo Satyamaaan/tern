@@ -236,6 +236,14 @@ final class Integration {
             })
 
         let triage = self.triage
+        services.aiPrioritize = { keys in Task { await triage.prioritize(keys) } }
+        Task { [weak self] in
+            for await status in await triage.statusUpdates() {
+                guard let self else { return }
+                let sorting = AISorting(status: status)
+                if self.services.aiSorting != sorting { self.services.aiSorting = sorting }
+            }
+        }
         Task.detached(priority: .utility) { await triage.start() }
     }
 

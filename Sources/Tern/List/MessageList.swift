@@ -27,6 +27,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var lastWidth: CGFloat = 0
     /// True while a new list replaces the old one; scroll changes then aren't the user's.
     private var resetting = false
+    /// A report of the rows in view to AI sorting is on its way.
+    private var screenReportPending = false
 
     static let headerHeight: CGFloat = 34
     static let footerHeight: CGFloat = 44
@@ -81,6 +83,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     // MARK: ListPresenting
 
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation) {
+        defer { reportRowsInView() }
         // Clear hover while the old snapshot still matches the rows on screen.
         setHovered(nil)
         let old = items
@@ -142,6 +145,23 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     func selectionDidChange(scrollTo key: ThreadKey?) {
         refreshVisibleRows()
         if let key, let index = snapshot.itemIndex[key] { reveal(index) }
+        reportRowsInView()
+    }
+
+    /// Tells AI sorting which threads are in view, and the open one, so they are sorted first. At most a
+    /// few times a second: scrolling calls this on every frame.
+    private func reportRowsInView() {
+        guard model.services.aiPrioritize != nil, !screenReportPending else { return }
+        screenReportPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.screenReportPending = false
+                let rows = self.table.rows(in: self.scrollView.contentView.bounds)
+                let inView = (rows.location..<rows.location + rows.length).compactMap { self.snapshot.row(at: $0)?.id }
+                self.model.services.aiPrioritize?((self.model.readerKey.map { [$0] } ?? []) + inView)
+            }
+        }
     }
 
     /// Scrolls just enough to show the row below the sticky header, without animation (j/k speed).
@@ -353,6 +373,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         if !resetting, nearEnd, bounds.minY > style.height || table.frame.height <= bounds.height { model.loadMore() }
         updateHoverFromMouse()
         refreshHeaders()
+        reportRowsInView()
     }
 
     func updateHoverFromMouse() {
