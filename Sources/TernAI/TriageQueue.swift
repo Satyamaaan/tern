@@ -69,6 +69,10 @@ public actor TriageQueue {
     static let minimumScreenBatch = 5
     /// At most this many threads are remembered from `prioritize`.
     static let screenLimit = 60
+    /// A thread whose call fails this many times with it alone waits until it changes.
+    static let failuresAlone = 2
+    /// So does any thread after this many failed calls, however it was batched.
+    static let failureLimit = 10
     /// Candidates read per pick: enough to count what is left for the progress line.
     static let scanLimit = 2_000
     /// The latest messages of a thread a prompt shows, and how much of each.
@@ -93,6 +97,20 @@ public actor TriageQueue {
     private var attempted: [ThreadKey: Int] = [:]
     /// Threads in a batch that is being answered.
     private var inFlight: Set<ThreadKey> = []
+    /// Threads whose call failed (a time-out, a CLI error, an unreadable answer), with the message count they
+    /// had. They go out again only through `retries`, in halves of the batch that failed, so one thread that
+    /// breaks a call can't hold the others back.
+    private var failures: [ThreadKey: Failure] = [:]
+    /// Halves of failed batches, sent after the threads on screen and before the rest.
+    private var retries: [[ThreadKey]] = []
+    /// Bumped when the AI settings change: calls picked before are cancelled and their answers dropped.
+    private(set) var generation = 0
+    /// The AI settings the queue last saw.
+    private var knownSettings: AISettings?
+    /// Interrupts the running pass when the settings change.
+    private var interrupt: AsyncStream<Void>.Continuation?
+    /// Threads the running pass has finished with: written, or set aside until they change.
+    private var passSettled = 0
     /// Threads on screen, sent before the rest.
     private var screen: [ThreadKey] = []
     private var resumeAt: Date?
@@ -105,6 +123,8 @@ public actor TriageQueue {
     private var passRequested = false
     /// The next pass skips the debounce (threads on screen are waiting).
     private var urgent = false
+    /// The debounce before the next pass; cancelled when threads on screen are waiting.
+    private var debounceWait: Task<Void, Never>?
     private var observers: [AnyDatabaseCancellable] = []
     private var loop: Task<Void, Never>?
     private var wake: Task<Void, Never>?
@@ -141,11 +161,10 @@ public actor TriageQueue {
                 }),
         ]
         continuation.yield()
-        let debounce = debounce
         loop = Task { [weak self] in
             for await _ in stream {
                 guard let self else { return }
-                if await !self.takeUrgent() { try? await Task.sleep(for: debounce) }
+                await self.waitOutDebounce()
                 guard !Task.isCancelled else { return }
                 await self.runPass()
             }
@@ -161,6 +180,7 @@ public actor TriageQueue {
         loop = nil
         wake?.cancel()
         wake = nil
+        debounceWait?.cancel()
     }
 
     /// Asks for a pass soon, e.g. after the user signs in to the CLI.
@@ -179,6 +199,7 @@ public actor TriageQueue {
         screen = keys
         guard !keys.isEmpty else { return }
         urgent = true
+        debounceWait?.cancel()
         pokes?.yield()
     }
 
@@ -212,43 +233,63 @@ public actor TriageQueue {
         } while passRequested && !Task.isCancelled
     }
 
-    /// One pass. Returns false when it stopped early (AI off, a failure, cancellation).
+    /// One pass. Returns false when it stopped early (AI off, a failure, cancellation). A settings change
+    /// cancels its calls and asks for a new pass with the new settings.
     private func pass() async -> Bool {
-        var done = 0
+        passSettled = 0
         var stop: Error?
-        await withTaskGroup(of: Answer.self) { group in
+        let (signals, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        interrupt = signal
+        await withTaskGroup(of: Event.self) { group in
+            group.addTask {
+                for await _ in signals { return .settingsChanged }
+                return .ended
+            }
             var running = 0
             while true {
                 while stop == nil, running < min(allowed, concurrency), !Task.isCancelled {
                     do {
                         guard let job = try await nextJob(free: min(allowed, concurrency) - running) else { break }
                         running += 1
-                        status.progress = Progress(done: done, total: done + job.remainingAfterPick)
+                        status.progress = Progress(done: passSettled, total: passSettled + job.remainingAfterPick)
                         setState(.working)
-                        group.addTask { await job.run() }
+                        group.addTask { .answer(await job.run()) }
                     } catch {
                         stop = Self.worse(stop, error)
                     }
                 }
-                guard running > 0, let answer = await group.next() else { break }
-                running -= 1
-                do {
-                    try await finish(answer)
-                    done += answer.job.picked.count
-                } catch AIError.invalidOutput(let message) {
-                    // Those threads aren't resent until they change; the rest carry on.
-                    status.lastError = message
-                    done += answer.job.picked.count
-                } catch {
-                    stop = Self.worse(stop, error)
-                }
-                if let progress = status.progress {
-                    status.progress = Progress(done: done, total: max(progress.total, done + inFlight.count))
-                    publish()
+                guard running > 0, let event = await group.next() else { break }
+                switch event {
+                case .settingsChanged:
+                    // Kills the CLIs that run and drops the calls still waiting for a slot.
+                    stop = SettingsChanged()
+                    group.cancelAll()
+                case .ended:
+                    continue
+                case .answer(let answer):
+                    running -= 1
+                    do {
+                        try await finish(answer)
+                    } catch AIError.invalidOutput(let message) {
+                        // Its threads go out again in halves; the rest carry on.
+                        status.lastError = message
+                    } catch {
+                        stop = Self.worse(stop, error)
+                    }
+                    if let progress = status.progress {
+                        status.progress = Progress(done: passSettled, total: max(progress.total, passSettled + inFlight.count))
+                        publish()
+                    }
                 }
             }
+            signal.finish()
         }
+        interrupt = nil
         status.progress = nil
+        if stop is SettingsChanged {
+            passRequested = true
+            return true
+        }
         guard let stop else {
             setState(.idle)
             return true
@@ -273,8 +314,30 @@ public actor TriageQueue {
         var messageCount: Int
     }
 
+    struct Failure: Hashable, Sendable {
+        var messageCount: Int
+        /// Failed calls the thread was in.
+        var count = 0
+        /// Of those, calls with it alone.
+        var alone = 0
+    }
+
+    /// The AI settings changed while a pass ran.
+    private struct SettingsChanged: Error {}
+
+    private enum Event: Sendable {
+        case answer(Answer)
+        case settingsChanged
+        /// The pass's settings watcher stopped.
+        case ended
+    }
+
     /// One CLI call's worth of threads, claimed until its answer is handled.
     struct Job: Sendable {
+        var queue: TriageQueue
+        /// The settings it was picked under, and their generation.
+        var settings: AISettings
+        var generation: Int
         var provider: any AIProvider
         var request: AIRequest
         var picked: [Candidate]
@@ -287,6 +350,10 @@ public actor TriageQueue {
 
         func run() async -> Answer {
             let started = Date()
+            // The settings may have changed while this call waited to start.
+            guard await queue.isCurrent(generation) else {
+                return Answer(job: self, verdicts: .failure(CancellationError()), seconds: 0)
+            }
             do {
                 let verdicts = try await TriageQueue.ask(provider, request, refs: Set(refs), projects: projects)
                 return Answer(job: self, verdicts: .success(verdicts), seconds: Date().timeIntervalSince(started))
@@ -303,6 +370,9 @@ public actor TriageQueue {
     }
 
     private struct Pick: Sendable {
+        enum Kind: Sendable { case screen, retry, backlog }
+
+        var kind: Kind
         var picked: [Candidate]
         var remaining: Int
         var threads: [PromptThread]
@@ -310,10 +380,14 @@ public actor TriageQueue {
         var projects: [Project]?
     }
 
-    /// The next batch: threads on screen first, split across `free` calls, else the provider's batch
-    /// size from the queue. Claims its threads; nil when nothing is left.
+    /// The next batch: threads on screen first, split across `free` calls; then halves of failed batches;
+    /// then the provider's batch size from the queue. Claims its threads; nil when nothing is left. Throws
+    /// `SettingsChanged` when it finds new settings while a pass runs.
     private func nextJob(free: Int) async throws -> Job? {
         let settings = try await database.reader.read { db in try AISettings.read(db) }
+        if observe(settings), interrupt != nil { throw SettingsChanged() }
+        // A later change makes this job stale before it starts.
+        let generation = generation
         guard settings.enabled else { throw AIError.disabled }
         let provider = try await providers.resolve(settings)
         let size = batchSize ?? Self.batchSize(for: provider.id)
@@ -323,9 +397,15 @@ public actor TriageQueue {
         while true {
             let skip = attempted
             let busy = inFlight
+            let failing = failures
+            let retry = retries.first ?? []
             let pick = try await database.reader.read { db -> Pick in
-                let open = { (candidate: Candidate) in skip[candidate.key] != candidate.messageCount && !busy.contains(candidate.key) }
+                let failed = { (candidate: Candidate) in failing[candidate.key]?.messageCount == candidate.messageCount }
+                let open = { (candidate: Candidate) in
+                    skip[candidate.key] != candidate.messageCount && !busy.contains(candidate.key) && !failed(candidate)
+                }
                 let all = try Self.candidates(db, since: since, limit: Self.scanLimit).filter(open)
+                var kind = Pick.Kind.backlog
                 var picked = Array(all.prefix(size))
                 if !screen.isEmpty {
                     let order = Dictionary(screen.enumerated().map { ($1, $0) }) { first, _ in first }
@@ -334,22 +414,42 @@ public actor TriageQueue {
                     if !onScreen.isEmpty {
                         let share = (onScreen.count + max(1, free) - 1) / max(1, free)
                         picked = Array(onScreen.prefix(min(size, max(Self.minimumScreenBatch, share))))
+                        kind = .screen
                     }
+                }
+                if kind != .screen, !retry.isEmpty {
+                    picked = try Self.candidates(db, since: since, limit: retry.count, keys: retry)
+                        .filter { failed($0) && !busy.contains($0.key) && skip[$0.key] != $0.messageCount }
+                    kind = .retry
                 }
                 let threads = try PromptData.threads(
                     db, keys: picked.map(\.key), messages: Self.messagesPerThread, characters: Self.charactersPerMessage)
                 let owner = try String.fetchAll(db, sql: "SELECT email FROM account ORDER BY sortOrder, email")
                 let projects = settings.autoProjects ? try Project.order(Column("sortOrder"), Column("name")).fetchAll(db) : nil
-                return Pick(picked: picked, remaining: max(all.count, picked.count), threads: threads, owner: owner, projects: projects)
+                return Pick(
+                    kind: kind, picked: picked, remaining: max(all.count, picked.count) + failing.count,
+                    threads: threads, owner: owner, projects: projects)
+            }
+            if pick.kind == .retry {
+                // The half leaves the queue; its threads that changed or need no AI any more leave the failures.
+                if let index = retries.firstIndex(of: retry) { retries.remove(at: index) }
+                let kept = Set(pick.picked.map(\.key))
+                for key in retry where !kept.contains(key) && !inFlight.contains(key) { failures[key] = nil }
+            } else {
+                // A failure recorded for an older version of a thread doesn't count any more.
+                for candidate in pick.picked where failures[candidate.key] != nil { failures[candidate.key] = nil }
             }
             // Another pick may have claimed some of these while this one read.
             let picked = pick.picked.filter { !inFlight.contains($0.key) && attempted[$0.key] != $0.messageCount }
-            guard !picked.isEmpty else { return nil }
+            guard !picked.isEmpty else {
+                if pick.kind == .retry { continue }
+                return nil
+            }
             let keys = Set(picked.map(\.key))
             let threads = pick.threads.filter { keys.contains($0.key) }
             guard !threads.isEmpty else {
                 // Nothing to show a model (no messages left); don't pick them again until they change.
-                for candidate in picked { attempted[candidate.key] = candidate.messageCount }
+                markSent(picked)
                 continue
             }
             inFlight.formUnion(keys)
@@ -359,43 +459,98 @@ public actor TriageQueue {
             request.model = settings.model(for: provider)
             request.isBackground = true
             return Job(
-                provider: provider, request: request, picked: picked, threads: threads, refs: refs,
-                projects: pick.projects ?? [], autoProjects: settings.autoProjects,
-                remainingAfterPick: busy.count + pick.remaining)
+                queue: self, settings: settings, generation: generation, provider: provider, request: request,
+                picked: picked, threads: threads, refs: refs, projects: pick.projects ?? [],
+                autoProjects: settings.autoProjects, remainingAfterPick: busy.count + pick.remaining)
         }
     }
 
-    /// Writes an answer and releases its threads. A definitive answer (verdicts, or none readable after
-    /// a retry) marks them sent; a call that failed for another reason releases them to be sent again
-    /// later. Rethrows that failure.
+    /// Writes an answer and releases its threads. Verdicts mark them sent. A failure of this call (a
+    /// time-out, a CLI error, an unreadable answer) sends them again in halves, or sets a thread aside once it
+    /// failed alone; any other failure (a usage limit, a sign-out) sends them again as they were. An answer
+    /// from before a settings change is dropped. Rethrows the failure.
     @discardableResult
     private func finish(_ answer: Answer) async throws -> Int {
         let job = answer.job
         let keys = Set(job.picked.map(\.key))
         defer { inFlight.subtract(keys) }
+        guard job.generation == generation else {
+            release(job)
+            return 0
+        }
         let verdicts: [TriageVerdict]
         switch answer.verdicts {
         case .success(let value):
             verdicts = value
         case .failure(let error):
-            if case AIError.invalidOutput = error {
-                for candidate in job.picked { attempted[candidate.key] = candidate.messageCount }
+            switch error {
+            case AIError.timedOut, AIError.failed: charge(job, unreadable: false)
+            case AIError.invalidOutput: charge(job, unreadable: true)
+            default: release(job)
             }
             throw error
         }
         let threadsByRef = Dictionary(uniqueKeysWithValues: zip(job.refs, job.threads))
         let classifiedAt = now()
         let source = job.provider.id
-        let autoProjects = job.autoProjects
-        let written = try await database.writer.write { db in
-            try Self.write(db, verdicts, threads: threadsByRef, source: source, autoProjects: autoProjects, at: classifiedAt)
+        let settings = job.settings
+        let written = try await database.writer.write { db -> Int? in
+            // AI was turned off, or the provider, model or projects setting changed, since the call went out.
+            guard try AISettings.read(db) == settings else { return nil }
+            return try Self.write(db, verdicts, threads: threadsByRef, source: source, autoProjects: settings.autoProjects, at: classifiedAt)
         }
-        for candidate in job.picked { attempted[candidate.key] = candidate.messageCount }
+        guard let written else {
+            release(job)
+            return 0
+        }
+        markSent(job.picked)
         status.classified += written
         allowed = min(concurrency, allowed + 1)
         backoff = 300
         aiLog.info("triage: \(written) of \(job.threads.count) threads classified by \(source, privacy: .public) in \(answer.seconds, format: .fixed(precision: 1))s")
         return written
+    }
+
+    /// The call itself failed: each thread counts a failure, and the batch goes out again in two halves. A
+    /// thread that failed alone `failuresAlone` times (once, when the answer was unreadable after its retry),
+    /// or `failureLimit` times in all, is set aside until it changes.
+    private func charge(_ job: Job, unreadable: Bool) {
+        let alone = job.picked.count == 1
+        var again: [ThreadKey] = []
+        for candidate in job.picked {
+            var failure = failures[candidate.key].flatMap { $0.messageCount == candidate.messageCount ? $0 : nil }
+                ?? Failure(messageCount: candidate.messageCount)
+            failure.count += 1
+            if alone { failure.alone += unreadable ? Self.failuresAlone : 1 }
+            if failure.alone >= Self.failuresAlone || failure.count >= Self.failureLimit {
+                failures[candidate.key] = nil
+                markSent([candidate])
+                aiLog.error("triage: a thread failed \(failure.count) calls; it waits until it changes")
+            } else {
+                failures[candidate.key] = failure
+                again.append(candidate.key)
+            }
+        }
+        guard !again.isEmpty else { return }
+        let half = (again.count + 1) / 2
+        retries.append(Array(again.prefix(half)))
+        if again.count > half { retries.append(Array(again.dropFirst(half))) }
+    }
+
+    /// The call didn't count against its threads: they go out again, failed ones as the half they were.
+    private func release(_ job: Job) {
+        let pending = job.picked.map(\.key).filter { failures[$0] != nil }
+        if !pending.isEmpty { retries.insert(pending, at: 0) }
+    }
+
+    /// These threads aren't sent again until they change.
+    private func markSent(_ candidates: [Candidate]) {
+        for candidate in candidates { attempted[candidate.key] = candidate.messageCount }
+        passSettled += candidates.count
+    }
+
+    func isCurrent(_ generation: Int) -> Bool {
+        generation == self.generation
     }
 
     /// Threads that need an AI verdict, inbox first, newest first. `keys` limits it to those threads.
@@ -481,6 +636,7 @@ public actor TriageQueue {
     static func worse(_ current: Error?, _ new: Error) -> Error {
         func rank(_ error: Error) -> Int {
             switch error {
+            case is SettingsChanged: 6
             case AIError.disabled: 5
             case AIError.notInstalled, AIError.notSignedIn: 4
             case AIError.rateLimited: 3
@@ -529,16 +685,37 @@ public actor TriageQueue {
         }
     }
 
-    private func takeUrgent() -> Bool {
-        defer { urgent = false }
-        return urgent
+    /// Waits `debounce` before a pass, or not at all when threads on screen are waiting (`prioritize`
+    /// cancels the wait).
+    private func waitOutDebounce() async {
+        if !urgent {
+            let wait = Task { [debounce] in _ = try? await Task.sleep(for: debounce) }
+            debounceWait = wait
+            await wait.value
+            debounceWait = nil
+        }
+        urgent = false
     }
 
-    private func settingsChanged() {
+    private func settingsChanged() async {
+        guard let settings = try? await database.reader.read({ db in try AISettings.read(db) }) else { return }
+        let firstSeen = knownSettings == nil
+        guard observe(settings) || firstSeen else { return }
         resumeAt = nil
         backoff = 300
         allowed = concurrency
         pokes?.yield()
+    }
+
+    /// Notes the AI settings in force. When they changed from what the queue saw before, a new generation
+    /// starts: the running pass is interrupted, which cancels its calls. Returns whether they changed.
+    @discardableResult
+    private func observe(_ settings: AISettings) -> Bool {
+        defer { knownSettings = settings }
+        guard let known = knownSettings, known != settings else { return false }
+        generation += 1
+        interrupt?.yield()
+        return true
     }
 
     private func setState(_ state: State) {

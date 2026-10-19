@@ -266,7 +266,7 @@ private func key(_ thread: String) -> ThreadKey {
     #expect(await triage.currentStatus.state == .idle)
 }
 
-@Test func triageResendsThreadsAfterAFailedCall() async throws {
+@Test func triageResendsAFailedCallInHalves() async throws {
     let database = try makeDatabase((0..<3).map { TestMail(id: "m\($0)", thread: "t\($0)") })
     let provider = FakeProvider { request, attempt in
         if attempt == 1 { throw AIError.timedOut }
@@ -274,8 +274,144 @@ private func key(_ thread: String) -> ThreadKey {
     }
     let triage = queue(database, provider)
     await #expect(throws: AIError.timedOut) { try await triage.processBatch() }
-    let result = try await triage.processBatch()
-    #expect(result.sent == 3 && result.classified == 3)
+    #expect(try await triage.processBatch() == .init(sent: 2, classified: 2))
+    #expect(try await triage.processBatch() == .init(sent: 1, classified: 1))
+    #expect(try await triage.processBatch().sent == 0)
+}
+
+@Test func triageSetsAsideTheThreadThatMakesCallsTimeOutUntilItChanges() async throws {
+    let mails = (0..<12).map { TestMail(id: "m\($0)", thread: "t\($0)", subject: $0 == 5 ? "Poison" : "Thread \($0)", daysAgo: 1 + Double($0) * 0.1) }
+    let database = try makeDatabase(mails)
+    let state = TestState()
+    state.isOn = true
+    let provider = FakeProvider { request, _ in
+        if state.isOn && subjectsIn(request.input).contains("Poison") { throw AIError.timedOut }
+        return triageAnswer(request)
+    }
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), batchSize: 8, concurrency: 1, now: { state.now })
+    // Each time-out pauses the queue two minutes.
+    for _ in 0..<12 {
+        await triage.runPass()
+        state.now = state.now.addingTimeInterval(121)
+    }
+    // The batch with the bad thread is halved until the thread is alone, which fails twice: then it waits.
+    let poisoned = provider.requests.map { subjectsIn($0.input) }.filter { $0.contains("Poison") }
+    #expect(poisoned.map(\.count) == [8, 4, 2, 1, 1])
+    #expect(provider.requests.count == 9, "8 + its halves, then the four after them")
+    var rows = try aiRows(database)
+    #expect(rows.count == 11 && rows["t5"] == nil)
+    await triage.runPass()
+    #expect(provider.requests.count == 9, "set aside, not sent again")
+
+    // New mail in the thread: it goes out again, like any thread.
+    state.isOn = false
+    try MailStore(database).upsertMessages([MailMessage(
+        accountId: me.id, id: "m5b", threadId: "t5", date: testNow, fromName: "Ethan", fromEmail: "ethan.brooks@gmail.com",
+        toList: [Participant(email: me.email)], subject: "Re: Poison", snippet: "Any news?", bodyText: "Any news?",
+        bodyState: .full, labelIds: [SystemLabel.inbox])])
+    await triage.runPass()
+    rows = try aiRows(database)
+    #expect(rows["t5"]?.source == "codex" && rows["t5"]?.messageCount == 2)
+}
+
+@Test func triageStopsSendingCallsThatAlwaysFail() async throws {
+    let database = try makeDatabase((0..<4).map { TestMail(id: "m\($0)", thread: "t\($0)") })
+    let state = TestState()
+    let provider = FakeProvider { _, _ in throw AIError.failed("Codex: ERROR: boom") }
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), batchSize: 4, concurrency: 1, now: { state.now })
+    for _ in 0..<30 {
+        await triage.runPass()
+        state.now = state.now.addingTimeInterval(121)
+    }
+    // 4, then 2 + 2, then each thread alone twice: eleven calls, then nothing more until mail changes.
+    #expect(provider.requests.map { refsIn($0.input).count } == [4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1])
+    #expect(try aiRows(database).isEmpty)
+    #expect(await triage.currentStatus.state == .idle)
+}
+
+@Test func triageCancelsQueuedAndRunningCallsWhenAIIsTurnedOff() async throws {
+    let database = try makeDatabase((0..<20).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
+    let gate = CLIGate(limit: 2, backgroundLimit: 2)
+    let started = Recorder()
+    let stopped = Recorder()
+    let provider = FakeProvider { request, _ in
+        try await gate.withSlot(background: request.isBackground) {
+            await started.add("call")
+            do {
+                try await Task.sleep(for: .seconds(30))
+            } catch {
+                await stopped.add("call")
+                throw error
+            }
+            return triageAnswer(request)
+        }
+    }
+    // An on-demand call holds one slot: one triage call runs, two wait behind it.
+    let latch = Latch()
+    let onDemand = Task { try await gate.withSlot { await latch.wait() } }
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    let triage = TriageQueue(
+        database: database, providers: AIProviders([provider]), batchSize: 5, concurrency: 3,
+        debounce: .milliseconds(10), now: { testNow })
+    await triage.start()
+    for _ in 0..<400 where await gate.occupancy.waiting < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(await started.items.count == 1)
+
+    try await database.writer.write { db in try AISettings(enabled: false, provider: "codex").write(db) }
+    for _ in 0..<400 where await triage.currentStatus.state != .off { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(await triage.currentStatus.state == .off)
+    #expect(await stopped.items.count == 1, "the running call was stopped")
+    await latch.release()
+    try await onDemand.value
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(await started.items.count == 1, "the waiting calls never started")
+    #expect(try aiRows(database).isEmpty)
+    let occupancy = await gate.occupancy
+    #expect(occupancy.running == 0 && occupancy.waiting == 0)
+    await triage.stop()
+}
+
+@Test func triageDropsAnswersFromTheProviderItSwitchedFrom() async throws {
+    let database = try makeDatabase((0..<10).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
+    let latch = Latch()
+    // The old provider ignores cancellation and answers after the switch anyway.
+    let codex = FakeProvider(id: "codex") { request, _ in
+        await latch.wait()
+        return triageAnswer(request)
+    }
+    let claude = FakeProvider(id: "claude") { request, _ in triageAnswer(request, category: "notification", needsReply: false) }
+    let triage = TriageQueue(
+        database: database, providers: AIProviders([codex, claude]), batchSize: 5, concurrency: 2,
+        debounce: .milliseconds(10), now: { testNow })
+    await triage.start()
+    for _ in 0..<400 where codex.requests.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    let before = await triage.generation
+
+    try await database.writer.write { db in try AISettings(enabled: true, provider: "claude").write(db) }
+    for _ in 0..<400 where await triage.generation == before { try await Task.sleep(for: .milliseconds(5)) }
+    await latch.release()
+    for _ in 0..<400 where (try? aiRows(database).count) != 10 { try await Task.sleep(for: .milliseconds(5)) }
+    await triage.stop()
+    let rows = try aiRows(database)
+    #expect(rows.count == 10)
+    #expect(rows.values.allSatisfy { $0.source == "claude" && $0.category == .notification })
+    #expect(codex.requests.count == 2)
+}
+
+@Test func triageSkipsTheDebounceForRowsOnScreen() async throws {
+    let database = try makeDatabase((0..<3).map { TestMail(id: "m\($0)", thread: "t\($0)") })
+    let provider = FakeProvider { request, _ in triageAnswer(request) }
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), debounce: .seconds(60), now: { testNow })
+    // The first pass waits out a long debounce...
+    await triage.start()
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(provider.requests.isEmpty)
+    // ...until rows on screen need sorting.
+    await triage.prioritize([key("t1")])
+    for _ in 0..<200 where (try? aiRows(database).count) != 3 { try await Task.sleep(for: .milliseconds(10)) }
+    #expect(try aiRows(database).count == 3)
+    #expect(subjectsIn(provider.requests[0].input).count == 1, "the row on screen went first, alone")
+    await triage.stop()
 }
 
 @Test func triageSendsThreadsOnScreenFirst() async throws {
