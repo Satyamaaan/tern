@@ -19,9 +19,14 @@ public actor CLIGate {
         self.backgroundLimit = min(self.limit, max(1, backgroundLimit ?? limit))
     }
 
-    /// Runs `body` once a slot is free. A cancelled waiter leaves the queue without running.
+    /// Runs `body` once a slot is free. A cancelled waiter leaves the queue without running, also when a slot
+    /// reached it before its cancellation did.
     public nonisolated func withSlot<T: Sendable>(background: Bool = false, _ body: @Sendable () async throws -> T) async throws -> T {
         try await acquire(background: background)
+        if Task.isCancelled {
+            await release(background: background)
+            throw CancellationError()
+        }
         do {
             let value = try await body()
             await release(background: background)
