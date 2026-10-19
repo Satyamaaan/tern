@@ -9,7 +9,7 @@ enum MailTrackers {
         "mailtrack.io", "t.yesware.com", "mailstat.us", "track.hubspot.com", "pixel.mailchimp.com",
         "list-manage.com/track", "sendgrid.net/wf/open", "mandrillapp.com/track", "t.sidekickopen",
         "email.mg.", "open.convertkit", "trk.klclick", "links.iterable.com/e/o", "superhuman.com/~",
-        "bl-1.com", "emltrk.com", "getnotify.com", "pixel.wp.com", "pmtrk",
+        "emltrk.com", "getnotify.com", "pixel.wp.com",
     ]
 
     /// File names that only open trackers use (`o.gif`: Campaign Monitor, `open.aspx`: Salesforce Marketing Cloud).
@@ -22,16 +22,29 @@ enum MailTrackers {
     static func isTracker(_ url: String) -> Bool {
         let lower = url.lowercased()
         if fragments.contains(where: { lower.contains($0) }) { return true }
-        guard let (host, path) = hostAndPath(lower) else { return false }
+        guard let (host, path, query) = parts(lower) else { return false }
         func on(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
         let segments = path.split(separator: "/")
 
-        // HubSpot, Google Analytics, Amazon SES opens (`/L0/` is a click), Postmark, Substack, Mailjet.
-        if on("t.hubspotemail.net") || on("track.hubspot.com") || on("google-analytics.com") { return true }
+        // Tracking hosts: HubSpot, Google Analytics, Streak, Postmark, bl-1.com.
+        if on("t.hubspotemail.net") || on("track.hubspot.com") || on("google-analytics.com") || on("mailfoogae.appspot.com")
+            || on("bl-1.com") || host.split(separator: ".").contains(where: { $0.hasPrefix("pmtrk") }) {
+            return true
+        }
+        // Amazon SES opens (`/L0/` is a click), Postmark, Substack, Mailjet, Constant Contact.
         if on("awstrack.me"), path.hasPrefix("/i0/") { return true }
         if on("pstmrk.it"), path.hasPrefix("/open") { return true }
         if on("eotrx.substackcdn.com"), path.hasPrefix("/open") { return true }
         if on("mjt.lu"), segments.first == "oo" { return true }
+        if on("rs6.net"), path.hasPrefix("/on.jsp") { return true }
+        // Marketo: `/trk?t=1` with the message id, on mktoweb.com or the sender's own domain; just `/trk` isn't enough.
+        if path == "/trk" {
+            let fields = Dictionary(query.split(separator: "&").map { field -> (Substring, Substring) in
+                let pair = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                return (pair[0], pair.count > 1 ? pair[1] : "")
+            }, uniquingKeysWith: { first, _ in first })
+            if fields["t"] == "1", on("mktoweb.com") || fields["mid"]?.isEmpty == false { return true }
+        }
         // Customer.io, Iterable and senders' own link domains: `/e/o/<token>`; Brevo: `/tr/op/<token>`.
         if segments.count >= 3, (segments[0] == "e" && segments[1] == "o") || (segments[0] == "tr" && segments[1] == "op") {
             return true
@@ -46,13 +59,14 @@ enum MailTrackers {
         if zip(segments, segments.dropFirst()).contains(where: { $0 == "track" && ($1 == "open" || $1.hasPrefix("open.")) }) {
             return true
         }
-        if let file = segments.last, pixelFiles.contains(String(file)) { return true }
-        return segments.contains("beacon")
+        // Pixel file names, and a beacon at the end of the path (a `/beacon/` folder of images is fine).
+        guard let file = segments.last else { return false }
+        return pixelFiles.contains(String(file)) || file == "beacon"
     }
 
-    /// The host (no user info or port) and the percent-decoded path of an absolute URL, lowercased, with
-    /// `\` read as `/` the way browsers read it.
-    static func hostAndPath(_ lower: String) -> (String, String)? {
+    /// The host (no user info or port), the percent-decoded path and the raw query of an absolute URL, lowercased,
+    /// with `\` read as `/` the way browsers read it.
+    static func parts(_ lower: String) -> (host: String, path: String, query: String)? {
         guard let start = lower.range(of: "//") else { return nil }
         let rest = lower[start.upperBound...].replacingOccurrences(of: "\\", with: "/")
         let hostEnd = rest.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) ?? rest.endIndex
@@ -63,7 +77,12 @@ enum MailTrackers {
         let tail = rest[hostEnd...]
         let pathEnd = tail.firstIndex(where: { $0 == "?" || $0 == "#" }) ?? tail.endIndex
         let raw = String(tail[..<pathEnd])
-        return (host, (raw.removingPercentEncoding ?? raw).lowercased())
+        var query = ""
+        if pathEnd < tail.endIndex, tail[pathEnd] == "?" {
+            let after = tail[tail.index(after: pathEnd)...]
+            query = String(after[..<(after.firstIndex(of: "#") ?? after.endIndex)])
+        }
+        return (host, (raw.removingPercentEncoding ?? raw).lowercased(), query)
     }
 
     /// A remote image hidden by its style or the `hidden` attribute, or drawn too small to see (`isPixelSize`): a

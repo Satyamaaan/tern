@@ -25,9 +25,8 @@ private func loaded(_ html: String) -> SanitizedMail {
     "https://example.com/campaign/open.php?u=1",
     "https://example.com/images/pixel.gif",
     "https://example.com/1x1.gif",
-    "https://stats.example.com/beacon/12345",
     "https://example.com/v1/beacon?m=1",
-    "https://example.com/%62eacon/x",
+    "https://example.com/v1/%62eacon?x",
     "https://example.com\\wf\\open?x",
     "https://acme.createsend1.com/t/y-o-abcdef-l/o.gif",
     "https://cl.s7.exct.net/open.aspx?ffcb10-fe8f1374-12",
@@ -37,6 +36,13 @@ private func loaded(_ html: String) -> SanitizedMail {
     "https://x8k2.mjt.lu/oo/BAAAAD4abc/aBc12/b.gif",
     "https://www.google-analytics.com/collect?v=1&tid=UA-1&t=event",
     "https://ssl.google-analytics.com/__utm.gif?utmac=1",
+    "https://mailfoogae.appspot.com/t?sender=abc&type=zerocontent&guid=123",
+    "https://r20.rs6.net/on.jsp?a=1102&r=3&c=abc&d=1&o=https://img.constantcontact.com/letters/images/S.gif",
+    "https://123-ABC-456.mktoweb.com/trk?t=1&mid=MTIzLUFCQy00NTY6MToy",
+    "https://123-abc-456.mktoweb.com/trk?t=1",
+    "https://go.acme.com/trk?t=1&mid=MTIzLUFCQy00NTY6MToy",
+    "https://go.acme.com/trk?mid=MTIz&t=1#x",
+    "https://tracker.bl-1.com/Ultra/Track?x=1",
 ])
 func openTrackersNeverLoad(_ url: String) {
     #expect(MailTrackers.isTracker(url), "\(url)")
@@ -65,6 +71,18 @@ func openTrackersNeverLoad(_ url: String) {
     "https://cdn.example.com/tr/op.png",
     "https://x8k2.mjt.lu/img/logo.png",
     "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png",
+    "https://cdn.example.com/beacon/logo.png",
+    "https://cdn.example.com/assets/bl-1.com.png",
+    "https://cdn.example.com/logo.png?ref=bl-1.com",
+    "https://cdn.example.com/images/pmtrk-chart.png",
+    "https://cdn.example.com/trk/logo.png",
+    "https://go.acme.com/trk?t=2&mid=abc",
+    "https://go.acme.com/trk?t=1",
+    "https://go.acme.com/trk.png?t=1&mid=abc",
+    "https://go.acme.com/rs/123-ABC-456/images/logo.png",
+    "https://files.constantcontact.com/abc123/logo.png",
+    "https://r20.rs6.net/tn.jsp?f=001abc",
+    "https://storage.googleapis.com/acme-mail/streak-logo.png",
 ])
 func ordinaryImagesStillLoad(_ url: String) {
     #expect(!MailTrackers.isTracker(url), "\(url)")
