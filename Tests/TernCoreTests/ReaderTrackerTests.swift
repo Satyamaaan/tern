@@ -29,6 +29,14 @@ private func loaded(_ html: String) -> SanitizedMail {
     "https://example.com/v1/beacon?m=1",
     "https://example.com/%62eacon/x",
     "https://example.com\\wf\\open?x",
+    "https://acme.createsend1.com/t/y-o-abcdef-l/o.gif",
+    "https://cl.s7.exct.net/open.aspx?ffcb10-fe8f1374-12",
+    "https://eotrx.substackcdn.com/open?token=eyJtIjoiMSJ9&e=1",
+    "https://abc.r.bh.d.sendibt3.com/tr/op/AbCdEf123-xyz",
+    "https://links.acme.com/tr/op/AbCdEf123",
+    "https://x8k2.mjt.lu/oo/BAAAAD4abc/aBc12/b.gif",
+    "https://www.google-analytics.com/collect?v=1&tid=UA-1&t=event",
+    "https://ssl.google-analytics.com/__utm.gif?utmac=1",
 ])
 func openTrackersNeverLoad(_ url: String) {
     #expect(MailTrackers.isTracker(url), "\(url)")
@@ -49,6 +57,14 @@ func openTrackersNeverLoad(_ url: String) {
     "https://cdn.example.com/track/opening-hours.png",
     "https://cdn.shopify.com/s/files/1/0001/open-house.jpg",
     "https://i.pstmrk.it/images/logo.png",
+    "https://substackcdn.com/image/fetch/w_1456,c_limit,f_webp,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fabc.png",
+    "https://substack-post-media.s3.amazonaws.com/public/images/open.jpeg",
+    "https://image.s7.exct.net/lib/fe8f1374/m/1/logo.png",
+    "https://i1.createsend1.com/ei/r/12/345/csimport/logo.png",
+    "https://img.mailinblue.com/2607945/images/content_library/original/logo.png",
+    "https://cdn.example.com/tr/op.png",
+    "https://x8k2.mjt.lu/img/logo.png",
+    "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png",
 ])
 func ordinaryImagesStillLoad(_ url: String) {
     #expect(!MailTrackers.isTracker(url), "\(url)")
@@ -58,11 +74,13 @@ func ordinaryImagesStillLoad(_ url: String) {
 
 @Test func hiddenAndTinyImagesArePixels() {
     let pixels = [
-        #"width="1" height="1""#, #"width="1""#, #"height="2px""#, #"width=" 0 ""#, #"width="2" height="100""#,
-        #"style="height:1px""#, #"style="width: 0""#, #"style="max-height:0""#, #"style="max-width: 0px !important""#,
+        #"width="1" height="1""#, #"width="1""#, #"height="1px""#, #"width=" 0 ""#, #"width="2" height="2""#,
+        #"width="1" height="2""#, #"width="600" height="0""#, #"style="height:1px""#, #"style="width: 0""#,
+        #"style="max-height:0""#, #"width="600" style="max-height:0""#, #"style="max-width: 0px !important""#,
         #"style="display: none""#, #"style="DISPLAY:NONE""#, #"style="visibility:hidden""#, #"style="opacity:0""#,
-        #"style="opacity: 0.0""#, #"style="opacity:0%""#, #"style="height:1pt""#, #"hidden"#,
+        #"style="opacity: 0.0""#, #"style="opacity:0%""#, #"style="height:0.75pt""#, #"hidden"#,
         #"width="600" style="height:1px;width:1px;max-height:1px;max-width:1px;display:block""#,
+        #"width="600" height="2" style="width:2px""#, #"width="0%""#, #"style="height:1px;max-width:100%""#,
     ]
     for attributes in pixels {
         let mail = loaded("<p>a</p><img src=\"https://cdn.example/x.png\" \(attributes) alt=\"\">")
@@ -70,9 +88,13 @@ func ordinaryImagesStillLoad(_ url: String) {
         let protocolRelative = loaded("<img src=\"//cdn.example/x.png\" \(attributes)>")
         #expect(!protocolRelative.html.contains("<img"), "protocol-relative \(attributes) → \(protocolRelative.html)")
     }
+    // Dividers and spacers draw something: one thin side is fine while the other is known and bigger.
     let images = [
         #"width="250""#, #"width="600" height="300""#, #"width="100%""#, #"style="width:250px;max-width:100%""#,
         #"style="opacity:0.9""#, #"style="height:auto""#, #"style="max-height:3px""#, #"width="3" height="3""#,
+        #"width="600" height="2""#, #"width="600" height="1""#, #"width="1" height="20""#, #"width="2" height="40""#,
+        #"style="width:600px;height:1px""#, #"width="100%" height="1""#, #"height="2""#, #"width="2""#,
+        #"width="1" style="width:600px""#, #"style="width:100%;height:1px""#,
     ]
     for attributes in images {
         let mail = loaded("<img src=\"https://cdn.example/x.png\" \(attributes)>")

@@ -12,8 +12,10 @@ enum MailTrackers {
         "bl-1.com", "emltrk.com", "getnotify.com", "pixel.wp.com", "pmtrk",
     ]
 
-    /// File names that only open trackers use.
-    static let pixelFiles: Set<String> = ["open.gif", "open.png", "open.php", "pixel.gif", "1x1.gif", "1x1.png", "beacon.gif"]
+    /// File names that only open trackers use (`o.gif`: Campaign Monitor, `open.aspx`: Salesforce Marketing Cloud).
+    static let pixelFiles: Set<String> = [
+        "open.gif", "open.png", "open.php", "open.aspx", "o.gif", "pixel.gif", "1x1.gif", "1x1.png", "beacon.gif",
+    ]
 
     /// True for an http(s) image URL that is an open tracker: a known tracking host, or the URL shapes mail
     /// services give their open pixels, also on a sender's own link domain.
@@ -24,12 +26,16 @@ enum MailTrackers {
         func on(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
         let segments = path.split(separator: "/")
 
-        // HubSpot, Amazon SES opens (`/L0/` is a click), Postmark.
-        if on("t.hubspotemail.net") || on("track.hubspot.com") { return true }
+        // HubSpot, Google Analytics, Amazon SES opens (`/L0/` is a click), Postmark, Substack, Mailjet.
+        if on("t.hubspotemail.net") || on("track.hubspot.com") || on("google-analytics.com") { return true }
         if on("awstrack.me"), path.hasPrefix("/i0/") { return true }
         if on("pstmrk.it"), path.hasPrefix("/open") { return true }
-        // Customer.io, Iterable and senders' own link domains: `/e/o/<token>`.
-        if segments.count >= 3, segments[0] == "e", segments[1] == "o" { return true }
+        if on("eotrx.substackcdn.com"), path.hasPrefix("/open") { return true }
+        if on("mjt.lu"), segments.first == "oo" { return true }
+        // Customer.io, Iterable and senders' own link domains: `/e/o/<token>`; Brevo: `/tr/op/<token>`.
+        if segments.count >= 3, (segments[0] == "e" && segments[1] == "o") || (segments[0] == "tr" && segments[1] == "op") {
+            return true
+        }
         // SendGrid, also on a sender's link domain.
         if path.hasPrefix("/wf/open") { return true }
         // Mailgun on its `email.` link domains: `/o/<token>`, a long token with no file extension.
@@ -60,12 +66,12 @@ enum MailTrackers {
         return (host, (raw.removingPercentEncoding ?? raw).lowercased())
     }
 
-    /// A remote image drawn 0–2 px wide or tall, or hidden by its style or the `hidden` attribute: a
-    /// tracking pixel, whatever its URL.
+    /// A remote image hidden by its style or the `hidden` attribute, or drawn too small to see (`isPixelSize`): a
+    /// tracking pixel, whatever its URL. Inline style sizes win over the attributes, as they do on screen.
     static func isPixel(width: String?, height: String?, style: String?, hidden: Bool) -> Bool {
         if hidden { return true }
-        if let width = attributeLength(width), width <= 2 { return true }
-        if let height = attributeLength(height), height <= 2 { return true }
+        var width = attributeLength(width), height = attributeLength(height)
+        var maxWidth: Double?, maxHeight: Double?
         for declaration in (style ?? "").lowercased().split(separator: ";") {
             guard let colon = declaration.firstIndex(of: ":") else { continue }
             let property = declaration[..<colon].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -75,19 +81,42 @@ enum MailTrackers {
             case "display": if value == "none" { return true }
             case "visibility": if value == "hidden" || value == "collapse" { return true }
             case "opacity": if let opacity = Double(value.hasSuffix("%") ? String(value.dropLast()) : value), opacity <= 0 { return true }
-            case "width", "height", "max-width", "max-height":
-                if let length = cssLength(value), length <= 2 { return true }
+            case "width": width = cssLength(value) ?? share(value)
+            case "height": height = cssLength(value) ?? share(value)
+            case "max-width": maxWidth = cssLength(value)
+            case "max-height": maxHeight = cssLength(value)
             default: continue
             }
         }
-        return false
+        if let maxWidth { width = min(width ?? maxWidth, maxWidth) }
+        if let maxHeight { height = min(height ?? maxHeight, maxHeight) }
+        return isPixelSize(width: width, height: height)
     }
 
-    /// A `width`/`height` attribute in pixels ("1", "1px", " 0 "); nil for percentages and anything else.
+    /// Too small to see: no width or no height at all, both sides 2 px or less, or one side 1 px or less with the
+    /// other unknown. A 600 × 2 divider or a 1 × 20 spacer draws something, so it stays.
+    static func isPixelSize(width: Double?, height: Double?) -> Bool {
+        if let width, width <= 0 { return true }
+        if let height, height <= 0 { return true }
+        switch (width, height) {
+        case let (width?, height?): return width <= 2 && height <= 2
+        case let (width?, nil): return width <= 1
+        case let (nil, height?): return height <= 1
+        case (nil, nil): return false
+        }
+    }
+
+    /// A `width`/`height` attribute in pixels ("1", "1px", " 0 ", or a percentage as `share`); nil for anything else.
     static func attributeLength(_ value: String?) -> Double? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespaces).lowercased()
-        return Double(trimmed.hasSuffix("px") ? String(trimmed.dropLast(2)) : trimmed)
+        return Double(trimmed.hasSuffix("px") ? String(trimmed.dropLast(2)) : trimmed) ?? share(trimmed)
+    }
+
+    /// A percentage size is a share of the column: wide unless it is 0%. Nil when `value` isn't a percentage.
+    static func share(_ value: String) -> Double? {
+        guard value.hasSuffix("%"), let percent = Double(value.dropLast()) else { return nil }
+        return percent > 0 ? .infinity : 0
     }
 
     /// A CSS length in pixels: `px`, `pt` or a bare number; nil for relative units and keywords.
