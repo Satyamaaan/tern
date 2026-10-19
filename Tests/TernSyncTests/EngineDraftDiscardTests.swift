@@ -145,19 +145,39 @@ private func draftRows(_ h: Harness) throws -> Int {
     try await h.syncFully()
 
     _ = try h.drafts.discardDrafts(inThreads: [draft.thread], holdFor: 0, now: h.clock.now())
-    // An account where drafts.list isn't available: the draft can't be looked up, but its message is still a draft.
+    // An account where drafts.list isn't available: the draft can't ever be looked up, but its message is
+    // still a draft, so it fails at once rather than after every retry.
     await h.fake.failNext(100, with: .server(status: 501, message: GmailDraftPage.unsupported), on: .drafts)
     try await h.sync.drainOps()
-    #expect(try h.ops().first?.state == .pending && h.ops().first?.attempts == 1, "it tries again")
-    for _ in 0..<(h.configuration.maxOpAttempts + 2) {
-        h.clock.advance(3_600)
-        try await h.sync.drainOps()
-    }
     let ops = try h.ops()
-    #expect(ops.map(\.kind) == [.deleteDraft] && ops.first?.state == .failed)
+    #expect(ops.map(\.kind) == [.deleteDraft] && ops.first?.state == .failed && ops.first?.attempts == 1)
     #expect(await h.fake.draftIds == [draft.draftId])
     #expect(await h.fake.callCounts[.deleteDraft] == nil)
     #expect(try h.message(draft.messageId)?.isDraft == true, "Gmail kept it, so it shows again")
+}
+
+@Test func aGmailDraftTheListDoesntShowYetIsTriedAgainUntilItDoes() async throws {
+    let h = try Harness()
+    await seed(h.fake, count: 2)
+    let draft = try await gmailDraft(h, subject: "Subscription", messageId: "phone-5@example.com")
+    try await h.syncFully()
+    try await h.store.database.writer.write { db in
+        try db.execute(sql: "UPDATE message SET rfcMessageId = NULL WHERE id = ?", arguments: [draft.messageId])
+    }
+
+    _ = try h.drafts.discardDrafts(inThreads: [draft.thread], holdFor: 0, now: h.clock.now())
+    await h.fake.setListed(false, draft: draft.draftId)
+    try await h.sync.drainOps()
+    #expect(try h.ops().first?.state == .pending && h.ops().first?.attempts == 1, "its message is still a draft: it tries again")
+    #expect(await h.fake.draftIds == [draft.draftId])
+
+    await h.fake.setListed(true, draft: draft.draftId)
+    h.clock.advance(3_600)
+    try await h.sync.drainOps()
+    #expect(await h.fake.draftIds.isEmpty)
+    #expect(try h.ops().isEmpty)
+    try await h.sync.pollHistory()
+    try await h.expectMirrorsGmail()
 }
 
 @Test func aDraftChangedOnAnotherDeviceDuringTheUndoWindowStays() async throws {
@@ -194,7 +214,8 @@ private final class Box<Value>: @unchecked Sendable {
 }
 
 /// A local draft saved to Gmail, then changed here: discarded while that change is on its way to Gmail.
-private func discardDuringSave(_ h: Harness) async throws -> (DiscardedDrafts, draftId: String, gmailDraftId: String) {
+/// `failedSave` adds an earlier save of it that failed for good.
+private func discardDuringSave(_ h: Harness, failedSave: Bool = false) async throws -> (DiscardedDrafts, draftId: String, gmailDraftId: String) {
     let seeded = await seed(h.fake, count: 2)
     try await h.syncFully()
     let thread = h.thread(seeded[0].threadId)
@@ -205,6 +226,12 @@ private func discardDuringSave(_ h: Harness) async throws -> (DiscardedDrafts, d
     try await h.sync.pollHistory()
     let gmailDraftId = try #require(await h.fake.draftIds.first)
 
+    if failedSave {
+        let payload = String(decoding: try JSONEncoder().encode(DraftOpPayload(draftId: draft.id)), as: UTF8.self)
+        try await h.store.database.writer.write { db in
+            try PendingOp(accountId: testEmail, kind: .saveDraft, payload: payload, state: .failed).insert(db)
+        }
+    }
     draft.bodyHtml = "<p>On it, sending Friday</p>"
     try await h.queueSave(draft)
     let discarded = Box<DiscardedDrafts>()
@@ -252,4 +279,19 @@ private func discardDuringSave(_ h: Harness) async throws -> (DiscardedDrafts, d
     let message = try #require(try h.drafts.draft(id: draftId)?.gmailMessageId)
     #expect(try h.message(message)?.isDraft == true, "its message is back in the lists")
     try await h.expectMirrorsGmail()
+}
+
+@Test func undoAfterASaveThatWasOnItsWayShowsTheDraftEvenWithAFailedSaveBeside() async throws {
+    let h = try Harness()
+    let (discarded, draftId, gmailDraftId) = try await discardDuringSave(h, failedSave: true)
+    try await h.sync.pollHistory()
+    #expect(try h.drafts.restore(discarded, now: h.clock.now()) == RestoredDrafts(exact: 1))
+    #expect(try h.ops().filter { $0.kind == .saveDraft }.map(\.state) == [.failed, .pending])
+
+    h.clock.advance(60)
+    try await h.sync.drainOps()
+    try await h.sync.pollHistory()
+    #expect(await h.fake.draftIds == [gmailDraftId])
+    let message = try #require(try h.drafts.draft(id: draftId)?.gmailMessageId)
+    #expect(try h.message(message)?.isDraft == true, "its message is back in the lists")
 }

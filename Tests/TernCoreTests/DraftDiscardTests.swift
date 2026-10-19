@@ -225,3 +225,77 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     #expect(try mail(store).threadDetail(key("solo"))?.attachments["d2"]?.map(\.filename) == ["plan.pdf"])
     #expect(try draftRows(store) == ["news"])
 }
+
+/// d1 or d2 as Gmail has it once it was sent from the phone: the same message, in Sent.
+private func sentCopy(_ draft: MailMessage) -> MailMessage {
+    MailMessage(accountId: me.id, id: draft.id, threadId: draft.threadId, date: draft.date, fromEmail: me.email, toList: draft.toList,
+                subject: draft.subject, bodyText: draft.bodyText, bodyState: .full, labelIds: ["SENT"], isFromMe: true,
+                rfcMessageId: draft.rfcMessageId)
+}
+
+@Test func undoLeavesADraftSentFromAnotherDeviceMeanwhileSent() async throws {
+    let store = try makeStore()
+    let draft = try await linkReply(store)
+    let d1 = try #require(try message(store, "d1")), d2 = try #require(try message(store, "d2"))
+    let discarded = try store.discardDrafts(inThreads: [key("news"), key("solo")], holdFor: hold, now: t0)
+    #expect(discarded.count == 2)
+
+    // Both are sent on the phone during the undo window, and sync brings them in.
+    try await store.database.writer.write { db in try MailStore.upsertServerMessages(db, [sentCopy(d1), sentCopy(d2)]) }
+    #expect(try store.restore(discarded, now: t0.addingTimeInterval(3)) == RestoredDrafts(sent: 2))
+    #expect(try message(store, "d1")?.isDraft == false && message(store, "d2")?.isDraft == false, "they stay sent")
+    #expect(try store.draft(id: draft.id) == nil, "the local draft doesn't come back to be saved as a new Gmail draft")
+    #expect(try draftRows(store).isEmpty)
+    #expect(try ops(store).map(\.kind) == [.deleteDraft, .deleteDraft], "the deletions run, find nothing to delete and clear the files")
+}
+
+@Test func undoAfterAFinishedSaveQueuesAnotherEvenWithAFailedOneBeside() async throws {
+    let store = try makeStore()
+    let draft = try await linkReply(store)
+    // An earlier save failed for good; the latest one is on its way to Gmail.
+    try await store.database.writer.write { db in
+        try db.execute(sql: "UPDATE pending_op SET state = 'failed'")
+        try PendingOp(accountId: me.id, kind: .saveDraft, payload: try encodeJSON(DraftOpPayload(draftId: draft.id)), createdAt: t0,
+                      state: .inflight, dispatched: true).insert(db)
+    }
+    let discarded = try store.discardDrafts(inThreads: [key("news")], holdFor: hold, now: t0)
+    #expect(discarded.items.first?.ops.map(\.state) == [.failed])
+    // The save finishes and hands its new copy to the waiting deletion (`AccountSync.saveDraft`).
+    try await store.database.writer.write { db in
+        try db.execute(sql: "DELETE FROM pending_op WHERE kind = 'saveDraft' AND state = 'inflight'")
+        try db.execute(sql: "UPDATE pending_op SET payload = json_set(payload, '$.gmailMessageId', 'd1b') WHERE kind = 'deleteDraft'")
+    }
+
+    #expect(try store.restore(discarded, now: t0.addingTimeInterval(3)) == RestoredDrafts(exact: 1))
+    #expect(try store.draft(id: draft.id)?.gmailMessageId == "d1b")
+    let saves = try ops(store).filter { $0.kind == .saveDraft }
+    #expect(saves.map(\.state) == [.failed, .pending], "a new save brings its message back into the lists")
+}
+
+@Test func aFailedGmailDeletionCountsOnlyWhileItsDraftIsStillThere() throws {
+    let store = try makeStore()
+    func failedDelete(_ messageId: String) throws {
+        try store.database.writer.write { db in
+            try PendingOp(accountId: me.id, kind: .deleteDraft,
+                          payload: try encodeJSON(DraftOpPayload(draftId: DraftStore.gmailDraftPrefix + messageId, gmailMessageId: messageId)),
+                          createdAt: t0, state: .failed).insert(db)
+        }
+    }
+    func failed() throws -> [String] {
+        try store.database.writer.write { db in
+            try MailStore.pruneFailedOps(db, accountId: me.id)
+            return try PendingOp.filter(Column("state") == "failed").fetchAll(db).compactMap { try payload($0).gmailMessageId }
+        }
+    }
+    try failedDelete("d1")
+    try failedDelete("d2")
+    // d2 was discarded again after it showed again, and Gmail kept it again: one notice, not two.
+    try failedDelete("d2")
+    #expect(try failed().sorted() == ["d1", "d2"], "Gmail kept them and they show again")
+
+    // d1 is discarded again; d2 is sent from the phone.
+    let d2 = try #require(try message(store, "d2"))
+    _ = try store.discardDrafts(inThreads: [key("news")], holdFor: hold, now: t0)
+    try store.database.writer.write { db in try MailStore.upsertServerMessages(db, [sentCopy(d2)]) }
+    #expect(try failed().isEmpty)
+}

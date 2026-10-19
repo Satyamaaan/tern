@@ -461,11 +461,17 @@ extension AccountSync {
 
     /// Deletes a Gmail draft. `DraftStore` has already removed the local draft (discard) or moved
     /// it to another account, so only Gmail's copy goes; history then removes its message here. When the
-    /// op names the draft's message (`gmailMessageId`), only that version goes: a draft changed on another
-    /// device since has a new message and stays, and history brings it in. A draft written in Gmail, whose
-    /// draft id Tern never learned, is found by its message; while it can't be found but its message is
-    /// still a draft, the op fails and retries, and in the end Tern shows the draft again (`rollBack`).
+    /// op names the draft's message (`gmailMessageId`), a draft changed on another device during the undo
+    /// window has a new message and stays, and history brings it in. Gmail has no conditional delete, so a
+    /// change landing between that check and the delete (one round trip) still goes. A draft written in
+    /// Gmail, whose draft id Tern never learned, is found by its message; while it can't be found but its
+    /// message is still a draft, the op fails and retries, and in the end Tern shows the draft again
+    /// (`rollBack`); without drafts.list it can't ever be found, so that happens at once.
     /// Once it's gone, so are the files of a discarded draft.
+    ///
+    /// Not handled: a draft discarded while its first save (a create) is on its way, when Tern quits before
+    /// the create returns. Tern never learns the new draft's ids, so its deletion has nothing to delete; the
+    /// draft stays in Gmail and comes back as a Gmail draft Tern has no row for.
     private func deleteDraft(_ op: PendingOp) async throws {
         guard let opId = op.id,
               let payload = try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)) else {
@@ -486,7 +492,7 @@ extension AccountSync {
                 gmailDraftId = nil
             } else if gmailDraftId == nil {
                 gmailDraftId = try await gmailDraft(withMessage: messageId, rfcMessageId: payload.rfcMessageId)
-                if gmailDraftId == nil { throw DraftNotFound() }
+                if gmailDraftId == nil { throw DraftNotFound(final: draftListUnsupported) }
             }
         }
         if let gmailDraftId {
@@ -502,8 +508,10 @@ extension AccountSync {
         }
     }
 
-    /// A Gmail draft whose message still exists but which drafts.list doesn't show (yet).
+    /// A Gmail draft whose message still exists but which drafts.list doesn't show (yet). `final` when the
+    /// account has no drafts.list at all, so trying again can't find it.
     struct DraftNotFound: LocalizedError {
+        var final = false
         var errorDescription: String? { "Gmail still has this draft, but it couldn't be found to delete" }
     }
 
@@ -546,8 +554,8 @@ extension AccountSync {
     // MARK: Failures
 
     /// Unauthorized pauses the account; offline and rate limits wait without using up attempts;
-    /// anything else backs off exponentially and fails for good after `maxOpAttempts`, rolling the
-    /// local change back to what Gmail has.
+    /// anything else backs off exponentially and fails for good after `maxOpAttempts` (at once when it
+    /// can't succeed, `DraftNotFound.final`), rolling the local change back to what Gmail has.
     private func failed(_ op: PendingOp, _ error: Error) async throws -> OpOutcome {
         guard let opId = op.id else { return .done }
         let now = clock.now()
@@ -576,7 +584,8 @@ extension AccountSync {
             // (Send again could then deliver it twice); it keeps retrying, at most every few minutes.
             let transient: Bool
             if case .server(let status, _)? = error as? GmailAPIError, status >= 500 { transient = true } else { transient = false }
-            if attempts >= configuration.maxOpAttempts, !(transient && AccountSync.isStaged(op)) {
+            let hopeless = (error as? DraftNotFound)?.final == true
+            if attempts >= configuration.maxOpAttempts || hopeless, !(transient && AccountSync.isStaged(op)) {
                 try await updateOp(opId) {
                     $0.state = .failed
                     $0.attempts = attempts

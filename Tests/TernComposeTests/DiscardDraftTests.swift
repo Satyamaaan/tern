@@ -220,3 +220,26 @@ private func ops(_ model: AppModel) throws -> [PendingOp] {
     #expect(try drafts(model) == [local.threadId], "the draft written here comes back, and saves itself again")
     #expect(try model.services.drafts.draft(id: "note")?.bodyHtml == "<p>Milk</p>")
 }
+
+@MainActor
+@Test func whenTheTrashCantBeUndoneTheDraftsStillComeBack() async throws {
+    let (model, registry, _) = try makeModel()
+    model.show(.allMail)
+    model.selectAll()
+    registry.run("trash")
+    await settle(model)
+    // Taking the newsletter out of Trash fails.
+    try await model.store.database.writer.write { db in
+        try db.execute(sql: """
+            CREATE TRIGGER refuse_untrash BEFORE UPDATE OF labelIds ON message
+            WHEN old.labelIds LIKE '%"TRASH"%' AND new.labelIds NOT LIKE '%"TRASH"%'
+            BEGIN SELECT RAISE(ABORT, 'refused'); END
+            """)
+    }
+    model.undoLast()
+    await settle(model, 0.1)
+    #expect(model.toasts.last?.title == "Couldn't take them out of Trash")
+    #expect(try drafts(model).contains(solo.threadId), "the draft is back")
+    #expect(try !ops(model).contains { $0.kind == .deleteDraft }, "and its Gmail deletion is called off")
+    #expect(try model.store.threadRows(in: Mailbox(.trash)).map(\.id) == [news])
+}

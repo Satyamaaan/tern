@@ -72,6 +72,9 @@ extension AppModel {
         if restored.lost > 0 {
             return "Too late: Gmail already deleted " + (restored.lost == 1 ? "the draft" : "\(restored.lost) drafts")
         }
+        if restored.sent > 0 {
+            return restored.sent == 1 ? "That draft was sent from another device" : "\(restored.sent) drafts were sent from another device"
+        }
         if restored.resaved > 0 { return restored.resaved == 1 ? "Draft back, saved to Gmail again" : "Drafts back, saved to Gmail again" }
         return nil
     }
@@ -134,20 +137,30 @@ extension AppModel {
         let store = self.store
         writes.async {
             var restored = RestoredDrafts()
-            var failed = false
-            do {
-                if let token = trash.value { try store.undo(token) }
-                if let discarded = result.value { restored = try drafts.restore(discarded) }
-            } catch {
-                failed = true
-                NSLog("Tern: restoring drafts failed: \(error)")
+            var failures: [String] = []
+            // The drafts first: their Gmail deletions are on a clock.
+            if let discarded = result.value {
+                do {
+                    restored = try drafts.restore(discarded)
+                } catch {
+                    failures.append("Couldn't bring the drafts back")
+                    NSLog("Tern: restoring drafts failed: \(error)")
+                }
+            }
+            if let token = trash.value {
+                do {
+                    try store.undo(token)
+                } catch {
+                    failures.append("Couldn't take them out of Trash")
+                    NSLog("Tern: undoing the trash failed: \(error)")
+                }
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     for key in keys { self.hidden[key] = nil }
                     self.rebuildSnapshot(.none)
                     if self.isSearching { self.refreshSearch() }
-                    if let title = failed ? "Couldn't bring the drafts back" : Self.restoredTitle(restored) {
+                    if let title = failures.count > 1 ? "Couldn't undo that" : failures.first ?? Self.restoredTitle(restored) {
                         self.showToast(title, undo: nil)
                     }
                 }

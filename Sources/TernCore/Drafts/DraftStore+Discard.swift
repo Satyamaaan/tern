@@ -45,11 +45,14 @@ public struct RestoredDrafts: Sendable, Hashable {
     public var resaved = 0
     /// Gmail drafts Tern had no row for that Gmail had already deleted: gone.
     public var lost = 0
+    /// Sent from another device meanwhile: they stay sent.
+    public var sent = 0
 
-    public init(exact: Int = 0, resaved: Int = 0, lost: Int = 0) {
+    public init(exact: Int = 0, resaved: Int = 0, lost: Int = 0, sent: Int = 0) {
         self.exact = exact
         self.resaved = resaved
         self.lost = lost
+        self.sent = sent
     }
 }
 
@@ -175,6 +178,8 @@ extension DraftStore {
     /// its way at the discard and finished since left its Gmail ids on the deletion; the draft takes them and
     /// saves again, so its message comes back through sync. A local draft whose Gmail copy is already gone
     /// comes back without it and saves a new one; a Gmail draft Tern had no row for can't come back then.
+    /// A draft sent from another device meanwhile (its message is in Tern now, and not a draft) stays sent:
+    /// neither its DRAFT copy nor its local row comes back, and its deletion, left to run, deletes nothing.
     public func restore(_ discarded: DiscardedDrafts, now: Date = Date()) throws -> RestoredDrafts {
         try database.writer.write { db in
             var result = RestoredDrafts()
@@ -184,6 +189,10 @@ extension DraftStore {
                 let held = try PendingOp.fetchOne(db, key: item.deleteOpId)
                 let stopped = held.map { $0.state == .pending && !$0.dispatched } ?? false
                 let payload = held.flatMap { try? JSONDecoder().decode(DraftOpPayload.self, from: Data($0.payload.utf8)) }
+                if try Self.wasSent(db, item, payload) {
+                    result.sent += 1
+                    continue
+                }
                 if stopped { _ = try held?.delete(db) }
                 guard var draft = item.draft else {
                     if stopped, let message = item.message {
@@ -209,8 +218,9 @@ extension DraftStore {
                     copy.id = nil
                     try copy.insert(db)
                 }
-                if !stopped || saved, !item.ops.contains(where: { $0.kind == .saveDraft || $0.kind == .sendDraft }),
-                   !DraftContent(stored: draft).isBlank {
+                // A save or send coming back with it brings the message back; a failed one won't run.
+                let queued = item.ops.contains { ($0.kind == .saveDraft || $0.kind == .sendDraft) && $0.state == .pending }
+                if !stopped || saved, !queued, !DraftContent(stored: draft).isBlank {
                     try Self.queueSave(db, draft, now: now)
                 }
                 if stopped, !saved, let message = item.message {
@@ -230,5 +240,15 @@ extension DraftStore {
             }
             return result
         }
+    }
+
+    /// Whether a message of the discarded draft is in Tern now as something other than a draft: sent.
+    private static func wasSent(_ db: Database, _ item: DiscardedDrafts.Item, _ payload: DraftOpPayload?) throws -> Bool {
+        guard let accountId = item.draft?.accountId ?? item.message?.accountId else { return false }
+        let ids = Set([item.message?.id, item.draft?.gmailMessageId, payload?.gmailMessageId].compactMap { $0 })
+        guard !ids.isEmpty else { return false }
+        return try MailMessage
+            .filter(Column("accountId") == accountId && ids.contains(Column("id")) && Column("isDraft") == false)
+            .fetchCount(db) > 0
     }
 }

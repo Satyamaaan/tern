@@ -8,7 +8,9 @@ extension MailStore {
     /// - label changes whose messages are all gone, that name a user label the account no longer has,
     ///   or that are true of every message's labels by now (done again here or in Gmail);
     /// - Gmail saves of a draft that is gone, being sent or sent again, or in another account;
-    /// - sends of a draft that is gone, or that the user has taken back to edit or send again.
+    /// - sends of a draft that is gone, or that the user has taken back to edit or send again;
+    /// - deletions of a Gmail draft whose message isn't a draft here any more (deleted or sent from Gmail),
+    ///   or that was discarded again since.
     public static func pruneFailedOps(_ db: Database, accountId: String) throws {
         let failed = try PendingOp
             .filter(Column("accountId") == accountId && Column("state") == PendingOp.State.failed.rawValue)
@@ -36,7 +38,17 @@ extension MailStore {
                   let draft = try Draft.fetchOne(db, key: draftId), draft.accountId == op.accountId else { return false }
             return op.kind == .saveDraft ? draft.state == .editing || draft.state == .failed : draft.state == .failed
         case .deleteDraft:
-            return true
+            guard let messageId = (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.gmailMessageId else {
+                return true
+            }
+            let isDraft = try Bool.fetchOne(db, sql: "SELECT isDraft FROM message WHERE accountId = ? AND id = ?",
+                                            arguments: [op.accountId, messageId]) ?? false
+            guard isDraft, let id = op.id else { return false }
+            let again = try PendingOp
+                .filter(Column("accountId") == op.accountId && Column("kind") == PendingOp.Kind.deleteDraft.rawValue && Column("id") > id)
+                .filter(sql: "json_extract(payload, '$.gmailMessageId') = ?", arguments: [messageId])
+                .fetchCount(db)
+            return again == 0
         }
     }
 }
