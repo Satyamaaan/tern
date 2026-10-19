@@ -132,13 +132,6 @@ enum MailHTMLPolicy {
         "colspan", "rowspan", "span", "start", "type", "reversed", "scope", "headers", "abbr", "summary",
         "bordercolor", "frame", "rules", "clear", "noshade", "char", "charoff", "compact", "datetime", "open",
     ]
-
-    static let trackerHosts: [String] = [
-        "mailtrack.io", "t.yesware.com", "mailstat.us", "track.hubspot.com", "pixel.mailchimp.com",
-        "list-manage.com/track", "sendgrid.net/wf/open", "mandrillapp.com/track", "t.sidekickopen",
-        "email.mg.", "open.convertkit", "trk.klclick", "links.iterable.com/e/o", "superhuman.com/~",
-        "bl-1.com", "emltrk.com", "getnotify.com", "pixel.wp.com",
-    ]
 }
 
 // MARK: - Writer
@@ -320,8 +313,7 @@ private struct Writer {
         if url.hasPrefix("//") { url = "https:" + url }
         switch scheme(of: url) {
         case "http", "https":
-            let lower = url.lowercased()
-            if MailHTMLPolicy.trackerHosts.contains(where: { lower.contains($0) }) { return .drop }
+            if MailTrackers.isTracker(url) { return .drop }
             return options.allowRemoteImages ? .keep(options.remoteImageURL(url)) : .blocked
         case "data":
             let lower = url.lowercased()
@@ -366,19 +358,9 @@ private struct Writer {
     // MARK: Helpers
 
     static func isTrackingPixel(_ node: HTMLNode) -> Bool {
-        guard let source = node.attribute("src"), source.lowercased().contains("http") else { return false }
-        func size(_ key: String) -> Double? {
-            guard let value = node.attribute(key) else { return nil }
-            return Double(value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "px", with: ""))
-        }
-        let style = (node.attribute("style") ?? "").lowercased().replacingOccurrences(of: " ", with: "")
-        if style.contains("display:none") || style.contains("visibility:hidden") { return true }
-        if style.contains("width:1px") && style.contains("height:1px") { return true }
-        if style.contains("width:0") && style.contains("height:0") { return true }
-        if let width = size("width"), let height = size("height") { return width <= 2 && height <= 2 }
-        if let width = size("width"), width <= 1 { return true }
-        if let height = size("height"), height <= 1 { return true }
-        return false
+        guard let source = node.attribute("src"), isRemote(source) else { return false }
+        return MailTrackers.isPixel(width: node.attribute("width"), height: node.attribute("height"),
+                                    style: node.attribute("style"), hidden: node.attribute("hidden") != nil)
     }
 
     /// A whole-pixel size from a `width`/`height` attribute ("600", "600px"); nil for percentages.
