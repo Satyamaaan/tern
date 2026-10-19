@@ -160,7 +160,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 - `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
   fits), then Unpin, Mark All as Read, Select All, Density, Inbox Tabs, Reading Pane. Right-click a tab to
   pin or unpin it.
-- Keys: Tab / ⇧Tab cycle the tabs shown; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 Primary to Forums.
+- Keys: Tab / ⇧Tab cycle the tabs shown; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 Primary to Forums (a key the user had
+  given another command before Gmail's tabs stays theirs; that tab then starts without one).
 - Right side: the **account stack** (up to three 20 px letter avatars in account hues, overlapping by 6 px with
   a 2 px `bg` ring) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
   account ⌘1…⌘9, Add account…, Settings…); then **compose**: a 28 px icon button, ink pencil, `hairlineStrong`

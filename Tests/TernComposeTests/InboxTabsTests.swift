@@ -159,3 +159,52 @@ private func withModel(promotions: Int = 4, primary: Int = 2, _ body: (AppModel)
     let prefs = Preferences(defaults: defaults)
     #expect(prefs.shortcutOverrides.keys["tab.primary"] == [.option("i")])
 }
+
+/// Overrides saved before Gmail's tabs, migrated, then validated by the registry as at launch.
+@MainActor
+private func migrated(_ saved: [String: [KeyShortcut]], _ check: ([String: [String]]?, CommandRegistry) -> Void) throws {
+    let name = "tern-inbox-tabs-tests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    defaults.set(saved.mapValues { $0.map(\.stored) }, forKey: ShortcutOverrides.defaultsKey)
+    Preferences.migrateInboxTabs(defaults)
+    let stored = defaults.dictionary(forKey: ShortcutOverrides.defaultsKey) as? [String: [String]]
+    try withModel { model in
+        check(stored, CommandRegistry(model: model, shell: nil, overrides: ShortcutOverrides.load(from: defaults), keyBindings: KeyBindingFiles(urls: [])))
+    }
+}
+
+@MainActor
+@Test func aKeyTheUserGaveAwayStaysTheirsWhenATabTakesItAsDefault() throws {
+    // ⌥5 was Notifications'; the user gave it to Archive. Social now has it built in, Updates took Notifications' place.
+    try migrated(["split.notifications": [], "archive": [.option("5")]]) { stored, registry in
+        #expect(stored == ["tab.updates": [], "tab.social": [], "archive": [KeyShortcut.option("5").stored]])
+        #expect(registry["archive"]?.keys == [.option("5")])
+        #expect(registry["tab.social"]?.keys == [] && registry["tab.updates"]?.keys == [])
+        #expect(registry["tab.primary"]?.keys == [.option("3")] && registry["tab.forums"]?.keys == [.option("7")])
+    }
+}
+
+@MainActor
+@Test func aKeyMovedOntoAnOldTabStaysWithItsGmailTab() throws {
+    // Important was given Notifications' ⌥5: Primary keeps it, Social goes without.
+    try migrated(["split.important": [.option("5")], "split.notifications": []]) { _, registry in
+        #expect(registry["tab.primary"]?.keys == [.option("5")])
+        #expect(registry["tab.social"]?.keys == [] && registry["tab.updates"]?.keys == [])
+    }
+    // Newsletters' ⌥6 went to Forward: Promotions keeps Newsletters' no key, and Updates, which has ⌥6 now, goes without.
+    try migrated(["split.newsletters": [], "forward": [.option("6")]]) { stored, registry in
+        #expect(stored?["tab.updates"] == [] && stored?["tab.promotions"] == [])
+        #expect(registry["forward"]?.keys == [.option("6")])
+        #expect(registry["tab.updates"]?.keys == [] && registry["tab.promotions"]?.keys == [])
+    }
+}
+
+@MainActor
+@Test func tabsKeepTheirKeysWhenNoOneElseHasThem() throws {
+    try migrated(["split.people": [], "archive": [.option("9")]]) { stored, registry in
+        #expect(stored == ["archive": [KeyShortcut.option("9").stored]])
+        for (index, tab) in InboxTab.allCases.enumerated() { #expect(registry["tab.\(tab.rawValue)"]?.keys == [.option("\(index + 3)")]) }
+        #expect(registry["archive"]?.keys == [.option("9")])
+    }
+}

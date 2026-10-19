@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import TernCore
 
 enum AppearanceMode: String, CaseIterable, Identifiable {
     case system, light, dark
@@ -160,14 +161,20 @@ final class Preferences {
     ]
 
     /// Moves what was saved for the old tab commands to the Gmail tabs': a changed key goes to its new command
-    /// unless that one has its own, and recent palette commands follow (People and Other drop out). Does nothing
-    /// once nothing names an old command.
+    /// unless that one has its own, and recent palette commands follow (People and Other drop out). A Gmail tab
+    /// whose built-in key the user has given another command starts without one (⌥5 was Notifications', is
+    /// Social's), since registry validation would otherwise take the key back. Does nothing once nothing names an
+    /// old command.
     static func migrateInboxTabs(_ defaults: UserDefaults) {
         let old = { (id: String) in id.hasPrefix("split.") }
         if var stored = defaults.dictionary(forKey: ShortcutOverrides.defaultsKey) as? [String: [String]], stored.keys.contains(where: old) {
             for id in stored.keys.filter(old) {
                 let keys = stored.removeValue(forKey: id)
                 if let new = renamedTabCommands[id], stored[new] == nil { stored[new] = keys }
+            }
+            let claimed = Set(stored.values.joined().compactMap(KeyShortcut.init(stored:)))
+            for tab in InboxTab.allCases where stored["tab.\(tab.rawValue)"] == nil && claimed.contains(CommandRegistry.defaultKey(tab)) {
+                stored["tab.\(tab.rawValue)"] = []
             }
             if stored.isEmpty { defaults.removeObject(forKey: ShortcutOverrides.defaultsKey) } else { defaults.set(stored, forKey: ShortcutOverrides.defaultsKey) }
         }

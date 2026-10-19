@@ -218,8 +218,8 @@ final class CommandRegistry {
             Command(id: "tab.needsReply", title: "Needs Reply Tab", group: .goTo, keys: [.option("2")], menu: .go, section: 4,
                     aliases: ["tab", "waiting"], hiddenInPalette: true) { m.select(.needsReply) },
         ]
-        for (index, tab) in InboxTab.allCases.enumerated() {
-            list.append(Command(id: "tab.\(tab.rawValue)", title: tab.title, group: .goTo, keys: [.option("\(index + 3)")],
+        for tab in InboxTab.allCases {
+            list.append(Command(id: "tab.\(tab.rawValue)", title: tab.title, group: .goTo, keys: [Self.defaultKey(tab)],
                                 menu: .go, section: 4, aliases: ["tab", "inbox", "category"],
                                 isEnabled: { m.prefs.splitInbox }) { m.showInboxTab(tab) })
         }
@@ -357,6 +357,11 @@ extension CommandRegistry {
         return commands.contains { command in
             !command.isTextSafe && command.menu != nil && !command.paletteOnly && command.menuKey?.matches(event) == true
         }
+    }
+
+    /// The built-in key of a Gmail tab's command: ⌥3 for Primary through ⌥7 for Forums.
+    static func defaultKey(_ tab: InboxTab) -> KeyShortcut {
+        .option("\(InboxTab.allCases.firstIndex(of: tab)! + 3)")
     }
 
     /// Saved changes as they can apply: only commands that exist and aren't locked, without reserved keys
