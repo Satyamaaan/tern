@@ -59,7 +59,7 @@ final class TypingCheck {
         let pane = model.prefs.readingPane, section = model.prefs.settingsSection
         model.prefs.readingPane = false
         model.show(.inbox)
-        model.showSplit(nil)
+        model.showInboxTab(nil)
         model.focusList()
         await wait(0.5)
         print("app active \(NSApp.isActive), input source \(TypingTrace.inputSource())")

@@ -19,7 +19,7 @@ extension SelfCheck {
         }
         model.prefs.readingPane = false
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         pump(0.2)
         let undo = model.undoStack.count, rows = model.snapshot.order.count
 
