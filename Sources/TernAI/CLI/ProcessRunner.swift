@@ -7,16 +7,20 @@ public struct ProcessInvocation: Hashable, Sendable {
     public var environment: [String: String]
     public var currentDirectory: String?
     public var stdin: Data?
+    /// Scheduling class of the child. Background work (triage) runs at `.utility`, so it gives way to
+    /// the apps the user is working in.
+    public var qualityOfService: QualityOfService
 
     public init(
         executable: String, arguments: [String], environment: [String: String] = [:],
-        currentDirectory: String? = nil, stdin: Data? = nil
+        currentDirectory: String? = nil, stdin: Data? = nil, qualityOfService: QualityOfService = .default
     ) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.currentDirectory = currentDirectory
         self.stdin = stdin
+        self.qualityOfService = qualityOfService
     }
 }
 
@@ -106,6 +110,7 @@ private final class Run: @unchecked Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = stdin
+        process.qualityOfService = invocation.qualityOfService
 
         let group = DispatchGroup()
         group.enter()

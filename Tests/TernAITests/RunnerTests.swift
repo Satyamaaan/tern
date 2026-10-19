@@ -54,12 +54,6 @@ import Testing
     }
 }
 
-private actor Counter {
-    var current = 0
-    var peak = 0
-    func enter() { current += 1; peak = max(peak, current) }
-    func leave() { current -= 1 }
-}
 
 @Test func gateRunsAtMostTwoAtOnce() async throws {
     let gate = CLIGate(limit: 2)
@@ -94,6 +88,54 @@ private actor Counter {
     await #expect(throws: CancellationError.self) { try await waiter.value }
     try await holder.value
     #expect(try await gate.withSlot { "free" } == "free")
+}
+
+@Test func gateKeepsASlotForOnDemandCalls() async throws {
+    let gate = CLIGate(limit: 2, backgroundLimit: 1)
+    let latch = Latch()
+    let holder = Task { try await gate.withSlot(background: true) { await latch.wait() } }
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    let waiting = Task { try await gate.withSlot(background: true) { "background" } }
+    for _ in 0..<200 where await gate.occupancy.waiting == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    // A second background call waits for the first; an on-demand call doesn't wait for either.
+    let occupancy = await gate.occupancy
+    #expect(occupancy.running == 1 && occupancy.waiting == 1)
+    #expect(try await gate.withSlot { "on demand" } == "on demand")
+    await latch.release()
+    try await holder.value
+    #expect(try await waiting.value == "background")
+}
+
+@Test func gateServesWaitingOnDemandCallsFirst() async throws {
+    let gate = CLIGate(limit: 1)
+    let latch = Latch()
+    let order = Recorder()
+    let holder = Task { try await gate.withSlot(background: true) { await latch.wait() } }
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    let background = Task { try await gate.withSlot(background: true) { await order.add("background") } }
+    for _ in 0..<200 where await gate.occupancy.waiting < 1 { try await Task.sleep(for: .milliseconds(5)) }
+    let onDemand = Task { try await gate.withSlot { await order.add("on demand") } }
+    for _ in 0..<200 where await gate.occupancy.waiting < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    await latch.release()
+    try await holder.value
+    try await background.value
+    try await onDemand.value
+    #expect(await order.items == ["on demand", "background"])
+}
+
+@Test func backgroundCallsRunAtUtilityPriority() async throws {
+    let runner = FakeRunner { invocation in
+        if invocation.arguments == ["--help"] { return ProcessResult(exitCode: 0, stdout: "--output-format --model -p --settings") }
+        return ProcessResult(exitCode: 0, stdout: #"{"is_error":false,"result":"ok"}"#)
+    }
+    let provider = ClaudeCLIProvider(
+        runner: runner,
+        locator: CLILocator(home: "/Users/test", environment: [:], isExecutable: { $0 == "/opt/homebrew/bin/claude" }, listDirectory: { _ in [] }, runner: runner),
+        gate: CLIGate(limit: 2, backgroundLimit: 1), environment: [:])
+    _ = try await provider.complete(AIRequest(instructions: "", input: "x", isBackground: true))
+    #expect(runner.invocations.last?.qualityOfService == .utility)
+    _ = try await provider.complete(AIRequest(instructions: "", input: "x"))
+    #expect(runner.invocations.last?.qualityOfService == .default)
 }
 
 @Test func providerPassesTimeoutAndPropagatesCancellation() async throws {

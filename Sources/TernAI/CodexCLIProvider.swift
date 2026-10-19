@@ -72,7 +72,8 @@ public struct CodexCLIProvider: AIProvider {
             schemaPath: schemaPath, answerPath: answerPath, flags: flags, enabledFeatures: enabled)
         let stdin = Self.stdin(for: request, schemaEnforced: schemaPath != nil)
 
-        let result = try await backend.runModel(arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout)
+        let result = try await backend.runModel(
+            arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout, background: request.isBackground)
         guard result.exitCode == 0 else {
             let error = CLIFailure.error(provider: displayName, exitCode: result.exitCode, output: result.stderrText + "\n" + result.stdoutText)
             if case .notSignedIn = error { await backend.invalidate() }

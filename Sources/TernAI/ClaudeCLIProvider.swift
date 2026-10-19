@@ -52,7 +52,8 @@ public struct ClaudeCLIProvider: AIProvider {
         defer { directory.remove() }
         let arguments = Self.arguments(for: request, flags: flags)
         let stdin = Self.stdin(for: request, flags: flags)
-        let result = try await backend.runModel(arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout)
+        let result = try await backend.runModel(
+            arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout, background: request.isBackground)
         do {
             return try Self.answer(from: result, provider: displayName)
         } catch AIError.notSignedIn(let provider) {
