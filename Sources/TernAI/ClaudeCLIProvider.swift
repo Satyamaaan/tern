@@ -54,7 +54,8 @@ public struct ClaudeCLIProvider: AIProvider {
         let arguments = Self.arguments(for: request, flags: flags)
         let stdin = Self.stdin(for: request, flags: flags)
         let result = try await backend.runModel(
-            arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout, background: request.isBackground)
+            arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout, background: request.isBackground,
+            environment: Self.environment(for: request))
         do {
             return try Self.answer(from: result, provider: displayName)
         } catch AIError.notSignedIn(let provider) {
@@ -79,14 +80,17 @@ public struct ClaudeCLIProvider: AIProvider {
         if has("--no-session-persistence") { arguments.append("--no-session-persistence") }
         if has("--disable-slash-commands") { arguments.append("--disable-slash-commands") }
         if has("--setting-sources") { arguments += ["--setting-sources", ""] }
-        if has("--settings") {
-            // Fast requests run without extended thinking. Claude Code turns it on by default, and Haiku then
-            // thinks for 10-17k tokens per triage batch: about 90 s instead of 8 s, for much the same verdicts.
-            let thinking = request.effort == .fast ? #","alwaysThinkingEnabled":false"# : ""
-            arguments += ["--settings", #"{"disableAllHooks":true"# + thinking + "}"]
-        }
+        if has("--settings") { arguments += ["--settings", #"{"disableAllHooks":true}"#] }
         if !request.instructions.isEmpty, has("--system-prompt") { arguments += ["--system-prompt", request.instructions] }
         return arguments
+    }
+
+    /// Fast requests run without extended thinking. Claude Code turns it on by default, and Haiku then
+    /// thinks for 10-17k tokens per triage batch: about 90 s instead of 8 s, for much the same verdicts.
+    /// An environment variable rather than a setting: in print mode a settings value an older version
+    /// doesn't know would drop the whole `--settings` JSON, `disableAllHooks` included.
+    static func environment(for request: AIRequest) -> [String: String] {
+        request.effort == .fast ? ["MAX_THINKING_TOKENS": "0"] : [:]
     }
 
     static func stdin(for request: AIRequest, flags: Set<String>) -> String {

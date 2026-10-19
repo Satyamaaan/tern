@@ -68,11 +68,15 @@ public struct CodexCLIProvider: AIProvider {
             schemaPath = url.path
         }
         let answerPath = directory.file("answer.txt").path
-        let instructionsURL = directory.file("instructions.md")
-        try Data(Self.baseInstructions.utf8).write(to: instructionsURL)
+        var instructionsPath: String?
+        if request.effort == .fast {
+            let url = directory.file("instructions.md")
+            try Data(Self.baseInstructions.utf8).write(to: url)
+            instructionsPath = url.path
+        }
         let arguments = Self.arguments(
             model: model, effort: request.effort, workDirectory: directory.work.path, schemaPath: schemaPath,
-            answerPath: answerPath, instructionsPath: instructionsURL.path, flags: flags, enabledFeatures: enabled)
+            answerPath: answerPath, instructionsPath: instructionsPath, flags: flags, enabledFeatures: enabled)
         let stdin = Self.stdin(for: request, schemaEnforced: schemaPath != nil)
 
         let result = try await backend.runModel(
@@ -134,9 +138,9 @@ public struct CodexCLIProvider: AIProvider {
         return names
     }
 
-    /// Replaces Codex's own coding-agent instructions, about 3,500 tokens on every call that a mail
-    /// request doesn't need. The request's instructions still lead the prompt, so a version that doesn't
-    /// know `model_instructions_file` (it ignores unknown settings) gets the same rules.
+    /// Replaces Codex's own coding-agent instructions for fast requests: about 3,500 tokens on every
+    /// triage call that a mail request doesn't need. The request's instructions still lead the prompt, so a
+    /// version that doesn't know `model_instructions_file` (it ignores unknown settings) gets the same rules.
     static let baseInstructions = """
         You answer requests from the Tern mail app. Follow the instructions in the user message exactly and \
         answer only in the format it asks for. You have no tools.

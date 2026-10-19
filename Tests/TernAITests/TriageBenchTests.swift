@@ -18,11 +18,65 @@ import TernCore
 //   TERN_BENCH_TRIVIAL=1 one tiny call with no mail, to time the fixed cost of a call
 //   TERN_BENCH_DRY=1     no calls: print prompt sizes and write the prompts to TERN_BENCH_OUT
 //   TERN_BENCH_OUT       directory for calls.jsonl, verdicts.json and prompts (default /tmp/tern-bench)
+//   TERN_BENCH_QUEUE=1   instead: run the real TriageQueue on a writable copy, the newest 25 inbox rows on
+//                        screen, and time the screen and the whole pass (TERN_BENCH_WINDOW_HOURS bounds it)
 
 private let env = ProcessInfo.processInfo.environment
 private let benchEnabled = env["TERN_BENCH_AI"] == "1" && env["TERN_BENCH_DB"] != nil
 
-@Test(.enabled(if: benchEnabled)) func benchTriage() async throws {
+@Test(.enabled(if: benchEnabled && env["TERN_BENCH_QUEUE"] == "1")) func benchTriageQueue() async throws {
+    let providerId = env["TERN_BENCH_PROVIDER"] ?? "claude"
+    let source = try #require(env["TERN_BENCH_DB"])
+    #expect(!source.contains("Application Support"), "Benchmarks run on a copy of a fake mailbox only.")
+    let copy = FileManager.default.temporaryDirectory.appendingPathComponent("tern-bench-\(UUID().uuidString).sqlite")
+    try FileManager.default.copyItem(at: URL(fileURLWithPath: source), to: copy)
+    defer { try? FileManager.default.removeItem(at: copy) }
+    let database = try AppDatabase.open(at: copy)
+    try await database.writer.write { db in try AISettings(enabled: true, provider: providerId).write(db) }
+
+    let (now, screen) = try await database.reader.read { db -> (Date, [ThreadKey]) in
+        let newest = try Double.fetchOne(db, sql: "SELECT max(lastDate) FROM thread") ?? 0
+        let screen = try Row.fetchAll(db, sql: """
+            SELECT t.accountId, t.id FROM thread t WHERE EXISTS (SELECT 1 FROM thread_label i
+              WHERE i.accountId = t.accountId AND i.threadId = t.id AND i.labelId = 'INBOX')
+            ORDER BY t.lastDate DESC LIMIT 25
+            """).map { ThreadKey(accountId: $0[0], threadId: $0[1]) }
+        return (Date(timeIntervalSince1970: newest + 3_600), screen)
+    }
+    let window = (Double(env["TERN_BENCH_WINDOW_HOURS"] ?? "") ?? 14) * 3_600
+    let needing = try await database.reader.read { db in
+        try TriageQueue.candidates(db, since: now.addingTimeInterval(-window), limit: 25, keys: screen).map(\.key)
+    }
+    let total = try await database.reader.read { db in
+        try TriageQueue.candidates(db, since: now.addingTimeInterval(-window), limit: 5_000).count
+    }
+    let provider: any AIProvider = providerId == "codex"
+        ? CodexCLIProvider(environment: benchEnvironment) : ClaudeCLIProvider(environment: benchEnvironment)
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), window: window, now: { now })
+    print("bench queue \(providerId): \(needing.count) of 25 rows on screen need AI, \(total) threads in all")
+
+    await triage.prioritize(screen)
+    let started = Date()
+    let pass = Task { await triage.runPass() }
+    var screenSeconds: TimeInterval?
+    while screenSeconds == nil {
+        let sorted = try await database.reader.read { db in
+            try needing.filter { key in
+                try String.fetchOne(db, sql: "SELECT source FROM thread_ai WHERE accountId = ? AND threadId = ?",
+                                    arguments: [key.accountId, key.threadId]) == providerId
+            }.count
+        }
+        if sorted == needing.count { screenSeconds = Date().timeIntervalSince(started) } else { try await Task.sleep(for: .milliseconds(100)) }
+        if Date().timeIntervalSince(started) > 300 { break }
+    }
+    await pass.value
+    let elapsed = Date().timeIntervalSince(started)
+    let status = await triage.currentStatus
+    print("bench queue \(providerId): screen sorted in \(String(format: "%.1f", screenSeconds ?? -1)) s; \(status.classified) of \(total) threads in \(String(format: "%.1f", elapsed)) s = \(String(format: "%.0f", Double(status.classified) / elapsed * 60)) threads/min; state \(status.state)")
+    #expect(status.state == .idle)
+}
+
+@Test(.enabled(if: benchEnabled && env["TERN_BENCH_QUEUE"] != "1")) func benchTriage() async throws {
     let providerId = env["TERN_BENCH_PROVIDER"] ?? "claude"
     let count = Int(env["TERN_BENCH_THREADS"] ?? "") ?? 45
     let batchSize = Int(env["TERN_BENCH_BATCH"] ?? "") ?? TriageQueue.batchSize(for: providerId)
@@ -178,5 +232,59 @@ private final class BenchRunner: ProcessRunner, @unchecked Sendable {
             text += String(decoding: data, as: UTF8.self) + "\n"
         }
         try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+// The queue against a fake provider that answers after the per-call times measured on the fake mailbox
+// (seconds = fixed + perThread × threads), sped up TERN_BENCH_SIM_SCALE times (default 20: the queue's own
+// few milliseconds per call stay small). No CLI runs. TERN_BENCH_SIM=1; TERN_BENCH_SIM_ONLY=<name part> picks setups.
+@Test(.enabled(if: env["TERN_BENCH_SIM"] == "1")) func benchTriageSimulated() async throws {
+    struct Setup {
+        var name: String
+        var fixed: TimeInterval
+        var perThread: TimeInterval
+        var batchSize: Int
+        var concurrency: Int
+        var prioritizes: Bool
+    }
+    let scale = Double(env["TERN_BENCH_SIM_SCALE"] ?? "") ?? 20
+    let setups = [
+        // Codex before: 9.1-9.3 s per 15 threads, 6.3-8.2 s for a one-word answer.
+        Setup(name: "codex old", fixed: 5.5, perThread: 0.25, batchSize: 15, concurrency: 1, prioritizes: false),
+        // Codex now: 4.0 s for a one-word answer, 11.5 s for 30 threads.
+        Setup(name: "codex new", fixed: 4.0, perThread: 0.25, batchSize: 30, concurrency: 3, prioritizes: true),
+        // Claude before: 87-150 s per 15 threads with thinking (mean 114 s).
+        Setup(name: "claude old", fixed: 0, perThread: 114.0 / 15, batchSize: 15, concurrency: 1, prioritizes: false),
+        // Claude now: 8.0-8.9 s per 15 threads, 2 s for a one-word answer.
+        Setup(name: "claude new", fixed: 1.5, perThread: 0.45, batchSize: 15, concurrency: 3, prioritizes: true),
+    ]
+    for setup in setups where env["TERN_BENCH_SIM_ONLY"].map(setup.name.contains) ?? true {
+        for screenAt in [0, 200] {
+            let database = try makeDatabase((0..<500).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.05) })
+            let provider = FakeProvider { request, index in
+                let threads = Double(refsIn(request.input).count)
+                let jitter = 0.9 + 0.2 * Double((index * 7_919) % 100) / 100
+                try await Task.sleep(for: .seconds((setup.fixed + setup.perThread * threads) * jitter / scale))
+                return triageAnswer(request)
+            }
+            let triage = TriageQueue(
+                database: database, providers: AIProviders([provider]), batchSize: setup.batchSize,
+                concurrency: setup.concurrency, now: { testNow })
+            // Fourteen threads on screen: the top of the inbox, or a tab or scroll position further down.
+            let screen = (screenAt..<screenAt + 14).map { ThreadKey(accountId: me.id, threadId: "t\($0)") }
+            if setup.prioritizes { await triage.prioritize(screen) }
+            let started = Date()
+            let pass = Task { await triage.runPass() }
+            var screenSeconds: TimeInterval?
+            while screenSeconds == nil {
+                let rows = try aiRows(database)
+                if screen.allSatisfy({ rows[$0.threadId] != nil }) { screenSeconds = Date().timeIntervalSince(started) * scale }
+                else { try await Task.sleep(for: .milliseconds(1)) }
+            }
+            await pass.value
+            let seconds = Date().timeIntervalSince(started) * scale
+            #expect(try aiRows(database).count == 500)
+            print("bench sim \(setup.name): screen at row \(screenAt) sorted in \(String(format: "%.0f", screenSeconds ?? 0)) s; 500 threads in \(String(format: "%.0f", seconds)) s = \(String(format: "%.0f", 500 / seconds * 60)) threads/min, \(provider.requests.count) calls")
+        }
     }
 }

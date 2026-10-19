@@ -82,6 +82,7 @@ private func directoryIsEmpty(_ path: String) -> Bool {
         flags: ["--sandbox", "--cd", "--model", "--config", "--color"])
     #expect(!old.contains("--ephemeral") && !old.contains("--output-last-message") && !old.contains("--model"))
     #expect(old.contains(#"model_reasoning_effort="medium""#))
+    #expect(!old.contains { $0.hasPrefix("model_instructions_file") }, "careful requests keep Codex's own instructions")
     #expect(old.last == "-")
 }
 
@@ -230,13 +231,13 @@ private let codexFeatures = """
     #expect(ClaudeCLIProvider.arguments(for: request, flags: CLIBackend.flags(in: claudeHelp)) == [
         "-p", "--model", "haiku", "--output-format", "json", "--json-schema", #"{"type":"object"}"#,
         "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands",
-        "--setting-sources", "", "--settings", #"{"disableAllHooks":true,"alwaysThinkingEnabled":false}"#,
-        "--system-prompt", "Sort these.",
+        "--setting-sources", "", "--settings", #"{"disableAllHooks":true}"#, "--system-prompt", "Sort these.",
     ])
-    // Careful requests (reply drafts) keep Claude Code's own thinking setting.
+    // Fast requests switch extended thinking off; careful ones (reply drafts) keep Claude Code's default.
+    #expect(ClaudeCLIProvider.environment(for: request) == ["MAX_THINKING_TOKENS": "0"])
     var careful = request
     careful.effort = .careful
-    #expect(ClaudeCLIProvider.arguments(for: careful, flags: CLIBackend.flags(in: claudeHelp)).contains(#"{"disableAllHooks":true}"#))
+    #expect(ClaudeCLIProvider.environment(for: careful).isEmpty)
     #expect(ClaudeCLIProvider.stdin(for: request, flags: CLIBackend.flags(in: claudeHelp)) == "mail")
 
     let old = ["-p", "--print", "--model", "--output-format", "--disallowedTools"]
@@ -280,6 +281,7 @@ private let codexFeatures = """
     #expect(call.arguments[0...2] == ["-p", "--model", "sonnet"])
     #expect(String(decoding: try #require(call.stdin), as: UTF8.self) == "MAIL")
     #expect(call.environment["CLAUDECODE"] == nil && call.environment["CLAUDE_CODE_ENTRYPOINT"] == nil)
+    #expect(call.environment["MAX_THINKING_TOKENS"] == "0" && call.environment["HOME"] == "/Users/test")
 
     // Without an auth command in the help, availability is not probed (it would start a session).
     let oldRunner = FakeRunner { _ in ProcessResult(exitCode: 0, stdout: "Usage: claude [options]") }
