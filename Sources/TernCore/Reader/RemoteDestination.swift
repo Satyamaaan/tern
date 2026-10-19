@@ -16,8 +16,12 @@ public enum RemoteDestination {
         case v6([UInt8])
     }
 
-    /// Names that never mean a public site.
-    static let localSuffixes = ["localhost", "local", "internal", "home.arpa", "localdomain", "lan", "intranet", "corp", "home", "private"]
+    /// Names that never mean a public site: local ones, and the reserved names that never resolve (refused without
+    /// asking DNS).
+    static let localSuffixes = [
+        "localhost", "local", "internal", "home.arpa", "localdomain", "lan", "intranet", "corp", "home", "private",
+        "example", "test", "invalid", "onion", "alt",
+    ]
 
     /// Checks `url` without touching the network: http(s), no user info, port 80 or 443, and a host that is a
     /// public address or a public-looking name (resolve it with `resolve` before connecting).

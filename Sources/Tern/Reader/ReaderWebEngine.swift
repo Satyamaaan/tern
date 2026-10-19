@@ -18,7 +18,7 @@ protocol ReaderWebDelegate: AnyObject {
 /// launch), its background is transparent before the first paint, and threads are shown by injecting
 /// content into the loaded page, never by navigating. Mail can't run script (page CSP plus
 /// `allowsContentJavaScript = false`), can't navigate, and can't load anything over http(s): the CSP
-/// and a `WKContentRuleList` both refuse it. Images of trusted messages arrive through signed
+/// and a `WKContentRuleList` both refuse it. Images of messages allowed to show them arrive through signed
 /// `tern-remote:` URLs (`ReaderRemoteImages`) instead, so trust applies per message.
 @MainActor
 final class ReaderWebEngine: NSObject {
@@ -206,7 +206,7 @@ private final class MessageProxy: NSObject, WKScriptMessageHandler {
 }
 
 /// Serves the bundled fonts (`tern-app://fonts/…`), inline mail images (`tern-cid://…`) and the
-/// remote images of trusted messages (`tern-remote://…`).
+/// remote images of messages allowed to show them (`tern-remote://…`).
 private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
     weak var engine: ReaderWebEngine?
     private var stopped = Set<ObjectIdentifier>()
@@ -226,12 +226,21 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
         if url.scheme == ReaderRemoteImages.scheme {
             remote[id] = Task { @MainActor [weak self] in
                 let result = try? await ReaderRemoteImages.load(url)
-                guard let self, self.remote.removeValue(forKey: id) != nil, !Task.isCancelled else { return }
+                guard let self, self.remote[id] != nil, !Task.isCancelled else { return }
                 if let result {
+                    self.remote[id] = nil
                     self.respond(task, data: result.0, mimeType: result.1)
-                } else {
+                    return
+                }
+                // The page marks the image first, so it is drawn empty (mail.css) instead of as WebKit's broken-image
+                // icon. The load then fails rather than answering with an empty picture: the page would keep that
+                // one for as long as it lives, and an image that failed should be tried again on the next open.
+                let finish = { [weak self] in
+                    guard let self, self.remote.removeValue(forKey: id) != nil else { return }
                     task.didFailWithError(URLError(.resourceUnavailable))
                 }
+                guard let engine = self.engine else { return finish() }
+                engine.run("Tern.imageFailed(u)", ["u": url.absoluteString]) { _ in MainActor.assumeIsolated { finish() } }
             }
             return
         }

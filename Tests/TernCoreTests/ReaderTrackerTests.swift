@@ -34,6 +34,7 @@ func openTrackersNeverLoad(_ url: String) {
     #expect(MailTrackers.isTracker(url), "\(url)")
     let mail = loaded("<img src=\"\(url)\" width=\"250\" height=\"60\" alt=\"x\"><div style=\"background:url(\(url))\">x</div>")
     #expect(!mail.html.contains("tern-remote"), "dropped before any request: \(mail.html)")
+    #expect(!mail.html.contains("<img"), "and without a stand-in box: \(mail.html)")
 }
 
 @Test(arguments: [

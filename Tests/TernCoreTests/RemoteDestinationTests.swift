@@ -54,6 +54,7 @@ func classifiesAddresses(_ host: String, _ isPublic: Bool) throws {
     "http://[::ffff:c0a8:101]/", "http://[fe80::1%25en0]/", "http://[fd00::1]/", "http://192.168.1.1./",
     "http://localhost/x.png", "http://LOCALHOST./x.png", "http://a.localhost/", "http://printer.local/",
     "http://router.home.arpa/", "http://db.internal/", "http://nas.lan/", "http://intranet/", "http://wpad/",
+    "https://images.weeklybuild.example/hero.jpg", "http://news.images.test/a.png", "http://x.invalid/",
     "http://127.0.0.%31/", "http://1.2.3.4.5/", "http://999.1.1.1/", "http://4294967296/", "http://example.0x1/",
     "http://169.254.169.254/latest/meta-data/", "http://100.100.100.100/", "http://cdn.example.com:8080/x.png",
     "https://cdn.example.com:22/", "http://cdn.example.com:0/", "https://user:pw@cdn.example.com/x.png",

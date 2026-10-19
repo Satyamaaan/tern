@@ -162,7 +162,7 @@ private struct Writer {
                 for child in node.children { write(child, into: &output) }
                 return
             }
-            if name == "img", Self.isTrackingPixel(node) { return }
+            if name == "img", Self.isTrackingPixel(node) || Self.isTracker(node) { return }
             output += "<" + name
             writeAttributes(of: node, into: &output)
             output += ">"
@@ -356,6 +356,14 @@ private struct Writer {
     }
 
     // MARK: Helpers
+
+    /// An image whose URL is an open tracker goes without a trace, like a pixel: no stand-in box in the mail.
+    static func isTracker(_ node: HTMLNode) -> Bool {
+        guard let source = node.attribute("src"), isRemote(source) else { return false }
+        var url = cleanURL(source)
+        if url.hasPrefix("//") { url = "https:" + url }
+        return MailTrackers.isTracker(url)
+    }
 
     static func isTrackingPixel(_ node: HTMLNode) -> Bool {
         guard let source = node.attribute("src"), isRemote(source) else { return false }

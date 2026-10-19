@@ -54,10 +54,6 @@ enum ReaderRemoteImages {
         #endif
     }
 
-    /// What the reader shows for an image that couldn't load: an SVG with no size of its own, so the image
-    /// keeps the box the mail declared and draws nothing in it (a 1×1 PNG would square the box up).
-    static let failureImage = Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)
-
     /// Fetches the image behind a signed reader URL. Throws for unsigned URLs, refused destinations, errors,
     /// non-2xx answers, anything over the size limit and anything that isn't an image.
     static func load(_ url: URL) async throws -> (Data, String) {

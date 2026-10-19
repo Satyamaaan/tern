@@ -13,7 +13,12 @@ enum ReaderSnapshotFixtures {
         var name: String
         var key: ThreadKey
         var width: CGFloat = 760
+        /// The images setting the fixture renders under.
+        var images: ImagesInMail = .automatic
     }
+
+    /// The local image server `scripts/reader-image-server.py` runs for the harness.
+    static let imageServer = "http://127.0.0.1:18766"
 
     static func install(into store: MailStore, now: Date) throws -> [Fixture] {
         var fixtures: [Fixture] = []
@@ -42,8 +47,9 @@ enum ReaderSnapshotFixtures {
                 to: [me], subject: "Issue 142: Shipping faster with smaller pull requests", minutesAgo: 95, html: newsletter, unread: true,
                 labels: ["INBOX", "CATEGORY_UPDATES"])
         ai.append(ThreadAI(accountId: account.id, threadId: "fx-news", category: .newsletter, messageCount: 1))
-        fixtures.append(Fixture(name: "newsletter", key: key("fx-news")))
-        fixtures.append(Fixture(name: "newsletter-narrow", key: key("fx-news"), width: 520))
+        // Its image hosts don't exist, so it renders under Ask first: the layout with its placeholders.
+        fixtures.append(Fixture(name: "newsletter", key: key("fx-news"), images: .ask))
+        fixtures.append(Fixture(name: "newsletter-narrow", key: key("fx-news"), width: 520, images: .ask))
 
         // Hostile mail: scripts, handlers, an iframe, a form, a fixed overlay and a phishing link.
         message("fx-evil", thread: "fx-evil", from: Participant(name: "PayPal Security", email: "security@paypa1-alerts.example"),
@@ -140,15 +146,37 @@ enum ReaderSnapshotFixtures {
                 """)
         fixtures.append(Fixture(name: "simple-colored", key: key("fx-simple")))
 
-        // Remote images from a local test server (the run script starts it on port 18766).
+        // Remote images from the local image server: they load by themselves, and with Ask first wait for Load images.
         message("fx-remote", thread: "fx-remote", from: Participant(name: "Local Images", email: "news@images.test"), to: [me],
                 subject: "Remote images from a local server", minutesAgo: 50, html: """
                 <p>Two remote images and a tracking pixel, served from 127.0.0.1.</p>
-                <p><img src="http://127.0.0.1:18766/hero.png" width="320" height="120" alt="Hero image"></p>
-                <div style="background: #ffffff url(http://127.0.0.1:18766/background.png); width: 320px; height: 40px">CSS background</div>
-                <img src="http://127.0.0.1:18766/pixel.png" width="1" height="1" alt="">
+                <p><img src="\(imageServer)/hero.png" width="320" height="120" alt="Hero image"></p>
+                <div style="background: #ffffff url(\(imageServer)/background.png); width: 320px; height: 40px">CSS background</div>
+                <img src="\(imageServer)/pixel.png" width="1" height="1" alt="">
                 """)
         fixtures.append(Fixture(name: "remote-images", key: key("fx-remote")))
+        fixtures.append(Fixture(name: "remote-images-ask", key: key("fx-remote"), images: .ask))
+
+        // A deploy notification like the one that looked broken: a centred logo that declares only its width, on a
+        // light card, and an open pixel with no size that only its URL gives away (the server must never see it).
+        message("fx-deploy", thread: "fx-deploy", from: Participant(name: "Trainyard", email: "notify@trainyard.example"), to: [me],
+                subject: "Deployment successful: api in production", minutesAgo: 8, html: deployNotice, unread: true)
+        ai.append(ThreadAI(accountId: account.id, threadId: "fx-deploy", category: .notification, messageCount: 1))
+        fixtures.append(Fixture(name: "deploy-notice", key: key("fx-deploy")))
+        fixtures.append(Fixture(name: "deploy-notice-ask", key: key("fx-deploy"), images: .ask))
+
+        // Images the server doesn't have: empty space where they were, no broken-image icon.
+        message("fx-failed", thread: "fx-failed", from: Participant(name: "Weekly Metrics", email: "metrics@charts.example"), to: [me],
+                subject: "Your weekly metrics", minutesAgo: 70, html: """
+                <div style="font:15px/1.6 Helvetica,Arial,sans-serif;color:#33302b">
+                <p style="margin:0 0 12px">This week's chart (gone from the server, so its 320 × 120 box stays empty):</p>
+                <p style="margin:0 0 12px"><img src="\(imageServer)/missing-chart.png" width="320" height="120" alt="Weekly chart"></p>
+                <p style="margin:0 0 12px">A logo that declared only its width folds away instead:</p>
+                <p style="margin:0 0 12px"><img src="\(imageServer)/missing-logo.png" width="250" alt="Metrics logo"></p>
+                <p style="margin:0">And the image that is there still loads: <img src="\(imageServer)/hero.png" width="160" height="60" alt="Hero" style="vertical-align:middle"></p>
+                </div>
+                """)
+        fixtures.append(Fixture(name: "failed-image", key: key("fx-failed")))
 
         // A rich mail that also styles itself for dark mode: on the light card it must still read as light.
         message("fx-dark-css", thread: "fx-dark-css", from: Participant(name: "Storage Team", email: "reports@storage.example"),
@@ -261,6 +289,22 @@ enum ReaderSnapshotFixtures {
         <tr class="cta"><td style="padding:16px 40px"><a href="https://storage.example/report" style="display:inline-block;background:#0f766e;color:#ffffff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">Review storage</a></td></tr>
         <tr><td style="padding:8px 40px 32px"><span class="note">Questions? Reply to this mail and the team will help.</span></td></tr>
         </table></td></tr></table></body></html>
+        """
+
+    /// A transactional mail shaped like the user's deploy notifications: logo, heading, paragraph, button, pixel.
+    static let deployNotice = """
+        <html><body style="margin:0;background:#f4f4f5">
+        <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f5"><tr><td align="center" style="padding:32px 16px">
+        <table width="560" cellpadding="0" cellspacing="0" role="presentation" style="background:#ffffff;border-radius:8px;font:15px/1.6 Helvetica,Arial,sans-serif;color:#3f3f46">
+        <tr><td align="center" style="padding:32px 40px 8px"><img src="\(imageServer)/logo.png" width="250" style="width:250px;display:block;margin:0 auto" alt="Trainyard Logo"></td></tr>
+        <tr><td style="padding:16px 40px 4px"><h1 style="margin:0;font:600 22px/1.3 Helvetica,Arial,sans-serif;color:#18181b">Deployment successful</h1></td></tr>
+        <tr><td style="padding:4px 40px"><p style="margin:0">Your service <b>api</b> in <b>production</b> deployed commit <code>3f9c2a1</code> in 48 seconds. It's live at api.trainyard.example.</p></td></tr>
+        <tr><td style="padding:20px 40px 32px"><a href="https://trainyard.example/project/deployments" style="display:inline-block;background:#7c3aed;color:#ffffff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600">View deployment</a></td></tr>
+        </table>
+        <p style="margin:16px 0 0;font:12px/1.5 Helvetica,Arial,sans-serif;color:#8a8f98">You're getting this because you watch deploys in this project.</p>
+        </td></tr></table>
+        <img src="\(imageServer)/e/o/eyJlbWFpbF9pZCI6ImZ4LWRlcGxveSIsInRva2VuIjoiOTkxMiJ9" alt="">
+        </body></html>
         """
 
     /// A whole style sheet for dark mode only, through `<style media>`.

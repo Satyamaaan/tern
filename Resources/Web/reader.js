@@ -518,6 +518,16 @@
         });
       }
     },
+    /// A remote image that couldn't load: it keeps the box its mail declared and shows nothing, and one that
+    /// declared no height folds away instead of standing at a guessed size.
+    imageFailed(url) {
+      for (const host of root().querySelectorAll('.mbody')) {
+        if (!host.shadowRoot) continue;
+        for (const image of host.shadowRoot.querySelectorAll('img[src]')) {
+          if (image.getAttribute('src') === url) image.setAttribute('data-tern-failed', '');
+        }
+      }
+    },
     setTheme(theme) { document.documentElement.dataset.theme = theme; },
     setKeys(map) { keys = map || {}; },
     next() { move(1); },

@@ -7,9 +7,12 @@ import WebKit
 
 /// Renders the reader offscreen for design and speed checks, then quits:
 ///
-///     swift build && mkdir -p /tmp/tern-reader-home && TERN_READER_SNAPSHOT=/tmp/tern-shots/reader \
-///       CFFIXED_USER_HOME=/tmp/tern-reader-home .build/debug/Tern -ApplePersistenceIgnoreState YES --fake
+///     swift build && mkdir -p /tmp/tern-reader-home && (python3 scripts/reader-image-server.py &) && \
+///       TERN_READER_SNAPSHOT=/tmp/tern-shots/reader CFFIXED_USER_HOME=/tmp/tern-reader-home \
+///       .build/debug/Tern -ApplePersistenceIgnoreState YES --fake
 ///
+/// The image server answers the remote-image fixtures on 127.0.0.1:18766 (loopback is allowed only in debug builds
+/// under this harness) and reports every path it was asked for, so the run can show that no tracker was.
 /// The harness starts with the first reader, so the shell needs a mailbox (`--fake`); it hides the
 /// shell window at once, and the temporary home keeps the shell away from the real database.
 /// Uses an in-memory fake mailbox plus `ReaderSnapshotFixtures`, writes `<fixture>-<light|dark>.png`
@@ -128,6 +131,7 @@ enum ReaderSnapshot {
                     window.setContentSize(NSSize(width: fixture.width, height: 1_000))
                     selection.key = nil
                     _ = await waitForRender(nil)
+                    ReaderModel.imagesOverride = fixture.images
                     selection.key = fixture.key
                     guard let milliseconds = await waitForRender(fixture.key) else {
                         note("\(fixture.name): no render")
@@ -135,6 +139,10 @@ enum ReaderSnapshot {
                     }
                     if fixture.name == "big-newsletter" { await waitForBody(since: milliseconds) }
                     try? await Task.sleep(for: .milliseconds(350))
+                    if Self.imageFixtures.contains(fixture.name) {
+                        await waitForImages()
+                        note("\(fixture.name) (\(suffix(appearance))): \(await imageReport())")
+                    }
                     if fixture.name == "reply-chain", appearance == .aqua {
                         await save(hosting, name: "\(fixture.name)-\(suffix(appearance))")
                         try? await Task.sleep(for: .milliseconds(1_200))
@@ -159,17 +167,19 @@ enum ReaderSnapshot {
                         await save(hosting, name: "hostile-hover-light")
                         _ = try? await js("document.body.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return true;")
                     }
-                    if fixture.name == "remote-images", appearance == .aqua {
-                        try? await Task.sleep(for: .seconds(2))
-                        note("remote-images: shown blocked for 2 s, clicking Load images at \(Date().formatted(.dateTime.hour().minute().second()))")
+                    // Load images lasts for the run, so it's clicked in the last pass.
+                    if fixture.name == "remote-images-ask", appearance == .darkAqua {
                         _ = try? await js("document.querySelector('.imgnote .load').click(); return true;")
-                        try? await Task.sleep(for: .milliseconds(1_200))
-                        note("remote-images: loaded shot at \(Date().formatted(.dateTime.hour().minute().second()))")
-                        await save(hosting, name: "remote-images-loaded-light")
+                        try? await Task.sleep(for: .milliseconds(300))
+                        await waitForImages()
+                        note("remote-images-ask: after Load images: \(await imageReport())")
+                        await save(hosting, name: "remote-images-ask-loaded-dark")
                     }
                     note("\(fixture.name) (\(suffix(appearance))): opened in \(String(format: "%.1f", milliseconds)) ms")
                 }
             }
+            ReaderModel.imagesOverride = nil
+            await imageServerReport()
             window.appearance = NSAppearance(named: .aqua)
             window.setContentSize(NSSize(width: 760, height: 1_000))
             if let chain = fixtures.first(where: { $0.name == "reply-chain" }) {
@@ -182,6 +192,54 @@ enum ReaderSnapshot {
         }
 
         func suffix(_ appearance: NSAppearance.Name) -> String { appearance == .aqua ? "light" : "dark" }
+
+        static let imageFixtures: Set<String> = ["remote-images", "remote-images-ask", "deploy-notice", "deploy-notice-ask", "failed-image"]
+
+        /// Waits until every remote image in the open messages has loaded or failed, for up to 3 s.
+        func waitForImages() async {
+            for _ in 0..<150 {
+                let pending = try? await js("""
+                    return [...document.querySelectorAll('.mbody')].filter((h) => h.shadowRoot)
+                      .flatMap((h) => [...h.shadowRoot.querySelectorAll('img[src^="tern-remote:"]')]).filter((i) => !i.complete).length;
+                    """) as? Int
+                if pending == 0 { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+
+        /// What the open messages' images came to: loaded, failed (empty, keeping a declared box), placeholders for
+        /// images left out, and broken ones (WebKit's icon, which should never show).
+        func imageReport() async -> String {
+            let report = try? await js("""
+                const images = [...document.querySelectorAll('.mbody')].filter((h) => h.shadowRoot)
+                  .flatMap((h) => [...h.shadowRoot.querySelectorAll('img')]);
+                const size = (i) => { const r = i.getBoundingClientRect(); return `${Math.round(r.width)}×${Math.round(r.height)}`; };
+                const list = (items) => `${items.length}${items.length ? ' (' + items.map(size).join(', ') + ')' : ''}`;
+                const remote = images.filter((i) => (i.getAttribute('src') || '').startsWith('tern-remote:'));
+                const failed = remote.filter((i) => i.hasAttribute('data-tern-failed'));
+                const loaded = remote.filter((i) => !i.hasAttribute('data-tern-failed') && i.complete && i.naturalWidth > 0);
+                const broken = images.filter((i) => i.getAttribute('src') && i.complete && i.naturalWidth === 0 && !i.hasAttribute('data-tern-failed'));
+                const placeholders = images.filter((i) => i.hasAttribute('data-tern-blocked') || i.hasAttribute('data-tern-missing'));
+                const note = document.querySelector('.msg.open .imgnote');
+                return `loaded ${list(loaded)}, failed ${list(failed)}, placeholders ${list(placeholders)}, broken ${broken.length}; `
+                  + `note: ${note ? note.textContent : 'none'}`;
+                """)
+            return report.map { "\($0)" } ?? "?"
+        }
+
+        /// Asks the image server which paths it served; the open pixel in the deploy notice must not be among them.
+        func imageServerReport() async {
+            guard let url = URL(string: ReaderSnapshotFixtures.imageServer + "/__requests"),
+                  let (data, _) = try? await URLSession.shared.data(from: url),
+                  let paths = try? JSONDecoder().decode([String].self, from: data) else {
+                note("image server: not running (scripts/reader-image-server.py)")
+                return
+            }
+            let counts = Dictionary(paths.map { ($0, 1) }, uniquingKeysWith: +).sorted { $0.key < $1.key }
+            note("image server: asked for \(counts.map { "\($0.key) ×\($0.value)" }.joined(separator: ", ")); "
+                 + "open pixel /e/o/… requested: \(paths.contains { $0.hasPrefix("/e/o/") })")
+        }
 
         func note(_ line: String) {
             log.append(line)

@@ -109,7 +109,10 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
         if let verdict = lock.withLock({ verdicts[host] }), verdict.until > now { return verdict.isPublic }
         let addresses = await resolve(host) ?? []
         let isPublic = !addresses.isEmpty && addresses.allSatisfy(RemoteDestination.isPublic)
-        lock.withLock { verdicts[host] = (isPublic, now.addingTimeInterval(300)) }
+        lock.withLock {
+            if verdicts.count >= 512 { verdicts = verdicts.filter { $0.value.until > now } }
+            verdicts[host] = (isPublic, now.addingTimeInterval(300))
+        }
         return isPublic
     }
 
