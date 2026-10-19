@@ -7,8 +7,7 @@ import Foundation
 /// form the network stack reads (`3232235777`, `0x7f.1`, `[::ffff:192.168.1.1]`); IPv4 is accepted only as a
 /// plain dotted quad. Local names are refused too.
 /// Only ports 80 and 443 are allowed: mail images live there, and the other ports are where local and
-/// admin services listen, which also keeps a DNS answer that changes between the check and the fetch
-/// away from them.
+/// admin services listen. Names are fetched over HTTPS only (`requestURL`).
 public enum RemoteDestination {
     /// An IP address, as the network stack would connect to it.
     public enum Address: Hashable, Sendable {
@@ -37,6 +36,26 @@ public enum RemoteDestination {
             return isPublic(address) && standardPort(url.port)
         }
         return isPublicName(host) && standardPort(url.port)
+    }
+
+    /// The URL Tern requests for `url`, or nil when it may not be fetched. Names always go over HTTPS: `http://name/…`
+    /// becomes `https://name/…`, and a name on any port but the scheme's own is refused. That TLS is load-bearing
+    /// against DNS rebinding: the addresses checked before connecting can't be pinned for the connection, so a name
+    /// that answers with a private address by then still needs a certificate for that name, which the router or
+    /// printer behind the address doesn't have, and the request is never sent. A public address literal keeps its
+    /// scheme: no DNS is involved, so there is nothing to rebind.
+    public static func requestURL(for url: URL, allowLoopback: Bool = false) -> URL? {
+        guard allows(url, allowLoopback: allowLoopback), let host = host(of: url) else { return nil }
+        if literal(host) != nil { return url }
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        switch (components.scheme?.lowercased(), url.port) {
+        case ("http", nil), ("http", 80), ("https", nil), ("https", 443): break
+        default: return nil
+        }
+        components.scheme = "https"
+        components.host = host
+        components.port = nil
+        return components.url
     }
 
     /// The URL's host, lowercased, without brackets or trailing dots; nil when it is missing or percent-encoded.
@@ -130,8 +149,9 @@ public enum RemoteDestination {
     public static func resolve(_ host: String) async -> [Address]? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                // No AI_ADDRCONFIG: every A and AAAA answer is judged, also for a family this Mac isn't using right now.
                 var hints = addrinfo()
-                hints.ai_flags = AI_DEFAULT
+                hints.ai_flags = 0
                 hints.ai_family = AF_UNSPEC
                 hints.ai_socktype = SOCK_STREAM
                 var list: UnsafeMutablePointer<addrinfo>?

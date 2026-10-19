@@ -99,6 +99,15 @@ private func mail(_ id: String, from: String, labels: [String], fromMe: Bool = f
     let shownHTML = try #require(shownBody["html"] as? String)
     #expect(shownHTML.contains("src=\"tern-remote://i/") && !shownHTML.contains("cloudinary") && !shownHTML.contains("notifylink"))
     #expect(shown["imagesAllowed"] as? Bool == true && shown["imagesOnce"] as? Bool == false)
+
+    // Without the content blocker, Load automatically loads nothing: the body is sanitized as blocked.
+    let unguarded = ReaderContext(accountEmails: [account.email], labelNames: [:],
+                                  trust: ReaderTrust(remoteImages: false, automatic: true), summary: [:])
+    let blocked = try #require((ReaderPayload.make(detail, context: unguarded).payload["messages"] as? [[String: Any]])?.first)
+    let blockedBody = try #require(blocked["body"] as? [String: Any])
+    #expect(blocked["imagesAllowed"] as? Bool == false && blocked["imagesOnce"] as? Bool == false)
+    #expect(blockedBody["blocked"] as? Int == 1 && (blockedBody["html"] as? String)?.contains("tern-remote") == false)
+    #expect(ReaderPayload.signature(detail, context: unguarded) == ReaderPayload.signature(detail, context: context(false)))
 }
 
 @MainActor

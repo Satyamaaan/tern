@@ -519,12 +519,14 @@
       }
     },
     /// A remote image that couldn't load: it keeps the box its mail declared and shows nothing, and one that
-    /// declared no height folds away instead of standing at a guessed size.
+    /// declared no height folds away instead of standing at a guessed size. A copy of the same image that already
+    /// arrived stays as it is.
     imageFailed(url) {
       for (const host of root().querySelectorAll('.mbody')) {
         if (!host.shadowRoot) continue;
         for (const image of host.shadowRoot.querySelectorAll('img[src]')) {
-          if (image.getAttribute('src') === url) image.setAttribute('data-tern-failed', '');
+          if (image.getAttribute('src') !== url || (image.complete && image.naturalWidth > 0)) continue;
+          image.setAttribute('data-tern-failed', '');
         }
       }
     },

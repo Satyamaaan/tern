@@ -37,11 +37,26 @@ enum ReaderRemoteImages {
     }
 
     /// The reader's one fetcher, caching in ~/Library/Caches/Tern/RemoteImages.
-    static let fetcher = RemoteImageFetcher(cacheDirectory: cacheDirectory, allowLoopback: allowsLoopback)
+    static let fetcher = RemoteImageFetcher(cacheDirectory: prepared(cacheDirectory), allowLoopback: allowsLoopback)
 
     static var cacheDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Tern", isDirectory: true).appendingPathComponent("RemoteImages", isDirectory: true)
+    }
+
+    /// Creates the cache folder and keeps it out of backups: it only holds what senders can send again.
+    static func prepared(_ directory: URL) -> URL {
+        var directory = directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? directory.setResourceValues(values)
+        return directory
+    }
+
+    /// Forgets every image on disk and in memory, after an account was removed: its mail's images shouldn't stay.
+    static func clearCache() async {
+        await Task.detached(priority: .utility) { fetcher.cache?.removeAllCachedResponses() }.value
     }
 
     /// Loopback is refused, except for the snapshot harness's local image server in debug builds

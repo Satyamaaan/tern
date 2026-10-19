@@ -1,38 +1,63 @@
 import Foundation
 import Testing
+import WebKit
 @testable import Tern
 @testable import TernCore
 
-/// Answers image requests from a table instead of the network and records every URL asked for.
+/// Answers image requests from a table instead of the network, records every URL asked for, and how many requests
+/// were open at once, overall and per host.
 private final class ImageServer: URLProtocol {
     struct Answer {
         var status = 200
         var headers: [String: String] = ["Content-Type": "image/png"]
         var body = Data()
+        /// Seconds before answering.
+        var delay = 0.0
     }
 
     nonisolated(unsafe) static var answers: [String: Answer] = [:]
     nonisolated(unsafe) static var requests: [String] = []
+    nonisolated(unsafe) static var open: [String: Int] = [:]
+    nonisolated(unsafe) static var mostOpen = 0
+    nonisolated(unsafe) static var mostOpenToOneHost = 0
     static let lock = NSLock()
+    private var stopped = false
 
     static func reset(_ table: [String: Answer]) {
         lock.withLock {
             answers = table
             requests = []
+            open = [:]
+            mostOpen = 0
+            mostOpenToOneHost = 0
         }
     }
 
     static var asked: [String] { lock.withLock { requests } }
+    static var peaks: (total: Int, perHost: Int) { lock.withLock { (mostOpen, mostOpenToOneHost) } }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         guard let url = request.url else { return }
-        let answer = Self.lock.withLock {
+        let host = url.host ?? ""
+        let reply = Self.lock.withLock {
             Self.requests.append(url.absoluteString)
+            Self.open[host, default: 0] += 1
+            Self.mostOpen = max(Self.mostOpen, Self.open.values.reduce(0, +))
+            Self.mostOpenToOneHost = max(Self.mostOpenToOneHost, Self.open[host] ?? 0)
             return Self.answers[url.absoluteString] ?? Answer(status: 404, headers: [:])
         }
+        guard reply.delay > 0 else { return send(reply, url) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + reply.delay) { [weak self] in
+            guard let self, !Self.lock.withLock({ self.stopped }) else { return }
+            self.send(reply, url)
+        }
+    }
+
+    private func send(_ answer: Answer, _ url: URL) {
+        Self.lock.withLock { Self.open[url.host ?? "", default: 1] -= 1 }
         let response = HTTPURLResponse(url: url, statusCode: answer.status, httpVersion: "HTTP/1.1", headerFields: answer.headers)!
         if (300..<400).contains(answer.status), let location = answer.headers["Location"], let next = URL(string: location) {
             client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: next), redirectResponse: response)
@@ -44,7 +69,7 @@ private final class ImageServer: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() { Self.lock.withLock { stopped = true } }
 }
 
 private let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 1, count: 600)
@@ -55,6 +80,21 @@ private func fetcher(_ directory: URL? = nil, maxBytes: Int = 20 * 1_024 * 1_024
                      addresses: [String: [RemoteDestination.Address]] = [:]) -> RemoteImageFetcher {
     RemoteImageFetcher(cacheDirectory: directory, maxBytes: maxBytes, protocolClasses: [ImageServer.self]) { host in
         addresses[host] ?? [publicAddress]
+    }
+}
+
+/// DNS answers in turn, one per lookup; the last one repeats.
+private final class Answers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var queue: [[RemoteDestination.Address]?]
+    private(set) var lookups = 0
+    init(_ answers: [[RemoteDestination.Address]?]) { queue = answers }
+
+    func next() -> [RemoteDestination.Address]? {
+        lock.withLock {
+            lookups += 1
+            return queue.count > 1 ? queue.removeFirst() : queue.first ?? nil
+        }
     }
 }
 
@@ -158,6 +198,95 @@ private func failure(_ work: () async throws -> (Data, String)) async -> (any Er
         #expect(await failure { try await images.image(at: URL(string: big)!) } as? RemoteImageFetcher.Failure == .tooBig)
     }
 
+    @Test func namesGoOverHTTPSAndAddressesAsWritten() async throws {
+        ImageServer.reset([
+            "https://cdn.example.com/logo.png": .init(body: png),
+            "https://cdn.example.com/logo.png?w=2": .init(body: png),
+            "http://93.184.216.34/x.png": .init(body: png),
+            "https://cdn.example.com/r": .init(status: 302, headers: ["Location": "http://images.example.com/a.png"]),
+            "https://images.example.com/a.png": .init(body: png),
+        ])
+        let images = fetcher()
+        defer { images.invalidate() }
+        #expect(try await images.image(at: URL(string: "http://cdn.example.com/logo.png")!).0 == png)
+        #expect(try await images.image(at: URL(string: "http://CDN.example.com:80/logo.png?w=2")!).0 == png)
+        #expect(try await images.image(at: URL(string: "http://93.184.216.34/x.png")!).0 == png, "no DNS, nothing to rebind")
+        #expect(try await images.image(at: URL(string: "https://cdn.example.com/r")!).0 == png, "an http redirect to a name is upgraded")
+        #expect(ImageServer.asked == ["https://cdn.example.com/logo.png", "https://cdn.example.com/logo.png?w=2",
+                                      "http://93.184.216.34/x.png", "https://cdn.example.com/r", "https://images.example.com/a.png"])
+        for url in ["https://cdn.example.com:80/x.png", "http://cdn.example.com:443/x.png"] {
+            #expect(await failure { try await images.image(at: URL(string: url)!) } as? RemoteImageFetcher.Failure == .refused, "\(url)")
+        }
+        #expect(RemoteDestination.requestURL(for: URL(string: "http://cdn.example.com/a%20b.png?q=%2F#f")!)?.absoluteString
+            == "https://cdn.example.com/a%20b.png?q=%2F#f", "the rest of the URL stays as it was written")
+    }
+
+    @Test func lookupsAreNeverRemembered() async throws {
+        ImageServer.reset(["https://cdn.example.com/a.png": .init(body: png)])
+        let url = URL(string: "https://cdn.example.com/a.png")!
+
+        // Offline (or just woken): refused now, fetched once DNS answers again.
+        let offline = Answers([nil, [], [publicAddress]])
+        let waking = RemoteImageFetcher(cacheDirectory: nil, protocolClasses: [ImageServer.self]) { _ in offline.next() }
+        defer { waking.invalidate() }
+        #expect(await failure { try await waking.image(at: url) } as? RemoteImageFetcher.Failure == .refused)
+        #expect(await failure { try await waking.image(at: url) } as? RemoteImageFetcher.Failure == .refused)
+        #expect(try await waking.image(at: url).0 == png)
+
+        // A public answer doesn't outlive itself: the name moving to a private address is caught on the next fetch.
+        let rebinding = Answers([[publicAddress], [.v4(0xC0A8_0001)]])
+        let moved = RemoteImageFetcher(cacheDirectory: nil, protocolClasses: [ImageServer.self]) { _ in rebinding.next() }
+        defer { moved.invalidate() }
+        #expect(try await moved.image(at: url).0 == png)
+        #expect(await failure { try await moved.image(at: url) } as? RemoteImageFetcher.Failure == .refused)
+        #expect(offline.lookups == 3 && rebinding.lookups == 2)
+    }
+
+    @Test func oneFetchForEveryImageAskingAtOnce() async throws {
+        let logo = URL(string: "https://cdn.example.com/logo.png")!
+        ImageServer.reset([logo.absoluteString: .init(body: png, delay: 0.3)])
+        let images = fetcher()
+        defer { images.invalidate() }
+        async let first = images.image(at: logo)
+        async let second = images.image(at: URL(string: "http://cdn.example.com/logo.png")!)
+        let results = try await [first, second]
+        #expect(results.allSatisfy { $0.0 == png })
+        #expect(ImageServer.asked == [logo.absoluteString])
+
+        // One of them stops asking (its message closed): the other still gets the image from the same fetch.
+        ImageServer.reset([logo.absoluteString: .init(body: png, delay: 0.3)])
+        let leaving = Task { try await images.image(at: logo) }
+        let staying = Task { try await images.image(at: logo) }
+        try await Task.sleep(for: .milliseconds(100))
+        leaving.cancel()
+        #expect(try await staying.value.0 == png)
+        #expect(ImageServer.asked == [logo.absoluteString])
+
+        // When every caller stops, the fetch stops, and the next one starts fresh.
+        ImageServer.reset([logo.absoluteString: .init(body: png, delay: 0.3)])
+        let alone = Task { try await images.image(at: logo) }
+        try await Task.sleep(for: .milliseconds(100))
+        alone.cancel()
+        #expect(await failure { try await alone.value } != nil)
+        #expect(try await images.image(at: logo).0 == png)
+        #expect(ImageServer.asked == [logo.absoluteString, logo.absoluteString])
+    }
+
+    @Test func fetchesTakeTurns() async throws {
+        let urls = (0..<3).flatMap { host in (0..<7).map { "https://cdn\(host).example.com/\($0).png" } }
+        ImageServer.reset(Dictionary(uniqueKeysWithValues: urls.map { ($0, ImageServer.Answer(body: png, delay: 0.15)) }))
+        let images = fetcher()
+        defer { images.invalidate() }
+        let results = try await withThrowingTaskGroup(of: Data.self) { group in
+            for url in urls { group.addTask { try await images.image(at: URL(string: url)!).0 } }
+            return try await group.reduce(into: [Data]()) { $0.append($1) }
+        }
+        #expect(results.count == urls.count && results.allSatisfy { $0 == png }, "all of them arrive, none timed out in a queue")
+        let peaks = ImageServer.peaks
+        #expect(peaks.total <= RemoteImageFetcher.concurrent && peaks.perHost <= RemoteImageFetcher.perHost, "\(peaks)")
+        #expect(peaks.perHost == RemoteImageFetcher.perHost, "and they do run side by side")
+    }
+
     @Test func readsTheImageTypeFromTheBytes() {
         func type(_ bytes: [UInt8], _ declared: String? = "application/octet-stream") -> String? {
             RemoteImageFetcher.imageType(Data(bytes) + Data(repeating: 0, count: 16), declared: declared)
@@ -172,4 +301,58 @@ private func failure(_ work: () async throws -> (Data, String)) async -> (any Er
         #expect(type(Array("<!doctype html><svg></svg>".utf8), "text/html") == nil, "an HTML page isn't an image")
         #expect(type(Array("{\"ok\":true}".utf8), "image/png") == nil, "nor is anything that only claims to be")
     }
+}
+
+/// A scheme task that records what it was told.
+private final class RecordingSchemeTask: NSObject, WKURLSchemeTask {
+    let request: URLRequest
+    var events: [String] = []
+    init(_ url: URL) { request = URLRequest(url: url) }
+    func didReceive(_ response: URLResponse) { events.append("response") }
+    func didReceive(_ data: Data) { events.append("data") }
+    func didFinish() { events.append("finish") }
+    func didFailWithError(_ error: any Error) { events.append("fail") }
+}
+
+@MainActor
+@Test func aStoppedImageHearsNothingMoreWhileItsFailureIsMarked() async throws {
+    let handler = ReaderSchemeHandler()
+    let webView = WKWebView(frame: .zero)
+    var marking: [() -> Void] = []
+    handler.markFailed = { _, done in marking.append(done) }
+    handler.loadRemote = { _ in throw URLError(.cannotFindHost) }
+    let url = try #require(URL(string: ReaderRemoteImages.readerURL(for: "https://cdn.example.com/gone.png")))
+    func waitForMarking(_ count: Int) async {
+        for _ in 0..<200 where marking.count < count { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    // WebKit stops the load (the message closed) while the page marks the image: the late failure isn't delivered.
+    let stopped = RecordingSchemeTask(url)
+    handler.webView(webView, start: stopped)
+    await waitForMarking(1)
+    handler.webView(webView, stop: stopped)
+    marking.forEach { $0() }
+    #expect(marking.count == 1 && stopped.events.isEmpty)
+
+    // Otherwise the image is marked first and then fails.
+    let failing = RecordingSchemeTask(url)
+    handler.webView(webView, start: failing)
+    await waitForMarking(2)
+    #expect(failing.events.isEmpty, "nothing before the page has marked it")
+    marking[1]()
+    #expect(failing.events == ["fail"])
+
+    // An image that arrives is answered and never marked.
+    handler.loadRemote = { _ in (Data([1, 2, 3]), "image/png") }
+    let arriving = RecordingSchemeTask(url)
+    handler.webView(webView, start: arriving)
+    for _ in 0..<200 where arriving.events.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+    #expect(arriving.events == ["response", "data", "finish"] && marking.count == 2)
+}
+
+@Test func theImageCacheStaysOutOfBackups() throws {
+    let directory = scratchDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let prepared = ReaderRemoteImages.prepared(directory)
+    #expect(try prepared.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
 }

@@ -207,8 +207,12 @@ private final class MessageProxy: NSObject, WKScriptMessageHandler {
 
 /// Serves the bundled fonts (`tern-app://fonts/…`), inline mail images (`tern-cid://…`) and the
 /// remote images of messages allowed to show them (`tern-remote://…`).
-private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
+final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
     weak var engine: ReaderWebEngine?
+    /// Fetches a `tern-remote:` image; tests stand in for the network.
+    var loadRemote: @Sendable (URL) async throws -> (Data, String) = { try await ReaderRemoteImages.load($0) }
+    /// Marks an image that couldn't load in the page, then calls back; tests stand in for the page.
+    var markFailed: ((URL, @escaping @MainActor () -> Void) -> Void)?
     private var stopped = Set<ObjectIdentifier>()
     private var remote: [ObjectIdentifier: Task<Void, Never>] = [:]
 
@@ -224,8 +228,9 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         let id = ObjectIdentifier(task)
         if url.scheme == ReaderRemoteImages.scheme {
+            let load = loadRemote
             remote[id] = Task { @MainActor [weak self] in
-                let result = try? await ReaderRemoteImages.load(url)
+                let result = try? await load(url)
                 guard let self, self.remote[id] != nil, !Task.isCancelled else { return }
                 if let result {
                     self.remote[id] = nil
@@ -239,8 +244,13 @@ private final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
                     guard let self, self.remote.removeValue(forKey: id) != nil else { return }
                     task.didFailWithError(URLError(.resourceUnavailable))
                 }
-                guard let engine = self.engine else { return finish() }
-                engine.run("Tern.imageFailed(u)", ["u": url.absoluteString]) { _ in MainActor.assumeIsolated { finish() } }
+                if let markFailed = self.markFailed {
+                    markFailed(url, finish)
+                } else if let engine = self.engine {
+                    engine.run("Tern.imageFailed(u)", ["u": url.absoluteString]) { _ in MainActor.assumeIsolated { finish() } }
+                } else {
+                    finish()
+                }
             }
             return
         }

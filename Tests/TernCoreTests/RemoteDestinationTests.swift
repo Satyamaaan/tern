@@ -89,3 +89,20 @@ func allowsPublicDestinations(_ string: String) throws {
     let addresses = try #require(await RemoteDestination.resolve("127.0.0.1"))
     #expect(addresses.contains(v4(127, 0, 0, 1)) && !addresses.contains(where: RemoteDestination.isPublic))
 }
+
+@Test func namesAreRequestedOverHTTPS() throws {
+    func request(_ string: String, loopback: Bool = false) throws -> String? {
+        RemoteDestination.requestURL(for: try #require(URL(string: string)), allowLoopback: loopback)?.absoluteString
+    }
+    #expect(try request("http://cdn.example.com/logo.png") == "https://cdn.example.com/logo.png")
+    #expect(try request("http://Cdn.Example.com.:80/a.png?x=1") == "https://cdn.example.com/a.png?x=1")
+    #expect(try request("https://cdn.example.com:443/a.png") == "https://cdn.example.com/a.png")
+    #expect(try request("https://cdn.example.com:80/a.png") == nil)
+    #expect(try request("http://cdn.example.com:443/a.png") == nil)
+    // Addresses involve no DNS, so they keep their scheme.
+    #expect(try request("http://93.184.216.34/a.png") == "http://93.184.216.34/a.png")
+    #expect(try request("http://[2606:4700:4700::1111]/a.png") == "http://[2606:4700:4700::1111]/a.png")
+    #expect(try request("http://127.0.0.1:18766/hero.png", loopback: true) == "http://127.0.0.1:18766/hero.png")
+    #expect(try request("http://127.0.0.1:18766/hero.png") == nil)
+    #expect(try request("http://printer.local/a.png") == nil)
+}

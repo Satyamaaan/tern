@@ -2,21 +2,24 @@ import Foundation
 import TernCore
 
 /// Fetches mail images for the reader the way a browser that shares nothing would: no cookies, credentials or
-/// referrer; public destinations only (`RemoteDestination`), checked for the URL, every redirect and, best
-/// effort, the addresses the host resolves to before connecting; images only, at most `maxBytes`. An image
-/// that arrives goes to an on-disk cache, so a reopened message paints it at once without asking the sender
-/// again; failures are never cached.
-///
-/// The resolution check can't pin the address the connection then uses, so a DNS answer that changes in
-/// between could still reach a private address on port 80 or 443; the port rule keeps everything else out.
+/// referrer; public destinations only (`RemoteDestination`), checked for the URL, every redirect and the addresses a
+/// name resolves to before connecting, and names over HTTPS only; images only, at most `maxBytes`. An image that
+/// arrives goes to an on-disk cache, so a reopened message paints it at once without asking the sender again;
+/// failures are never cached. A URL is fetched once for every image asking for it at the time, and fetches take
+/// turns (`FetchGate`), so the last images of a long newsletter don't time out queued behind its first ones.
 final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     enum Failure: Error, Equatable {
-        /// Not a public http(s) destination, or a redirect to one that isn't.
+        /// Not a public destination, or a redirect to one that isn't.
         case refused
         case status(Int)
         case tooBig
         case notAnImage
     }
+
+    /// At most this many fetches run at once, and at most `perHost` to one host; the rest wait their turn before
+    /// their timeouts start.
+    static let concurrent = 8
+    static let perHost = 4
 
     let maxBytes: Int
     let maxRedirects = 5
@@ -24,10 +27,10 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     private let allowLoopback: Bool
     private let resolve: @Sendable (String) async -> [RemoteDestination.Address]?
     private var session: URLSession!
+    private let gate = FetchGate(total: RemoteImageFetcher.concurrent, perHost: RemoteImageFetcher.perHost)
     private let lock = NSLock()
     private var loads: [Int: Load] = [:]
-    /// Hosts already resolved, with whether every address was public, for a few minutes.
-    private var verdicts: [String: (isPublic: Bool, until: Date)] = [:]
+    private var flights: [URL: Flight] = [:]
 
     private final class Load {
         let continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>
@@ -36,6 +39,12 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
         var failure: Failure?
         var redirects = 0
         init(_ continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>) { self.continuation = continuation }
+    }
+
+    /// One fetch, shared by every caller asking for its URL while it runs; it stops once they have all stopped asking.
+    private final class Flight: @unchecked Sendable {
+        var task: Task<(Data, String), any Error>?
+        var callers = 1
     }
 
     /// `cacheDirectory` nil keeps nothing on disk. Tests pass `protocolClasses` and `resolve` to stand in for
@@ -71,18 +80,63 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     /// Ends the session; the fetcher can't be used afterwards. The app's one fetcher lives as long as the app.
     func invalidate() { session.invalidateAndCancel() }
 
-    /// The image at `remote` and its MIME type, from the cache or the network.
+    /// The image at `remote` and its MIME type, from the cache or the network. A name is asked for over HTTPS.
     func image(at remote: URL) async throws -> (Data, String) {
-        guard RemoteDestination.allows(remote, allowLoopback: allowLoopback) else { throw Failure.refused }
-        let request = URLRequest(url: remote)
-        if let cached = cache?.cachedResponse(for: request), let type = Self.imageType(cached.data, declared: cached.response.mimeType) {
+        guard let target = RemoteDestination.requestURL(for: remote, allowLoopback: allowLoopback) else { throw Failure.refused }
+        if let cached = cache?.cachedResponse(for: URLRequest(url: target)),
+           let type = Self.imageType(cached.data, declared: cached.response.mimeType) {
             return (cached.data, type)
         }
-        guard await resolvesPublicly(remote) else { throw Failure.refused }
+        let flight = lock.withLock { () -> Flight in
+            if let flight = flights[target] {
+                flight.callers += 1
+                return flight
+            }
+            let flight = Flight()
+            flights[target] = flight
+            flight.task = Task { [weak self] in
+                defer { self?.land(flight, target) }
+                guard let self else { throw CancellationError() }
+                return try await self.load(target)
+            }
+            return flight
+        }
+        let task = lock.withLock { flight.task }
+        return try await withTaskCancellationHandler {
+            guard let task else { throw CancellationError() }
+            return try await task.value
+        } onCancel: {
+            self.abandon(flight, target)
+        }
+    }
+
+    /// The fetch is over: the next caller starts a new one (or reads the cache).
+    private func land(_ flight: Flight, _ target: URL) {
+        lock.withLock { if flights[target] === flight { flights[target] = nil } }
+    }
+
+    /// A caller stopped asking; when it was the last one, the fetch stops too.
+    private func abandon(_ flight: Flight, _ target: URL) {
+        let task = lock.withLock { () -> Task<(Data, String), any Error>? in
+            flight.callers -= 1
+            guard flight.callers == 0 else { return nil }
+            if flights[target] === flight { flights[target] = nil }
+            return flight.task
+        }
+        task?.cancel()
+    }
+
+    /// Waits its turn, checks where the name resolves, fetches, and keeps a complete image on disk.
+    private func load(_ target: URL) async throws -> (Data, String) {
+        let host = RemoteDestination.host(of: target) ?? ""
+        try await gate.enter(host)
+        defer { gate.leave(host) }
+        guard await resolvesPublicly(target) else { throw Failure.refused }
+        let request = URLRequest(url: target)
         let (data, response) = try await fetch(request)
         guard let type = Self.imageType(data, declared: response.mimeType) else { throw Failure.notAnImage }
         let noStore = response.value(forHTTPHeaderField: "Cache-Control")?.lowercased().contains("no-store") == true
-        if let cache, !noStore, let stored = HTTPURLResponse(url: remote, statusCode: 200, httpVersion: "HTTP/1.1",
+        if let cache, !noStore, let stored = HTTPURLResponse(url: target, statusCode: 200, httpVersion: "HTTP/1.1",
                                                              headerFields: ["Content-Type": type, "Content-Length": String(data.count)]) {
             cache.storeCachedResponse(CachedURLResponse(response: stored, data: data, userInfo: nil, storagePolicy: .allowed), for: request)
         }
@@ -101,22 +155,15 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Literal addresses were judged by `RemoteDestination.allows`; names must resolve to public addresses only.
+    /// Literal addresses were judged by `RemoteDestination`; a name must resolve, and only to public addresses.
+    /// Nothing is remembered: a lookup that failed (offline, just woken) mustn't refuse the host afterwards, and a
+    /// public answer mustn't outlive its DNS record. Repeated lookups are answered by the system's own DNS cache.
     private func resolvesPublicly(_ url: URL) async -> Bool {
         guard let host = RemoteDestination.host(of: url) else { return false }
         if RemoteDestination.literal(host) != nil { return true }
-        let now = Date()
-        if let verdict = lock.withLock({ verdicts[host] }), verdict.until > now { return verdict.isPublic }
-        let addresses = await resolve(host) ?? []
-        let isPublic = !addresses.isEmpty && addresses.allSatisfy(RemoteDestination.isPublic)
-        lock.withLock {
-            if verdicts.count >= 512 { verdicts = verdicts.filter { $0.value.until > now } }
-            verdicts[host] = (isPublic, now.addingTimeInterval(300))
-        }
-        return isPublic
+        guard let addresses = await resolve(host), !addresses.isEmpty else { return false }
+        return addresses.allSatisfy(RemoteDestination.isPublic)
     }
-
-    private func load(_ task: URLSessionTask) -> Load? { lock.withLock { loads[task.taskIdentifier] } }
 
     private func fail(_ task: URLSessionTask, _ failure: Failure) {
         lock.withLock { loads[task.taskIdentifier]?.failure = failure }
@@ -159,14 +206,18 @@ extension RemoteImageFetcher: URLSessionDataDelegate {
             loads[task.taskIdentifier]?.redirects += 1
             return loads[task.taskIdentifier]?.redirects ?? .max
         }
-        guard count <= maxRedirects, let url = request.url, RemoteDestination.allows(url, allowLoopback: allowLoopback) else {
+        guard count <= maxRedirects, let url = request.url,
+              let next = RemoteDestination.requestURL(for: url, allowLoopback: allowLoopback) else {
             fail(task, .refused)
             completionHandler(nil)
             return
         }
+        // A redirect to a name over http goes over HTTPS instead, like any other request for a name.
+        var upgraded = request
+        upgraded.url = next
         Task {
-            if await resolvesPublicly(url) {
-                completionHandler(request)
+            if await resolvesPublicly(next) {
+                completionHandler(upgraded)
             } else {
                 fail(task, .refused)
                 completionHandler(nil)
@@ -222,5 +273,89 @@ extension RemoteImageFetcher: URLSessionDataDelegate {
         } else {
             load.continuation.resume(throwing: URLError(.badServerResponse))
         }
+    }
+}
+
+/// Lets at most `total` fetches run at once, and at most `perHost` to one host; the others wait in order of arrival.
+/// A waiter whose task is cancelled leaves the line.
+private final class FetchGate: @unchecked Sendable {
+    private struct Waiter {
+        let id: UInt64
+        let host: String
+        let continuation: CheckedContinuation<Void, any Error>
+    }
+
+    private let total: Int
+    private let perHost: Int
+    private let lock = NSLock()
+    private var running = 0
+    private var runningByHost: [String: Int] = [:]
+    private var waiting: [Waiter] = []
+    private var lastId: UInt64 = 0
+
+    init(total: Int, perHost: Int) {
+        self.total = total
+        self.perHost = perHost
+    }
+
+    func enter(_ host: String) async throws {
+        let id = lock.withLock { () -> UInt64 in
+            lastId += 1
+            return lastId
+        }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                let admitted = lock.withLock { () -> Bool? in
+                    if Task.isCancelled { return nil }
+                    if canRun(host) {
+                        admit(host)
+                        return true
+                    }
+                    waiting.append(Waiter(id: id, host: host, continuation: continuation))
+                    return false
+                }
+                switch admitted {
+                case .none: continuation.resume(throwing: CancellationError())
+                case .some(true): continuation.resume()
+                case .some(false): break
+                }
+            }
+        } onCancel: {
+            let waiter = lock.withLock { () -> Waiter? in
+                guard let index = waiting.firstIndex(where: { $0.id == id }) else { return nil }
+                return waiting.remove(at: index)
+            }
+            waiter?.continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    func leave(_ host: String) {
+        let ready = lock.withLock { () -> [CheckedContinuation<Void, any Error>] in
+            running -= 1
+            runningByHost[host, default: 1] -= 1
+            if runningByHost[host] == 0 { runningByHost[host] = nil }
+            var ready: [CheckedContinuation<Void, any Error>] = []
+            var index = 0
+            while index < waiting.count, running < total {
+                if canRun(waiting[index].host) {
+                    let waiter = waiting.remove(at: index)
+                    admit(waiter.host)
+                    ready.append(waiter.continuation)
+                } else {
+                    index += 1
+                }
+            }
+            return ready
+        }
+        ready.forEach { $0.resume() }
+    }
+
+    /// Call with the lock held.
+    private func canRun(_ host: String) -> Bool { running < total && runningByHost[host, default: 0] < perHost }
+
+    /// Call with the lock held.
+    private func admit(_ host: String) {
+        running += 1
+        runningByHost[host, default: 0] += 1
     }
 }
