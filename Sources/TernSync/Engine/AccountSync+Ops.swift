@@ -448,21 +448,26 @@ extension AccountSync {
     }
 
     /// Deletes a Gmail draft. `DraftStore` has already removed the local draft (discard) or moved
-    /// it to another account, so only Gmail's copy goes; history then removes its message here.
+    /// it to another account, so only Gmail's copy goes; history then removes its message here. A draft
+    /// written in Gmail, whose draft id Tern never learned, is found by its message (`gmailMessageId`).
+    /// Once it's gone, so are the files of a discarded draft.
     private func deleteDraft(_ op: PendingOp) async throws {
         guard let opId = op.id,
               let payload = try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)) else {
             if let id = op.id { try await deleteOp(id) }
             return
         }
+        let accountId = self.accountId
         var gmailDraftId = payload.gmailDraftId
         if gmailDraftId == nil {
-            let accountId = self.accountId
             gmailDraftId = try await read { db in
                 try Draft.fetchOne(db, key: payload.draftId).flatMap { $0.accountId == accountId ? $0.gmailDraftId : nil }
             }
         }
         guard try claimOp(opId) != nil else { return }
+        if gmailDraftId == nil, let messageId = payload.gmailMessageId {
+            gmailDraftId = try await gmailDraft(withMessage: messageId, rfcMessageId: payload.rfcMessageId)
+        }
         if let gmailDraftId {
             do {
                 try await api.deleteDraft(id: gmailDraftId)
@@ -471,6 +476,33 @@ extension AccountSync {
             }
         }
         try deleteOpNow(opId)
+        if try await read({ db in try Draft.exists(db, key: payload.draftId) }) == false {
+            try? FileManager.default.removeItem(at: DraftStore.folder(for: payload.draftId, in: configuration.draftFilesDirectory))
+        }
+    }
+
+    /// The Gmail draft whose message is `messageId`: looked up by the message's Message-ID (5 units), or
+    /// without one by going through the drafts, 100 at a time. Nil when Gmail has no such draft any more
+    /// (deleted, or changed elsewhere since, which history then brings in).
+    private func gmailDraft(withMessage messageId: String, rfcMessageId: String?) async throws -> String? {
+        guard !draftListUnsupported else { return nil }
+        let query = rfcMessageId.map { "rfc822msgid:" + $0.trimmingCharacters(in: CharacterSet(charactersIn: "<> ")) }
+        var pageToken: String?
+        for _ in 0..<(query == nil ? 20 : 1) {
+            let page: GmailDraftPage
+            do {
+                page = try await withRetry { [api, pageToken] in
+                    try await api.drafts(query: query, pageToken: pageToken, maxResults: query == nil ? 100 : 5)
+                }
+            } catch GmailAPIError.server(501, GmailDraftPage.unsupported) {
+                draftListUnsupported = true
+                return nil
+            }
+            if let match = page.drafts?.first(where: { $0.message?.id == messageId }) { return match.id }
+            guard let next = page.nextPageToken else { break }
+            pageToken = next
+        }
+        return nil
     }
 
     // MARK: Failures
@@ -543,8 +575,17 @@ extension AccountSync {
             }
         case .sendDraft:
             try? await restoreDraftState(op, state: .failed, error: error)
-        case .saveDraft, .deleteDraft:
+        case .saveDraft:
             try? await restoreDraftState(op, state: nil, error: error)
+        case .deleteDraft:
+            // Gmail kept the draft: its message, taken out when it was discarded, shows again.
+            guard let messageId = (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.gmailMessageId,
+                  let fetched = try? await api.messages(ids: [messageId], format: .full), !fetched.isEmpty else { return }
+            let email = account.email
+            let parsed = fetched.map { GmailMessageParser.parse($0, accountId: accountId, accountEmail: email, format: .full) }
+            _ = try? await writeServer { db in
+                try MailStore.upsertServerMessages(db, parsed.map(\.message), attachments: parsed.flatMap(\.attachments))
+            }
         }
     }
 

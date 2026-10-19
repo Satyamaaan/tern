@@ -87,7 +87,16 @@ extension MailStore {
     /// Rules run for the touched threads (`applyRules`).
     public static func upsertServerMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment] = []) throws {
         guard !messages.isEmpty || !attachments.isEmpty else { return }
+        var messages = messages
         var attachments = attachments
+        // A draft discarded here stays out while its deletion waits to go to Gmail (the undo window).
+        if messages.contains(where: \.isDraft) {
+            let discarded = try discardedDraftMessages(db)
+            if !discarded.isEmpty {
+                messages.removeAll { discarded.contains($0.key) }
+                attachments.removeAll { discarded.contains(MessageKey(accountId: $0.accountId, messageId: $0.messageId)) }
+            }
+        }
         if !attachments.isEmpty {
             var paths: [String: String] = [:]
             for (accountId, items) in Dictionary(grouping: attachments, by: \.accountId) {
@@ -236,6 +245,15 @@ extension MailStore {
         try db.execute(sql: """
             UPDATE pending_op SET state = 'pending' WHERE accountId = ? AND state = 'inflight'
             """, arguments: [accountId])
+    }
+
+    /// DRAFT messages of discarded drafts whose Gmail deletion is queued and hasn't failed.
+    static func discardedDraftMessages(_ db: Database) throws -> Set<MessageKey> {
+        let rows = try Row.fetchAll(db, sql: """
+            SELECT accountId, json_extract(payload, '$.gmailMessageId') AS messageId FROM pending_op
+            WHERE kind = 'deleteDraft' AND state != 'failed' AND json_extract(payload, '$.gmailMessageId') IS NOT NULL
+            """)
+        return Set(rows.map { MessageKey(accountId: $0["accountId"], messageId: $0["messageId"]) })
     }
 
     /// Draft ops (save, send, delete) that reference `draftId`.
