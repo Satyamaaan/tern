@@ -97,11 +97,15 @@ the user is at the Mac; render views offscreen (NSHostingView + cacheDisplay) to
   only the deltas, keyed by command id). Show a shortcut with `registry.hint(title, id)` or
   `command.shortcutText`, never as a literal string, so edits show everywhere at once.
 - Bare keys (no ⌘ or ⌃) run through `KeyRouter` and only outside text fields; `BareKeySafeMenu` never fires them
-  as menu key equivalents. ⌘ keys fire from the menu bar, which is rebuilt when shortcuts change. While a text
-  field has the keyboard the menu bar also leaves alone the ⌘/⌃ keys of commands that aren't `isTextSafe`
-  (`registry.leavesToText`), so they keep their text meaning. Commands aren't text-safe unless they set
-  `isTextSafe: true`: ⌘K, new mail, Settings, find, print, New Project, ⌘0–⌘9, view and appearance, and the app's
-  own items. Don't add one that acts on mail or rebuilds the tabs or the list (Split Inbox isn't text-safe).
+  as menu key equivalents. A key the router handles goes no further (its monitor returns nil); while typing, keys
+  take their normal way to the text view, so input methods, dead keys and Press and Hold work. `--check` types
+  into the fields through the real event path (`SelfCheck+Typing`, `PostedKeys`); debug builds have `--typing` for
+  more fields, speeds and a trace of every dispatch (`TypingCheck`). ⌘ keys fire from the menu bar, which is
+  rebuilt when shortcuts change. While a text field has the keyboard the menu bar also leaves alone the ⌘/⌃ keys
+  of commands that aren't `isTextSafe` (`registry.leavesToText`), so they keep their text meaning. Commands aren't
+  text-safe unless they set `isTextSafe: true`: ⌘K, new mail, Settings, find, print, New Project, ⌘0–⌘9, view and
+  appearance, and the app's own items. Don't add one that acts on mail or rebuilds the tabs or the list (Split
+  Inbox isn't text-safe).
 - A command that only makes sense in one place sets `yieldsToReader` (list) or `readerOnly`, so it can share a
   bare key with a command of the other scope (`ShortcutRules.canShare`); ⌘/⌃ keys are never shared. Reserved keys
   (macOS, fixed menu items, text-editing Control keys) and locked commands are in `ShortcutRules`. Saved overrides

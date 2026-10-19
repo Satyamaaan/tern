@@ -7,14 +7,17 @@ import TernCore
 /// - `--fake` or `TERN_FAKE=1` opens the demo mailbox (`Tern-Fake.sqlite`), seeding it if empty.
 /// - `--snapshot <dir>` renders the main window offscreen into PNGs and quits.
 /// - `--check` drives the shell offscreen through its behaviour and quits.
+/// - `--typing` (debug builds) types into every kind of field through the real event path and quits (`TypingCheck`).
 struct LaunchOptions {
     var databaseURL: URL
     var isFake: Bool
     var snapshotDirectory: URL?
     var isCheck = false
+    /// `--typing`, which only debug builds have.
+    var isTypingCheck = false
 
-    /// Offscreen runs (`--snapshot`, `--check`): no updater, no prompts, nothing on screen.
-    var isHeadless: Bool { snapshotDirectory != nil || isCheck }
+    /// Offscreen runs (`--snapshot`, `--check`, `--typing`): no updater, no prompts, nothing on screen.
+    var isHeadless: Bool { snapshotDirectory != nil || isCheck || isTypingCheck }
 
     static func current(
         arguments: [String] = CommandLine.arguments,
@@ -31,6 +34,10 @@ struct LaunchOptions {
         if let index = arguments.firstIndex(of: "--snapshot"), index + 1 < arguments.count {
             snapshot = URL(fileURLWithPath: (arguments[index + 1] as NSString).expandingTildeInPath)
         }
-        return LaunchOptions(databaseURL: url, isFake: isFake, snapshotDirectory: snapshot, isCheck: arguments.contains("--check"))
+        var options = LaunchOptions(databaseURL: url, isFake: isFake, snapshotDirectory: snapshot, isCheck: arguments.contains("--check"))
+        #if DEBUG
+        options.isTypingCheck = arguments.contains("--typing")
+        #endif
+        return options
     }
 }
