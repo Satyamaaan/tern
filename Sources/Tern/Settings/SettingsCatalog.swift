@@ -56,7 +56,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .senderLogos: "sender logos avatars icons favicons"
         case .readingPane: "reading pane split view side by side"
         case .sidebar: "sidebar mailboxes projects"
-        case .splitInbox: "split inbox categories important people newsletters"
+        case .splitInbox: "inbox tabs split inbox categories gmail primary promotions social updates forums"
         case .pinnedTabs: "pinned tabs pin unpin reorder"
         case .notifications: "notifications new mail banners alerts"
         case .notifyImportant: "only important notifications"

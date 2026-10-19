@@ -1,8 +1,9 @@
 import AppKit
+import GRDB
 import SwiftUI
 import TernCore
 
-/// `--check`: drives the shell offscreen through triage, undo, search, splits, selection, key routing and
+/// `--check`: drives the shell offscreen through triage, undo, search, the inbox tabs, selection, key routing and
 /// the settings page, and prints PASS/FAIL per step plus timings. It writes to the database, so point `TERN_DB`
 /// at a throwaway copy of a seeded mailbox.
 @MainActor
@@ -31,6 +32,7 @@ final class SelfCheck {
         wait(0.3)
         check("list loaded", model.listLoaded && !model.snapshot.isEmpty)
         check("first row selected", model.cursor == model.snapshot.order.first)
+        check("launch opens the inbox on Primary", !model.prefs.splitInbox || model.activeTab == .category(.primary))
         timeQueries()
         previews()
         triage()
@@ -41,7 +43,7 @@ final class SelfCheck {
         needsReply()
         reviewFixes()
         search()
-        splits()
+        tabs()
         scope()
         keys()
         paletteSearch()
@@ -64,7 +66,7 @@ final class SelfCheck {
 
     private func triage() {
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         guard let first = model.cursor, let second = model.snapshot.key(from: first, offset: 1) else {
             return check("triage has rows", false)
@@ -86,7 +88,7 @@ final class SelfCheck {
     }
 
     private func multiSelect() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         model.moveToTop()
         model.moveCursor(1, extend: true)
@@ -105,7 +107,7 @@ final class SelfCheck {
     }
 
     private func clicks() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let order = model.snapshot.order
         guard order.count > 5 else { return check("click rows", false) }
@@ -131,7 +133,7 @@ final class SelfCheck {
 
     private func dropOnProject() {
         guard let project = model.projects.first else { return check("projects", false) }
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         guard let key = model.snapshot.order.first(where: { !(model.row($0)?.projectIds.contains(project.id) ?? true) }) else {
             return check("drop candidate", false)
@@ -148,7 +150,7 @@ final class SelfCheck {
     /// Regressions found in review.
     private func reviewFixes() {
         // The next thread after triage is marked read when reading in the reader.
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         if let index = model.snapshot.order.indices.dropLast().first(where: { (model.row(model.snapshot.order[$0 + 1])?.thread.unreadCount ?? 0) > 0 }) {
             let key = model.snapshot.order[index], next = model.snapshot.order[index + 1]
@@ -183,7 +185,7 @@ final class SelfCheck {
 
         // A thread opened from outside the list survives the next observation.
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         if let outsider = try? model.store.threadRows(in: Mailbox(.sent), limit: 50).first(where: { model.snapshot.rows[$0.id] == nil })?.id,
            let other = model.snapshot.order.first {
@@ -228,7 +230,7 @@ final class SelfCheck {
     }
 
     private func needsReply() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         guard let key = model.snapshot.order.first(where: { !(model.row($0)?.needsReply ?? true) }) else {
             return check("needs-reply candidate", false)
@@ -265,14 +267,22 @@ final class SelfCheck {
         check("esc restores the mailbox", !model.isSearching && model.snapshot.rows.count > 0)
     }
 
-    private func splits() {
+    private func tabs() {
+        if !model.prefs.splitInbox { model.setSplitInbox(true) }
+        model.show(.sent)
         model.show(.inbox)
-        model.showSplit(.important)
-        wait(0.1)
+        wait(0.2)
+        check("the Inbox opens on Primary", model.activeTab == .category(.primary))
+        check("Primary holds only Primary threads",
+              !model.snapshot.isEmpty && model.snapshot.order.allSatisfy { model.row($0)?.inboxTab == .primary })
+        let shown = model.tabs.compactMap { tab -> InboxTab? in if case .category(let inbox) = tab { inbox } else { nil } }
+        print("  tabs: \(shown.map(\.title).joined(separator: ", ")); unread \(InboxTab.allCases.map { "\($0.title) \(model.counts.tabUnread[$0, default: 0])" }.joined(separator: ", "))")
+        guard shown.count > 1 else { return check("inbox tabs: a second tab", false) }
         model.cycleTab(1)
-        wait(0.1)
-        check("tab moves to People", model.split == .people)
-        check("People holds only people", model.snapshot.order.allSatisfy { model.row($0)?.category == .people })
+        wait(0.2)
+        check("tab moves to \(shown[1].title)", model.activeTab == .category(shown[1]))
+        check("\(shown[1].title) holds only its threads",
+              !model.snapshot.isEmpty && model.snapshot.order.allSatisfy { model.row($0)?.inboxTab == shown[1] })
         model.cycleTab(-2)
         wait(0.1)
         check("⇧tab twice goes back to Needs reply", model.activeTab == .needsReply)
@@ -287,6 +297,81 @@ final class SelfCheck {
         } else {
             check("All starts with a date group", false)
         }
+        check("⌥4 is Promotions", registry["tab.promotions"]?.keys == [.option("4")])
+        let promotionsUnread = model.counts.tabUnread[.promotions, default: 0]
+        check("Promotions shows its unread count, All and Primary none",
+              promotionsUnread > 0 && model.count(for: .category(.promotions)) == promotionsUnread
+                && model.count(for: .all) == nil && model.count(for: .category(.primary)) == nil)
+
+        hiddenTabs()
+        moveToTab()
+        model.showInboxTab(.primary)
+        wait(0.1)
+    }
+
+    /// A tab with nothing in the scope's inbox hides, except while it is open.
+    private func hiddenTabs() {
+        let scopes = [Scope.all] + model.accounts.map { Scope.account($0.id) }
+        var found: (Scope, InboxTab)?
+        for scope in scopes {
+            model.setScope(scope)
+            wait(0.3)
+            if let empty = InboxTab.allCases.first(where: { $0 != .primary && model.counts.tabThreads[$0, default: 0] == 0 }) {
+                found = (scope, empty)
+                break
+            }
+        }
+        guard let (scope, empty) = found else { return check("an empty tab in some scope", false) }
+        check("an empty tab (\(empty.title), \(scope)) is hidden", !model.tabs.contains(.category(empty)))
+        model.select(.category(empty))
+        wait(0.2)
+        check("…but shows while it is open", model.tabs.contains(.category(empty)) && model.activeTab == .category(empty) && model.snapshot.isEmpty)
+        model.showInboxTab(.primary)
+        wait(0.1)
+        check("…and hides again once left", !model.tabs.contains(.category(empty)))
+        model.setScope(.all)
+        wait(0.3)
+    }
+
+    /// Move to Primary from Promotions: the row leaves in the same frame, Gmail's labels swap (queued for Gmail),
+    /// it shows in Primary, and undo puts it back.
+    private func moveToTab() {
+        model.showInboxTab(.promotions)
+        wait(0.2)
+        guard let key = model.snapshot.order.first, let next = model.snapshot.key(from: key, offset: 1) else {
+            return check("move to tab: a Promotions thread", false)
+        }
+        let before = gmailTab(key)
+        model.setCursor(key, open: false)
+
+        let menu = ThreadMenu.make(registry: registry, model: model)
+        let tabsItem = menu.items.first { $0.title == "Move to Tab" }
+        check("the row menu has Move to Tab with Gmail's five tabs, Promotions ticked",
+              tabsItem?.submenu?.items.map(\.title) == InboxTab.allCases.map(\.title)
+                && tabsItem?.submenu?.items.first { $0.state == .on }?.title == "Promotions")
+        model.palette = .commands
+        palette.query = "move to pri"
+        check("⌘K offers Move to Primary", palette.flatItems.first?.title == "Move to Primary")
+        palette.close()
+
+        registry.run("moveToTab.primary")
+        check("Move to Primary takes the thread out of Promotions in the same frame",
+              model.snapshot.rows[key] == nil && model.cursor == next)
+        check("…with a toast", model.toasts.last?.title == "Moved to Primary")
+        let filed = waitUntil { self.gmailTab(key) == .primary }
+        check("…and files it under Gmail's Primary", filed)
+        let change = latestLabelOp(key)
+        check("…queuing the label swap for Gmail",
+              change?.action == "moveToTab" && change?.add == [SystemLabel.categoryPersonal]
+                && Set(change?.remove ?? ["?"]).isSubset(of: InboxTab.allCases.filter { $0 != .primary }.map(\.labelId)))
+        model.showInboxTab(.primary)
+        _ = waitUntil { self.model.snapshot.rows[key] != nil }
+        check("…where Primary lists it", model.snapshot.rows[key] != nil)
+        model.showInboxTab(.promotions)
+        wait(0.2)
+        model.undoLast()
+        let back = waitUntil { self.model.snapshot.rows[key] != nil && self.gmailTab(key) == before }
+        check("undo puts it back in Promotions", back && model.cursor == key)
     }
 
     private func scope() {
@@ -300,7 +385,7 @@ final class SelfCheck {
     }
 
     private func keys() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         model.moveToTop()
         let start = model.cursor
@@ -377,6 +462,23 @@ final class SelfCheck {
     }
 
     // MARK: Helpers
+
+    private func gmailTab(_ key: ThreadKey) -> InboxTab? {
+        try? model.store.database.reader.read { db in
+            try MailThread.fetchOne(db, key: ["accountId": key.accountId, "id": key.threadId])?.gmailTab
+        }
+    }
+
+    /// The newest queued label op touching the thread: its action and the first message's change.
+    private func latestLabelOp(_ key: ThreadKey) -> (action: String, add: [String], remove: [String])? {
+        let op = try? model.store.database.reader.read { db in
+            try PendingOp.filter(Column("accountId") == key.accountId && Column("kind") == PendingOp.Kind.modifyLabels.rawValue)
+                .order(Column("id").desc).fetchOne(db)
+        }
+        guard let op, let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)),
+              payload.threadIds.contains(key.threadId), let change = payload.changes.first else { return nil }
+        return (payload.action, change.add, change.remove)
+    }
 
     private func isInInbox(_ key: ThreadKey) throws -> Bool {
         try model.store.database.reader.read { db in

@@ -129,7 +129,7 @@ extension AccountSync {
     }
 
     /// The inbox and recent mail are in. Every write already sorted its threads (`MailStore.applyRules`);
-    /// now the address book is rebuilt, so the split inbox knows who the user writes to, and the
+    /// now the address book is rebuilt, so the classifier knows who the user writes to, and the
     /// account's threads are sorted again with it.
     private func finishInitialSync() async throws {
         initialPlan = nil

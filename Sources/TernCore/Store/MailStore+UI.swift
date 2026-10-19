@@ -1,58 +1,24 @@
 import Foundation
 import GRDB
 
-// Reads and small writes the app shell needs beyond the core `Mailbox` lists: split-inbox filters,
-// per-scope counts, the needs-reply toggle.
+// Reads and small writes the app shell needs beyond the core `Mailbox` lists: the inbox tabs, per-scope
+// counts, the needs-reply toggle.
 
-/// A slice of the inbox, used for split tabs. Filters combine with AND.
+/// A slice of the inbox: one account or all, the whole inbox or one of Gmail's tabs.
 public struct InboxFilter: Hashable, Sendable {
-    public enum NeedsReply: Hashable, Sendable { case any, only, exclude }
-
     /// Nil reads every account.
     public var accountId: String?
-    /// Nil keeps every category.
-    public var categories: Set<MailCategory>?
-    /// With `categories`, also keep threads the classifier hasn't seen yet.
-    public var includeUncategorized: Bool
-    /// With `categories`, also keep threads flagged as needing a reply, whatever their category.
-    public var includeNeedsReply: Bool
-    public var needsReply: NeedsReply
+    /// Nil is the whole inbox (All).
+    public var tab: InboxTab?
 
-    public init(
-        accountId: String? = nil, categories: Set<MailCategory>? = nil, includeUncategorized: Bool = false,
-        includeNeedsReply: Bool = false, needsReply: NeedsReply = .any
-    ) {
+    public init(accountId: String? = nil, tab: InboxTab? = nil) {
         self.accountId = accountId
-        self.categories = categories
-        self.includeUncategorized = includeUncategorized
-        self.includeNeedsReply = includeNeedsReply
-        self.needsReply = needsReply
-    }
-
-    /// Whether a row read elsewhere belongs to this slice.
-    public func matches(category: MailCategory?, needsReply flagged: Bool) -> Bool {
-        switch needsReply {
-        case .only where !flagged, .exclude where flagged: return false
-        default: break
-        }
-        guard let categories else { return true }
-        if let category, categories.contains(category) { return true }
-        return (category == nil && includeUncategorized) || (flagged && includeNeedsReply)
+        self.tab = tab
     }
 }
 
-/// Counts for the sidebar, split tabs and the Flock, for one scope (one account or all).
+/// Counts for the sidebar and the title bar's tabs, for one scope (one account or all).
 public struct ScopeCounts: Hashable, Sendable {
-    public struct Bucket: Hashable, Sendable {
-        public var category: MailCategory?
-        public var needsReply: Bool
-
-        public init(category: MailCategory?, needsReply: Bool) {
-            self.category = category
-            self.needsReply = needsReply
-        }
-    }
-
     public var inboxUnread = 0
     /// Inbox threads flagged as waiting on your reply, read or not.
     public var needsReply = 0
@@ -60,23 +26,14 @@ public struct ScopeCounts: Hashable, Sendable {
     public var drafts = 0
     /// Unread inbox threads per project id, across accounts.
     public var projectUnread: [String: Int] = [:]
-    /// Unread inbox threads per bucket.
-    public var unreadByBucket: [Bucket: Int] = [:]
-    /// Inbox threads that are unread or need a reply, per bucket.
-    public var actionByBucket: [Bucket: Int] = [:]
+    /// Inbox threads per tab; a tab with none is missing.
+    public var tabThreads: [InboxTab: Int] = [:]
+    /// Unread inbox threads per tab.
+    public var tabUnread: [InboxTab: Int] = [:]
     /// Unread inbox threads over every account, for the Dock badge.
     public var allAccountsInboxUnread = 0
 
     public init() {}
-
-    public func unread(in filter: InboxFilter) -> Int { sum(unreadByBucket, filter) }
-    public func needingAction(in filter: InboxFilter) -> Int { sum(actionByBucket, filter) }
-
-    private func sum(_ buckets: [Bucket: Int], _ filter: InboxFilter) -> Int {
-        buckets.reduce(0) { total, entry in
-            filter.matches(category: entry.key.category, needsReply: entry.key.needsReply) ? total + entry.value : total
-        }
-    }
 }
 
 /// What undoing a needs-reply change restores: earlier flags, and manual entries to remove.
@@ -88,7 +45,8 @@ public struct NeedsReplyUndo: Hashable, Sendable {
 }
 
 extension MailStore {
-    /// Inbox rows in one slice, newest first.
+    /// Inbox rows in one slice, newest first. A tab with a fallback (Primary, Promotions, Updates) walks the
+    /// inbox by date and keeps its rows; Social and Forums read their own index.
     public static func fetchInboxRows(_ db: Database, _ filter: InboxFilter, limit: Int, before: Date? = nil) throws -> [ThreadRow] {
         var sql = """
             SELECT \(rowColumns) FROM thread_label tl
@@ -101,20 +59,10 @@ extension MailStore {
             sql += " AND tl.accountId = ?"
             _ = arguments.append(contentsOf: [accountId])
         }
-        if let categories = filter.categories {
-            var any: [String] = []
-            if !categories.isEmpty {
-                any.append("ai.category IN (\(databaseQuestionMarks(count: categories.count)))")
-                _ = arguments.append(contentsOf: StatementArguments(categories.map(\.rawValue).sorted()))
-            }
-            if filter.includeUncategorized { any.append("ai.category IS NULL") }
-            if filter.includeNeedsReply { any.append("ai.needsReply = 1") }
-            sql += any.isEmpty ? " AND 0" : " AND (\(any.joined(separator: " OR ")))"
-        }
-        switch filter.needsReply {
-        case .any: break
-        case .only: sql += " AND ai.needsReply = 1"
-        case .exclude: sql += " AND COALESCE(ai.needsReply, 0) = 0"
+        if let tab = filter.tab {
+            let condition = tab.condition(gmailTab: "tl.gmailTab", category: "ai.category")
+            sql += " AND \(condition.sql)"
+            _ = arguments.append(contentsOf: condition.arguments)
         }
         if let before {
             sql += " AND tl.lastDate < ?"
@@ -129,28 +77,29 @@ extension MailStore {
         try database.reader.read { db in try Self.fetchScopeCounts(db, accountId: accountId) }
     }
 
+    /// One pass over the scope's inbox rows (its index) for the inbox, tab and needs-reply counts.
     public static func fetchScopeCounts(_ db: Database, accountId: String?) throws -> ScopeCounts {
         var counts = ScopeCounts()
         let scoped = accountId == nil ? "" : " AND i.accountId = ?"
         let scopeArguments: StatementArguments = accountId.map { [$0] } ?? []
 
         for row in try Row.fetchAll(db, sql: """
-            SELECT ai.category AS category, COALESCE(ai.needsReply, 0) AS flagged,
-              sum(u.threadId IS NOT NULL) AS unread, count(*) AS action
+            SELECT \(InboxTab.expression(gmailTab: "i.gmailTab", category: "ai.category")) AS tab,
+              COALESCE(ai.needsReply, 0) AS flagged, count(*) AS threads, sum(u.threadId IS NOT NULL) AS unread
             FROM thread_label i
             LEFT JOIN thread_label u ON u.accountId = i.accountId AND u.threadId = i.threadId AND u.labelId = 'UNREAD'
             LEFT JOIN thread_ai ai ON ai.accountId = i.accountId AND ai.threadId = i.threadId
-            WHERE i.labelId = 'INBOX'\(scoped) AND (u.threadId IS NOT NULL OR ai.needsReply = 1)
+            WHERE i.labelId = 'INBOX'\(scoped)
             GROUP BY 1, 2
             """, arguments: scopeArguments) {
-            let category: String? = row["category"]
-            let bucket = ScopeCounts.Bucket(category: category.flatMap(MailCategory.init(rawValue:)), needsReply: row["flagged"])
+            let threads: Int = row["threads"]
             let unread: Int = row["unread"]
-            let action: Int = row["action"]
-            counts.unreadByBucket[bucket, default: 0] += unread
-            counts.actionByBucket[bucket, default: 0] += action
+            if let tab = InboxTab(rawValue: row["tab"]) {
+                counts.tabThreads[tab, default: 0] += threads
+                if unread > 0 { counts.tabUnread[tab, default: 0] += unread }
+            }
             counts.inboxUnread += unread
-            if bucket.needsReply { counts.needsReply += action }
+            if row["flagged"] as Bool { counts.needsReply += threads }
         }
 
         counts.allAccountsInboxUnread = accountId == nil ? counts.inboxUnread : try Int.fetchOne(db, sql: """

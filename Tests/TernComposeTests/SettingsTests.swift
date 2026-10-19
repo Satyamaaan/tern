@@ -5,8 +5,8 @@ import Testing
 @testable import TernCore
 
 // Settings: shortcut overrides (storage, validation, conflicts, reserved keys, the key bindings files, reset, bare
-// keys, typing, the reader page's keys), the defaults of the settings the page added, what follows triage, Split
-// Inbox keeping the open thread, and image senders.
+// keys, typing, the reader page's keys), the defaults of the settings the page added, what follows triage, Inbox
+// Tabs keeping the open thread, and image senders.
 
 @MainActor
 private func makeModel(threads: Int = 0) throws -> AppModel {
@@ -339,7 +339,7 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
         "about", "checkForUpdates", "mainWindow",
     ]
     #expect(safe == expected)
-    // Split Inbox rebuilds the tabs and the list: a settings command, but not one for while typing.
+    // Inbox Tabs rebuilds the tabs and the list: a settings command, but not one for while typing.
     #expect(registry["splitInbox"]?.isTextSafe == false && registry["splitInbox"]?.availableInSettings == true)
 }
 
@@ -377,7 +377,7 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
                                              ("\\", 42, .command), ("l", 37, [.command, .shift]), ("s", 1, [.control, .command])] {
         #expect(!registry.leavesToText(event(characters, characters, keyCode, modifiers), in: window), "\(characters) \(modifiers)")
     }
-    // A modified key given to Split Inbox keeps its meaning in the text: the tabs and the list stay.
+    // A modified key given to Inbox Tabs keeps its meaning in the text: the tabs and the list stay.
     registry.assign(KeyShortcut(key: .char("j"), modifiers: [.command, .option]), to: "splitInbox", replacing: nil)
     #expect(registry.leavesToText(event("∆", "j", 38, [.command, .option]), in: window))
 
@@ -577,8 +577,8 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
     prefs.splitInbox = true
     let model = try makeModel(threads: 6)
     model.reloadList()
-    // Unclassified mail is in Important, so that tab lists every thread.
-    model.showSplit(.important)
+    // Unclassified mail with no Gmail category is in Primary, so that tab lists every thread.
+    model.showInboxTab(.primary)
     let order = model.snapshot.order
     try #require(order.count == 6 && model.cursor == order[0])
     model.setCursor(order[3], open: false)
@@ -588,7 +588,7 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
 
     // Off: the tab becomes All, which still has both threads, with the cursor where it was.
     model.setSplitInbox(false)
-    #expect(model.activeTab == .all && model.source.split == nil)
+    #expect(model.activeTab == .all && model.source.tab == nil)
     #expect(model.cursor == order[4] && model.checked == checked && model.snapshot.order == order)
 
     // On again, the list is All either way: nothing is read again.

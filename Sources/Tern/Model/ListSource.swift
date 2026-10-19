@@ -2,31 +2,14 @@ import Foundation
 import GRDB
 import TernCore
 
-/// The inbox's category tabs. "Important" is people, needs reply, calendar, security and anything the
-/// classifier hasn't seen yet, so new mail is never hidden behind a tab.
-enum InboxSplit: String, CaseIterable, Identifiable, Sendable {
-    case important, people, notifications, newsletters, other
-
-    var id: String { rawValue }
-
+extension InboxTab {
     var title: String {
         switch self {
-        case .important: "Important"
-        case .people: "People"
-        case .notifications: "Notifications"
-        case .newsletters: "Newsletters"
-        case .other: "Other"
-        }
-    }
-
-    func filter(accountId: String?) -> InboxFilter {
-        switch self {
-        case .important:
-            InboxFilter(accountId: accountId, categories: [.people, .calendar, .security], includeUncategorized: true, includeNeedsReply: true)
-        case .people: InboxFilter(accountId: accountId, categories: [.people])
-        case .notifications: InboxFilter(accountId: accountId, categories: [.notification])
-        case .newsletters: InboxFilter(accountId: accountId, categories: [.newsletter])
-        case .other: InboxFilter(accountId: accountId, categories: [.receipt, .promotion, .other])
+        case .primary: "Primary"
+        case .promotions: "Promotions"
+        case .social: "Social"
+        case .updates: "Updates"
+        case .forums: "Forums"
         }
     }
 }
@@ -34,13 +17,13 @@ enum InboxSplit: String, CaseIterable, Identifiable, Sendable {
 /// What the list column reads. One value per screen state; the list observation restarts when it changes.
 struct ListSource: Hashable, Sendable {
     var mailbox: Mailbox
-    /// The category tab, when the mailbox is the inbox and split inbox is on; nil is the whole inbox.
-    var split: InboxSplit?
+    /// Gmail's tab, when the mailbox is the inbox and its tabs are on; nil is the whole inbox.
+    var tab: InboxTab?
 
     /// Inbox slice for inbox-backed lists.
     var inboxFilter: InboxFilter? {
         guard case .inbox = mailbox.kind else { return nil }
-        return split?.filter(accountId: mailbox.accountId) ?? InboxFilter(accountId: mailbox.accountId)
+        return InboxFilter(accountId: mailbox.accountId, tab: tab)
     }
 
     /// Lists sorted by something other than date get no date groups.

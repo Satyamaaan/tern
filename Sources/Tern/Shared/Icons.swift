@@ -60,6 +60,18 @@ extension Icon {
         }
     }
 
+    /// Gmail's inbox tabs: a person for Primary (mail from people), Promotions' discount tag, a heart for
+    /// Social, Updates' bell, a quote mark for Forums' discussions.
+    static func tab(_ tab: InboxTab) -> Icon {
+        switch tab {
+        case .primary: .people
+        case .promotions: .promotion
+        case .social: .heart
+        case .updates: .notification
+        case .forums: .quote
+        }
+    }
+
     /// Inline SVG markup in `currentColor`, for the reader page (Tern's own chrome, never mail content).
     var svgMarkup: String {
         var body = ""

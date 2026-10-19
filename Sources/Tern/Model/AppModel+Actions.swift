@@ -32,6 +32,10 @@ extension AppModel {
     /// Whether the action takes threads out of the list on screen.
     func leavesList(_ action: MailAction) -> Bool {
         if isSearching { return false }
+        if case .moveToTab(let tab) = action {
+            guard case .inbox = kind, let inboxTab else { return false }
+            return inboxTab != tab
+        }
         switch (kind, action) {
         case (_, .trash), (_, .markSpam):
             if case .trash = kind { return false }
@@ -67,6 +71,7 @@ extension AppModel {
         case .addLabel: return "Labeled"
         case .removeLabel: return "Label removed"
         case .moveToLabel: return "Moved"
+        case .moveToTab(let tab): return "Moved to \(tab.title)" + suffix
         case .snooze(let until): return "Snoozed until \(SnoozeOption.detailText(until))"
         case .unsnooze: return "Unsnoozed"
         }

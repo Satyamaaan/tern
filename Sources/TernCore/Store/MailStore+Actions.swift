@@ -8,6 +8,9 @@ public enum MailAction: Codable, Hashable, Sendable {
     case removeLabel(String)
     /// Archive and add a label, like Gmail's "Move to".
     case moveToLabel(String)
+    /// Files the conversation under one of Gmail's tabs: its category label replaces any other, so Gmail
+    /// files it there too.
+    case moveToTab(InboxTab)
     case snooze(until: Date)
     case unsnooze
 
@@ -26,6 +29,7 @@ public enum MailAction: Codable, Hashable, Sendable {
         case .addLabel: "addLabel"
         case .removeLabel: "removeLabel"
         case .moveToLabel: "moveToLabel"
+        case .moveToTab: "moveToTab"
         case .snooze: "snooze"
         case .unsnooze: "unsnooze"
         }
@@ -316,6 +320,8 @@ extension MailStore {
             return all(remove: [id])
         case .moveToLabel(let id):
             return all(add: [id], remove: [SystemLabel.inbox])
+        case .moveToTab(let tab):
+            return all(add: [tab.labelId], remove: InboxTab.allCases.filter { $0 != tab }.map(\.labelId))
         case .unsnooze:
             return all(add: [SystemLabel.inbox])
         }

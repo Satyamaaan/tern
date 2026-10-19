@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// `--snapshot <dir>`: renders the main window at 1320×840 (the list in light and dark, the ⌘K palette, the
+/// `--snapshot <dir>`: renders the main window at 1320×840 (the list in light and dark, the ⌘K palette, Gmail's tabs, the
 /// reader over the list, search, an inline reply, the settings page and onboarding) into PNGs, prints speed measurements,
 /// and quits. WebKit only paints into a window on screen, so after the launch and j/k measurements the
 /// window is ordered in at 1 % opacity and click-through, without activating the app: nothing shows.
@@ -36,6 +36,7 @@ struct Snapshotter {
         render(window, appearance: .aqua, to: directory.appendingPathComponent("palette-light.png"))
         render(window, appearance: .darkAqua, to: directory.appendingPathComponent("palette-dark.png"))
         model.palette = nil
+        tabShots(window, directory)
         integrationShots(window, directory)
         if ProcessInfo.processInfo.environment["TERN_SNAPSHOT_EXTRAS"] == "1" { extras(window, directory) }
         print("Snapshots written to \(directory.path)")

@@ -64,8 +64,8 @@ final class AppModel {
 
     var scope: Scope = .all
     var kind: Mailbox.Kind = .inbox
-    /// The inbox's category tab; nil is the whole inbox (All).
-    var split: InboxSplit?
+    /// The inbox's Gmail tab; nil is the whole inbox (All). Starts on Primary when inbox tabs are on.
+    var inboxTab: InboxTab?
     var focus: Focus = .list
     /// Without the reading pane, whether the open thread covers the list.
     var readerExpanded = false
@@ -174,7 +174,8 @@ final class AppModel {
         self.store = services.store
         self.isFake = isFake
         self.databaseURL = databaseURL
-        self.source = ListSource(mailbox: .unifiedInbox, split: nil)
+        self.source = ListSource(mailbox: .unifiedInbox, tab: nil)
+        inboxTab = landingTab
     }
 
     // MARK: Derived
@@ -214,7 +215,8 @@ final class AppModel {
 
     func row(_ key: ThreadKey) -> ThreadRow? { snapshot.rows[key] }
 
-    func unreadCount(_ split: InboxSplit) -> Int { counts.unread(in: split.filter(accountId: scope.accountId)) }
+    /// Where the inbox opens: Primary with inbox tabs on, else the whole inbox.
+    var landingTab: InboxTab? { prefs.splitInbox ? .primary : nil }
 
     func account(_ id: String) -> Account? { accounts.first { $0.id == id } }
 
@@ -225,13 +227,18 @@ final class AppModel {
     /// `keepingPlace`: see `reloadList(keepingPlace:)`.
     func setScope(_ scope: Scope, keepingPlace: Bool = false) {
         guard scope != self.scope else { return }
-        if case .label = kind, scope == .all { kind = .inbox }
+        if case .label = kind, scope == .all {
+            kind = .inbox
+            inboxTab = landingTab
+        }
         self.scope = scope
         observeScope()
         reloadList(keepingPlace: keepingPlace)
     }
 
+    /// Opens a mailbox. The inbox opens on its landing tab (Primary with inbox tabs on), from wherever.
     func show(_ kind: Mailbox.Kind) {
+        if case .inbox = kind { return showInboxTab(landingTab) }
         if isSearching { endSearch(restoreFocus: false) }
         focus = .list
         readerExpanded = false
@@ -240,24 +247,24 @@ final class AppModel {
         reloadList()
     }
 
-    /// Shows the inbox, or one of its category tabs.
-    func showSplit(_ split: InboxSplit?) {
+    /// Shows the whole inbox (nil, All), or one of Gmail's tabs.
+    func showInboxTab(_ tab: InboxTab?) {
         if isSearching { endSearch(restoreFocus: false) }
         focus = .list
         readerExpanded = false
-        let split = prefs.splitInbox ? split : nil
-        if case .inbox = kind, self.split == split { return }
-        self.split = split
+        let tab = prefs.splitInbox ? tab : nil
+        if case .inbox = kind, inboxTab == tab { return }
+        inboxTab = tab
         kind = .inbox
         reloadList()
     }
 
-    /// Split Inbox on or off (Settings → Layout, the Mailbox menu). The open thread, the selection and the
-    /// list stay as they were: All is the same list either way, and a category tab turned off becomes All,
-    /// which still has its threads.
+    /// Inbox tabs on or off (Settings → Layout, the Mailbox menu). The open thread, the selection and the
+    /// list stay as they were: All is the same list either way, and a tab turned off becomes All, which
+    /// still has its threads.
     func setSplitInbox(_ enabled: Bool) {
         prefs.splitInbox = enabled
-        if !enabled { split = nil }
+        if !enabled { inboxTab = nil }
         reloadList(keepingPlace: true)
     }
 

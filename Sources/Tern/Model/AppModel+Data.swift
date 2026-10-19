@@ -21,23 +21,28 @@ extension AppModel {
                 self.projects = projects
                 self.services.projects = projects
             }
-        observeScope()
+        observeScope(immediate: true)
         reloadList()
     }
 
-    /// Counts and labels depend on the account in scope.
-    func observeScope() {
+    /// Counts and labels depend on the account in scope. At launch (`immediate`) the first counts are read
+    /// before the window first draws, one pass over the inbox's index, so the tabs that have mail are there in
+    /// the first frame instead of moving in after it; after that they arrive off the main thread.
+    func observeScope(immediate: Bool = false) {
         let reader = store.database.reader
         let accountId = scope.accountId
-        countsObservation = ValueObservation
+        let receive: (ScopeCounts) -> Void = { [weak self] counts in
+            guard let self else { return }
+            self.counts = counts
+            let badge = counts.allAccountsInboxUnread
+            NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
+        }
+        let observation = ValueObservation
             .tracking { db in try MailStore.fetchScopeCounts(db, accountId: accountId) }
             .removeDuplicates()
-            .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
-                guard let self else { return }
-                self.counts = counts
-                let badge = counts.allAccountsInboxUnread
-                NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
-            }
+        countsObservation = immediate
+            ? observation.startRestarting(in: reader, scheduling: .immediate, onError: Self.log, onChange: receive)
+            : observation.startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log, onChange: receive)
         guard let accountId else {
             labelsObservation = nil
             labels = []
@@ -65,12 +70,12 @@ extension AppModel {
 
     // MARK: The list
 
-    /// Starts reading a different list (mailbox, scope or split changed), from its first row. With
-    /// `keepingPlace` (a setting changed under the open thread, like Split Inbox) the cursor and the selection
+    /// Starts reading a different list (mailbox, scope or tab changed), from its first row. With
+    /// `keepingPlace` (a setting changed under the open thread, like Inbox Tabs) the cursor and the selection
     /// stay on the threads the new list still has, so the open thread stays open as it was, and the same list
     /// isn't read again at all.
     func reloadList(keepingPlace: Bool = false) {
-        let next = ListSource(mailbox: mailbox, split: kind == .inbox && prefs.splitInbox ? split : nil)
+        let next = ListSource(mailbox: mailbox, tab: kind == .inbox && prefs.splitInbox ? inboxTab : nil)
         if keepingPlace, next == source, listLoaded { return }
         source = next
         pendingCursor = nil

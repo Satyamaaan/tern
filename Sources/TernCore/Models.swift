@@ -308,13 +308,16 @@ public struct MailThread: TernRecord, Hashable, Identifiable {
     public var participants: [Participant]
     /// Union of all message labels.
     public var labelIds: [String]
+    /// The Gmail tab its category labels put it in (`InboxTab.gmailTab`); nil when Gmail hasn't categorised it.
+    public var gmailTab: InboxTab?
 
     public var key: ThreadKey { ThreadKey(accountId: accountId, threadId: id) }
 }
 
 // MARK: - AI classification, projects, snooze
 
-/// Split-inbox buckets. Assigned by rules first, refined by the AI classifier.
+/// What Tern's classifier makes of a thread: the row's chip, and the inbox tab of threads Gmail hasn't
+/// categorised (`InboxTab.init(fallback:)`). Assigned by rules first, refined by the AI classifier.
 public enum MailCategory: String, Codable, Sendable, CaseIterable, DatabaseValueConvertible {
     /// A real person wrote to you.
     case people

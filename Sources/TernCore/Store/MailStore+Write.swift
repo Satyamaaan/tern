@@ -174,7 +174,8 @@ extension MailStore {
 
     // MARK: Threads
 
-    /// Rebuilds thread rows and their label index from messages. A thread with no messages left is removed.
+    /// Rebuilds thread rows and their label index (with the thread's Gmail tab) from messages. A thread
+    /// with no messages left is removed.
     public static func refreshThreads(_ db: Database, _ keys: some Collection<ThreadKey>) throws {
         guard !keys.isEmpty else { return }
         let select = try db.cachedStatement(sql: """
@@ -184,7 +185,7 @@ extension MailStore {
             """)
         let deleteLabels = try db.cachedStatement(sql: "DELETE FROM thread_label WHERE accountId = ? AND threadId = ?")
         let insertLabel = try db.cachedStatement(sql: """
-            INSERT INTO thread_label (accountId, threadId, labelId, lastDate) VALUES (?, ?, ?, ?)
+            INSERT INTO thread_label (accountId, threadId, labelId, lastDate, gmailTab) VALUES (?, ?, ?, ?, ?)
             """)
 
         for key in keys {
@@ -197,7 +198,7 @@ extension MailStore {
             try thread.upsert(db)
             try deleteLabels.execute(arguments: [key.accountId, key.threadId])
             for label in thread.labelIds {
-                try insertLabel.execute(arguments: [key.accountId, key.threadId, label, thread.lastDate.timeIntervalSince1970])
+                try insertLabel.execute(arguments: [key.accountId, key.threadId, label, thread.lastDate.timeIntervalSince1970, thread.gmailTab])
             }
         }
     }
@@ -255,7 +256,8 @@ extension MailStore {
             hasAttachments: visible.contains(where: \.hasAttachments),
             hasDraft: parts.contains(where: \.isDraft),
             participants: participants,
-            labelIds: labels.sorted())
+            labelIds: labels.sorted(),
+            gmailTab: InboxTab.gmailTab(sent.map { ($0.labelIds, $0.isFromMe) }))
     }
 
     // MARK: Contacts

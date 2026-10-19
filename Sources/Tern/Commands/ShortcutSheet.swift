@@ -118,7 +118,7 @@ enum ShortcutTable {
         "star": "Star or Unstar",
         "unread": "Mark Read or Unread",
         "needsReply": "Needs Reply",
-        "splitInbox": "Split Inbox",
+        "splitInbox": "Inbox Tabs",
         "toggleSidebar": "Show or Hide Sidebar",
         "readingPane": "Show or Hide Reading Pane",
         "appearance.toggle": "Switch Light and Dark",

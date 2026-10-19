@@ -2,7 +2,7 @@ import AppKit
 import TernCore
 
 /// The settings page in the main window and edited shortcuts: opening and closing it leaves the mail as it
-/// was (whatever Layout changed, Split Inbox included, and with the keyboard back in the field it was in, also
+/// was (whatever Layout changed, Inbox Tabs included, and with the keyboard back in the field it was in, also
 /// when ⌘K opened it), mail keys and the palette's mail entries do nothing while it is open, a changed shortcut
 /// fires from the keyboard and the menu bar while the old key no longer does, the reader page follows edited
 /// keys, and a mail command's ⌃ key never fires while typing.
@@ -25,7 +25,7 @@ extension SelfCheck {
         defer { model.prefs.readingPane = pane }
         model.prefs.readingPane = false
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let order = model.snapshot.order
         guard order.count > 4 else { return check("settings: rows", false) }
@@ -60,7 +60,7 @@ extension SelfCheck {
         defer { model.prefs.readingPane = pane }
         model.prefs.readingPane = false
         model.show(.inbox)
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let order = model.snapshot.order
         guard order.count > 4 else { return check("settings layout: rows", false) }
@@ -95,8 +95,8 @@ extension SelfCheck {
               !model.readerVisible && model.focus == .list && window.firstResponder === table)
     }
 
-    /// Split Inbox switched in Layout leaves the open conversation as it was: on All (the same list either way) and
-    /// on a category tab (which becomes All, still holding the thread), with its find bar still open.
+    /// Inbox Tabs switched in Layout leaves the open conversation as it was: on All (the same list either way) and
+    /// on a Gmail tab (which becomes All, still holding the thread), with its find bar still open.
     private func settingsSplitInbox() {
         let pane = model.prefs.readingPane, split = model.prefs.splitInbox
         defer {
@@ -105,13 +105,13 @@ extension SelfCheck {
         }
         model.prefs.readingPane = false
         if !model.prefs.splitInbox { model.setSplitInbox(true) }
-        guard let reader = model.services.reader.model else { return check("split inbox: a reader", false) }
+        guard let reader = model.services.reader.model else { return check("inbox tabs: a reader", false) }
 
-        func roundTrip(_ tab: InboxSplit?, _ name: String) {
-            model.showSplit(tab)
+        func roundTrip(_ tab: InboxTab?, _ name: String) {
+            model.showInboxTab(tab)
             wait(0.2)
             let order = model.snapshot.order
-            guard order.count > 4 else { return check("split inbox \(name): rows", false) }
+            guard order.count > 4 else { return check("inbox tabs \(name): rows", false) }
             let thread = order[3]
             model.click(thread, command: false, shift: false)
             wait(0.3)
@@ -121,7 +121,7 @@ extension SelfCheck {
             wait(0.1)
             model.setSplitInbox(false)
             wait(0.2)
-            check("Split Inbox off in Layout keeps the conversation open in All (\(name))",
+            check("Inbox Tabs off in Layout keeps the conversation open in All (\(name))",
                   model.activeTab == .all && model.cursor == thread && reader.key == thread && reader.findVisible && model.readerExpanded)
             model.setSplitInbox(true)
             wait(0.2)
@@ -133,7 +133,7 @@ extension SelfCheck {
             wait(0.2)
         }
         roundTrip(nil, "All")
-        roundTrip(.important, "a category tab")
+        roundTrip(.primary, "a Gmail tab")
     }
 
     /// The find bar and an inline reply get the keyboard back, not the page around them, also when Settings is
@@ -142,7 +142,7 @@ extension SelfCheck {
         let pane = model.prefs.readingPane
         defer { model.prefs.readingPane = pane }
         model.prefs.readingPane = false
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let order = model.snapshot.order
         guard order.count > 4, let reader = model.services.reader.model else { return check("settings typing: a thread", false) }
@@ -189,7 +189,7 @@ extension SelfCheck {
     }
 
     private func settingsKeys() {
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         model.moveToTop()
         model.focusList()
@@ -257,7 +257,7 @@ extension SelfCheck {
 
     private func editedShortcuts() {
         let saved = registry.overrides
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         model.moveToTop()
         model.focusList()
@@ -310,7 +310,7 @@ extension SelfCheck {
         let pane = model.prefs.readingPane
         defer { model.prefs.readingPane = pane }
         model.prefs.readingPane = false
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let order = model.snapshot.order
         guard order.count > 4 else { return check("reader keys: rows", false) }
@@ -370,7 +370,7 @@ extension SelfCheck {
     private func typingKeepsTextKeys() {
         let saved = registry.overrides
         defer { registry.restore(saved) }
-        model.showSplit(.people)
+        model.showInboxTab(.primary)
         wait(0.2)
         let control = KeyShortcut(key: .char("g"), modifiers: .control)
         registry.assign(control, to: "trash", replacing: nil)
@@ -396,12 +396,12 @@ extension SelfCheck {
               && model.palette == .commands)
         model.palette = nil
         wait(0.1)
-        // Split Inbox with a ⌥⌘ key: typing keeps the key, and the tabs and the list stay.
+        // Inbox Tabs with a ⌥⌘ key: typing keeps the key, and the tabs and the list stay.
         registry.assign(KeyShortcut(key: .char("j"), modifiers: [.command, .option]), to: "splitInbox", replacing: nil)
         model.beginSearch()
         if waitUntil(1, { KeyRouter.textInput(in: window) != nil }) {
             let split = model.prefs.splitInbox, tabs = model.tabs
-            check("a Split Inbox key doesn't fire from the menu bar while typing",
+            check("an Inbox Tabs key doesn't fire from the menu bar while typing",
                   NSApp.mainMenu?.performKeyEquivalent(with: event("∆", "j", 38, [.command, .option])) == false
                     && model.prefs.splitInbox == split && model.tabs == tabs)
         }

@@ -26,7 +26,7 @@ struct TitleBar: View {
 
 // MARK: - Tabs
 
-/// All, Needs reply, the category tabs and pinned tabs; what doesn't fit moves into `…`. The tab of an
+/// All, Needs reply, Gmail's tabs and pinned tabs; what doesn't fit moves into `…`. The tab of an
 /// open mailbox or search that isn't a tab shows at the end while it is open.
 struct TabBar: View {
     @Environment(AppModel.self) private var model
@@ -142,7 +142,7 @@ struct TabButton: View {
         switch tab {
         case .all: return model.registry?.hint(title, "tab.all") ?? title
         case .needsReply: return model.registry?.hint(title, "tab.needsReply") ?? title
-        case .split(let split): return model.registry?.hint(title, "split.\(split.rawValue)") ?? title
+        case .category(let tab): return model.registry?.hint(title, "tab.\(tab.rawValue)") ?? title
         default: return title
         }
     }
@@ -155,11 +155,7 @@ extension ListTab {
         switch self {
         case .all: (.inbox, Theme.text2)
         case .needsReply: (.needsReply, Theme.ink)
-        case .split(.important): (.important, Theme.importantColor)
-        case .split(.people): (.people, Theme.categoryColor(.people))
-        case .split(.notifications): (.notification, Theme.categoryColor(.notification))
-        case .split(.newsletters): (.newsletter, Theme.categoryColor(.newsletter))
-        case .split(.other): (.other, Theme.text3)
+        case .category(let tab): (Icon.tab(tab), Theme.tabColor(tab))
         case .project(let id):
             model.project(id).map { (Icon.project($0.icon), Theme.projectColor($0.colorIndex)) } ?? (.folder, Theme.text2)
         case .label: (.label, Theme.text2)
@@ -283,7 +279,7 @@ private struct MoreTabsButton: View {
         let densityItem = NSMenuItem(title: "Density", action: nil, keyEquivalent: "")
         densityItem.submenu = density
         menu.addItem(densityItem)
-        let split = ClosureMenuItem("Split Inbox") { model.setSplitInbox(!model.prefs.splitInbox) }
+        let split = ClosureMenuItem("Inbox Tabs") { model.setSplitInbox(!model.prefs.splitInbox) }
         split.state = model.prefs.splitInbox ? .on : .off
         menu.addItem(split)
         let pane = ClosureMenuItem("Reading Pane", shortcut: model.registry?["readingPane"]) { model.toggleReadingPane() }

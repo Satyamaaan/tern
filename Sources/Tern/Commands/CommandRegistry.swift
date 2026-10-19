@@ -130,6 +130,15 @@ final class CommandRegistry {
                     isEnabled: { !m.undoStack.isEmpty }) { m.undoLast() },
         ]
 
+        // Gmail's tabs: palette and the row and reader menus (`ThreadMenu.moveToTabItem`), no menu bar items.
+        for tab in InboxTab.allCases {
+            list.append(Command(id: "moveToTab.\(tab.rawValue)", title: "Move to \(tab.title)", group: .actions,
+                                aliases: ["tab", "category", "move to tab"],
+                                isEnabled: { m.prefs.splitInbox && m.targets.contains { m.row($0)?.inboxTab != tab } }) {
+                m.perform(.moveToTab(tab), on: m.targets)
+            })
+        }
+
         // File
         list += [
             Command(id: "compose", title: "New Message", group: .actions, keys: [.key("c"), .command("n")], menu: .file,
@@ -152,8 +161,9 @@ final class CommandRegistry {
                     isEnabled: { !m.snapshot.isEmpty }) { m.markAllRead() },
             Command(id: "newProject", title: "New Project…", group: .projects, keys: [.command("p", shift: true)], menu: .mailbox, section: 2,
                     aliases: ["create project"], isTextSafe: true) { m.newProject() },
-            Command(id: "splitInbox", title: "Split Inbox", group: .settings, menu: .mailbox, section: 2,
-                    currentTitle: { m.prefs.splitInbox ? "Turn Off Split Inbox" : "Turn On Split Inbox" }) { m.setSplitInbox(!m.prefs.splitInbox) },
+            Command(id: "splitInbox", title: "Inbox Tabs", group: .settings, menu: .mailbox, section: 2,
+                    aliases: ["split inbox", "primary", "promotions", "social", "updates", "forums", "categories"],
+                    currentTitle: { m.prefs.splitInbox ? "Turn Off Inbox Tabs" : "Turn On Inbox Tabs" }) { m.setSplitInbox(!m.prefs.splitInbox) },
         ]
 
         // Scope
@@ -208,10 +218,10 @@ final class CommandRegistry {
             Command(id: "tab.needsReply", title: "Needs Reply Tab", group: .goTo, keys: [.option("2")], menu: .go, section: 4,
                     aliases: ["tab", "waiting"], hiddenInPalette: true) { m.select(.needsReply) },
         ]
-        for (index, split) in InboxSplit.allCases.enumerated() {
-            list.append(Command(id: "split.\(split.rawValue)", title: split.title, group: .goTo, keys: [.option("\(index + 3)")],
-                                menu: .go, section: 4, aliases: ["split", "tab"],
-                                isEnabled: { m.prefs.splitInbox }) { m.showSplit(split) })
+        for (index, tab) in InboxTab.allCases.enumerated() {
+            list.append(Command(id: "tab.\(tab.rawValue)", title: tab.title, group: .goTo, keys: [.option("\(index + 3)")],
+                                menu: .go, section: 4, aliases: ["tab", "inbox", "category"],
+                                isEnabled: { m.prefs.splitInbox }) { m.showInboxTab(tab) })
         }
 
         // View

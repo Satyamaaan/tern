@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-// Settings → Layout: the reading pane and the sidebar (⌘\ and ⌃⌘S), split inbox and the pinned tabs.
+// Settings → Layout: the reading pane and the sidebar (⌘\ and ⌃⌘S), the inbox tabs and the pinned tabs.
 
 struct ReadingPaneItem: View {
     @Environment(AppModel.self) private var model
@@ -29,7 +29,7 @@ struct SplitInboxItem: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        SettingsRow(title: "Split inbox", detail: "Important, People, Notifications, Newsletters and Other as tabs.") {
+        SettingsRow(title: "Inbox tabs", detail: "Primary, Promotions, Social, Updates and Forums, like Gmail.") {
             InkToggle(isOn: Binding(get: { model.prefs.splitInbox }, set: { model.setSplitInbox($0) }))
         }
     }
