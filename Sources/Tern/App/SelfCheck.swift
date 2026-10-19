@@ -35,6 +35,7 @@ final class SelfCheck {
         previews()
         triage()
         multiSelect()
+        archiveMailbox()
         clicks()
         paging()
         dropOnProject()
@@ -378,7 +379,7 @@ final class SelfCheck {
 
     // MARK: Helpers
 
-    private func isInInbox(_ key: ThreadKey) throws -> Bool {
+    func isInInbox(_ key: ThreadKey) throws -> Bool {
         try model.store.database.reader.read { db in
             try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM thread_label WHERE accountId = ? AND threadId = ? AND labelId = 'INBOX')",
                               arguments: [key.accountId, key.threadId]) ?? false
