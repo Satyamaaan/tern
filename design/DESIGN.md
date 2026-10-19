@@ -195,7 +195,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 - A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
   selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label (every
   other category comes off, also one Gmail adds before the move lands), so Gmail files it there too, and like
-  archive the row leaves a tab it no longer belongs to, with undo.
+  archive the row leaves a tab it no longer belongs to, with undo: each message goes back to the tab it was in
+  when you moved it, also in Gmail.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
 - Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a

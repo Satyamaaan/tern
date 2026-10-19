@@ -65,28 +65,27 @@ extension MailStore {
 
     // MARK: Reconciliation
 
-    /// Label ops Gmail hasn't confirmed yet (pending or inflight), oldest first, with their payloads.
-    private static func unconfirmedLabelOps(_ db: Database, accountId: String) throws -> [(op: PendingOp, payload: LabelOpPayload)] {
-        try PendingOp
+    /// Label changes of ops Gmail hasn't confirmed yet (pending or inflight), oldest first, by message id.
+    public static func unconfirmedLabelChanges(_ db: Database, accountId: String, messageIds: Set<String>? = nil) throws -> [String: [LabelChange]] {
+        let ops = try PendingOp
             .filter(Column("accountId") == accountId && Column("kind") == PendingOp.Kind.modifyLabels.rawValue
                 && Column("state") != PendingOp.State.failed.rawValue)
             .order(Column("id"))
             .fetchAll(db)
-            .compactMap { op in
-                guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else { return nil }
-                return (op, payload)
+        var result: [String: [LabelChange]] = [:]
+        for op in ops {
+            guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else { continue }
+            for change in payload.changes where messageIds?.contains(change.messageId) ?? true {
+                result[change.messageId, default: []].append(change)
             }
+        }
+        return result
     }
 
     /// Writes messages fetched from Gmail, then replays unconfirmed local changes on top so a user
     /// action never visibly reverts while its op is still queued. Downloaded attachment paths are kept.
     /// Rules run for the touched threads (`applyRules`).
     public static func upsertServerMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment] = []) throws {
-        try upsertServerMessages(db, messages, attachments: attachments, labelsFromGmail: true)
-    }
-
-    /// `labelsFromGmail` is false when the messages carry the labels stored here (`upsertServerBodies`).
-    private static func upsertServerMessages(_ db: Database, _ messages: [MailMessage], attachments: [MailAttachment], labelsFromGmail: Bool) throws {
         guard !messages.isEmpty || !attachments.isEmpty else { return }
         var attachments = attachments
         if !attachments.isEmpty {
@@ -109,7 +108,7 @@ extension MailStore {
         }
         let touched = try upsertMessages(db, messages, attachments: attachments)
         for (accountId, items) in Dictionary(grouping: messages, by: \.accountId) {
-            try reapplyUnconfirmedChanges(db, accountId: accountId, messageIds: Set(items.map(\.id)), labelsFromGmail: labelsFromGmail)
+            try reapplyUnconfirmedChanges(db, accountId: accountId, messageIds: Set(items.map(\.id)))
         }
         try applyRules(db, keys: touched)
     }
@@ -138,7 +137,7 @@ extension MailStore {
         let kept = Set(keep.map(\.key))
         try upsertServerMessages(db, keep, attachments: attachments.filter {
             kept.contains(MessageKey(accountId: $0.accountId, messageId: $0.messageId))
-        }, labelsFromGmail: false)
+        })
         return skipped
     }
 
@@ -148,12 +147,15 @@ extension MailStore {
     public static func applyServerLabels(_ db: Database, accountId: String, _ labelsByMessage: [String: [String]]) throws {
         guard !labelsByMessage.isEmpty else { return }
         let ids = Array(labelsByMessage.keys)
+        let changes = try unconfirmedLabelChanges(db, accountId: accountId, messageIds: Set(ids))
         var current: [String: [String]] = [:]
         for chunk in chunked(ids, 500) { current.merge(try messageLabels(db, accountId: accountId, messageIds: chunk)) { $1 } }
-        let ops = try unconfirmedLabelOps(db, accountId: accountId)
-        let replayed = try replaying(ops, on: labelsByMessage.filter { current[$0.key] != nil }, labelsFromGmail: true, db)
         var updates: [String: [String]] = [:]
-        for (id, labels) in replayed where labels != Set(current[id] ?? []) { updates[id] = Array(labels) }
+        for (id, server) in labelsByMessage {
+            guard let stored = current[id] else { continue }
+            let labels = applying(changes[id] ?? [], to: server)
+            if labels != Set(stored) { updates[id] = Array(labels) }
+        }
         try applyRules(db, keys: try setLabels(db, accountId: accountId, updates))
     }
 
@@ -162,46 +164,26 @@ extension MailStore {
         try applyRules(db, keys: try deleteMessages(db, accountId: accountId, ids: ids))
     }
 
-    /// Re-applies unconfirmed label changes on top of what's stored for `messageIds`, which is what Gmail
-    /// has unless `labelsFromGmail` is false.
-    public static func reapplyUnconfirmedChanges(_ db: Database, accountId: String, messageIds: Set<String>, labelsFromGmail: Bool = true) throws {
-        let ops = try unconfirmedLabelOps(db, accountId: accountId)
-        let touched = Set(ops.flatMap { $0.payload.changes.map(\.messageId) }).intersection(messageIds)
-        guard !touched.isEmpty else { return }
-        let stored = try messageLabels(db, accountId: accountId, messageIds: Array(touched))
-        let replayed = try replaying(ops, on: stored, labelsFromGmail: labelsFromGmail, db)
+    /// Re-applies unconfirmed label changes on top of what's stored for `messageIds`.
+    public static func reapplyUnconfirmedChanges(_ db: Database, accountId: String, messageIds: Set<String>) throws {
+        let changes = try unconfirmedLabelChanges(db, accountId: accountId, messageIds: messageIds)
+        guard !changes.isEmpty else { return }
+        let current = try messageLabels(db, accountId: accountId, messageIds: Array(changes.keys))
         var updates: [String: [String]] = [:]
-        for (id, labels) in replayed where labels != Set(stored[id] ?? []) { updates[id] = Array(labels) }
+        for (id, stored) in current {
+            let labels = applying(changes[id] ?? [], to: stored)
+            if labels != Set(stored) { updates[id] = Array(labels) }
+        }
         try setLabels(db, accountId: accountId, updates)
     }
 
-    /// `labels` with the changes of `ops` (unconfirmed, oldest first) replayed in order, each as asked
-    /// (`LabelChange.requestAdd`, `requestRemove`). On Gmail's labels, a change that carries an intent and Gmail
-    /// hasn't made yet is measured again and its op saved: it keeps Move to tab's category over one Gmail filed the
-    /// message under meanwhile, and undo then puts back what Gmail has now, not what it had when the user acted.
-    private static func replaying(_ ops: [(op: PendingOp, payload: LabelOpPayload)], on labels: [String: [String]],
-                                  labelsFromGmail: Bool, _ db: Database) throws -> [String: Set<String>] {
-        var result = labels.mapValues(Set.init)
-        guard !result.isEmpty else { return result }
-        for (op, original) in ops {
-            var payload = original
-            for index in payload.changes.indices {
-                let change = payload.changes[index]
-                guard var current = result[change.messageId] else { continue }
-                let made = Set(change.requestAdd).isSubset(of: current) && Set(change.requestRemove).isDisjoint(with: current)
-                if labelsFromGmail, change.intentAdd != nil || change.intentRemove != nil, !made {
-                    payload.changes[index].add = change.requestAdd.filter { !current.contains($0) }
-                    payload.changes[index].remove = change.requestRemove.filter { current.contains($0) }
-                }
-                current.subtract(change.requestRemove)
-                current.formUnion(change.requestAdd)
-                result[change.messageId] = current
-            }
-            if payload != original {
-                var saved = op
-                saved.payload = try encodeJSON(payload)
-                try saved.update(db)
-            }
+    /// Each change as asked (`LabelChange.requestAdd`, `requestRemove`): Move to tab keeps its category over one
+    /// Gmail filed the message under before the op landed.
+    private static func applying(_ changes: [LabelChange], to labels: [String]) -> Set<String> {
+        var result = Set(labels)
+        for change in changes {
+            result.subtract(change.requestRemove)
+            result.formUnion(change.requestAdd)
         }
         return result
     }

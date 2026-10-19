@@ -44,8 +44,8 @@ design/               research and the visual spec (DESIGN.md)
 - `MailStore.perform(_:on:)` / `undo(_:)` — optimistic actions. Each writes one `PendingOp` per account
   with a `LabelOpPayload` of exact per-message label changes. Move to tab also records what it asks of Gmail
   (`LabelChange.intentAdd`/`intentRemove`: every other category comes off): that is what is sent and what sync
-  replays over Gmail's newer labels, while `add`/`remove` stay what undo takes back (measured again when Gmail
-  refiles the message before the op lands).
+  replays over Gmail's newer labels. Its undo is a move back, not a reverse: each message to the category it had
+  when the user acted (none: all off), with the same intent, whatever Gmail filed it under meanwhile.
 - `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads. Scope counts
   (`fetchScopeCounts`) are a pass over the scope's whole inbox, so they are only ever read off the main thread;
   the tab bar's Gmail tabs come from a bounded probe (`fetchTabsWithMail`) when the scope is set.

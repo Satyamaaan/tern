@@ -220,7 +220,23 @@ func probingTheTabsStaysCheapOnAVeryLargeInbox() throws {
 
 // MARK: Move to tab
 
-@Test func moveToTabSwapsTheCategoryLabelsAndUndoPutsThemBack() throws {
+private func labels(_ store: MailStore, _ id: String) throws -> Set<String> {
+    Set(try store.database.reader.read { db in try MailStore.messageLabels(db, accountId: me.id, messageIds: [id]) }[id] ?? [])
+}
+
+private func payloads(_ store: MailStore) throws -> [LabelOpPayload] {
+    try store.database.reader.read { db in try PendingOp.order(Column("id")).fetchAll(db) }
+        .map { try JSONDecoder().decode(LabelOpPayload.self, from: Data($0.payload.utf8)) }
+}
+
+private func fromGmail(_ store: MailStore, _ labels: [String: [String]]) throws {
+    try store.database.writer.write { db in try MailStore.applyServerLabels(db, accountId: me.id, labels) }
+}
+
+/// Every category but `tab`'s (all five without one).
+private func others(_ tab: InboxTab?) -> [String] { InboxTab.allCases.filter { $0 != tab }.map(\.labelId) }
+
+@Test func moveToTabSwapsTheCategoryLabelsAndUndoMovesThemBack() throws {
     let store = try store([
         message("p1", thread: "p", at: 100, labels: [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.unread]),
         message("p2", thread: "p", at: 200, labels: [SystemLabel.sent], fromMe: true),
@@ -229,64 +245,55 @@ func probingTheTabsStaysCheapOnAVeryLargeInbox() throws {
     let token = try store.perform(.moveToTab(.primary), on: [key("p")])
     #expect(try thread(store, "p")?.gmailTab == .primary)
 
-    let ops = try store.database.reader.read { db in try PendingOp.fetchAll(db) }
-    try #require(ops.count == 1)
-    let payload = try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[0].payload.utf8))
-    #expect(payload.action == "moveToTab" && payload.threadIds == ["p"])
+    let move = try payloads(store)
+    try #require(move.count == 1)
+    #expect(move[0].action == "moveToTab" && move[0].threadIds == ["p"])
     // Here only the label the message had comes off; Gmail is asked to take off every other category. Drafts are
     // left alone, like every label action.
-    let others = [SystemLabel.categoryPromotions, SystemLabel.categorySocial, SystemLabel.categoryUpdates, SystemLabel.categoryForums]
-    #expect(Set(payload.changes) == [
+    #expect(Set(move[0].changes) == [
         LabelChange(messageId: "p1", add: [SystemLabel.categoryPersonal], remove: [SystemLabel.categoryPromotions],
-                    intentAdd: [SystemLabel.categoryPersonal], intentRemove: others),
+                    intentAdd: [SystemLabel.categoryPersonal], intentRemove: others(.primary)),
         LabelChange(messageId: "p2", add: [SystemLabel.categoryPersonal], remove: [],
-                    intentAdd: [SystemLabel.categoryPersonal], intentRemove: others),
+                    intentAdd: [SystemLabel.categoryPersonal], intentRemove: others(.primary)),
     ])
     let primary = try store.database.reader.read { db in
         try MailStore.fetchInboxRows(db, InboxFilter(tab: .primary), limit: 10).map(\.thread.id)
     }
     #expect(primary == ["p"])
 
-    // Not sent yet: undo drops the op and restores the labels exactly.
+    // Not sent yet: undo drops the move and queues a move back, as a move: each message to the category it had,
+    // every other one off (all of them for p2, which had none). The labels here are as they were.
     try store.undo(token)
-    #expect(try store.database.reader.read { db in try PendingOp.fetchCount(db) } == 0)
+    let back = try payloads(store)
+    try #require(back.count == 1)
+    #expect(back[0].action == "undo-moveToTab")
+    #expect(Set(back[0].changes) == [
+        LabelChange(messageId: "p1", add: [SystemLabel.categoryPromotions], remove: [SystemLabel.categoryPersonal],
+                    intentAdd: [SystemLabel.categoryPromotions], intentRemove: others(.promotions)),
+        LabelChange(messageId: "p2", add: [], remove: [SystemLabel.categoryPersonal], intentAdd: [], intentRemove: others(nil)),
+    ])
     #expect(try thread(store, "p")?.gmailTab == .promotions)
-    let labels = try store.database.reader.read { db in try MailStore.messageLabels(db, accountId: me.id, messageIds: ["p1", "p2"]) }
-    #expect(Set(labels["p1"] ?? []) == [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.unread])
-    #expect(labels["p2"] == [SystemLabel.sent])
+    #expect(try labels(store, "p1") == [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.unread])
+    #expect(try labels(store, "p2") == [SystemLabel.sent])
 }
 
-@Test func undoingAMoveGmailMayHaveSeenQueuesTheReverse() throws {
+@Test func undoingAMoveGmailMayHaveSeenSendsTheMoveBackAfterIt() throws {
     let store = try store([message("s1", thread: "s", at: 100, labels: [SystemLabel.inbox, SystemLabel.categorySocial])])
     let token = try store.perform(.moveToTab(.forums), on: [key("s")])
     try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET dispatched = 1") }
     try store.undo(token)
-    let ops = try store.database.reader.read { db in try PendingOp.order(Column("id")).fetchAll(db) }
+    let ops = try payloads(store)
     try #require(ops.count == 2)
-    let reverse = try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[1].payload.utf8))
-    #expect(reverse.action == "undo-moveToTab")
-    #expect(reverse.changes == [LabelChange(messageId: "s1", add: [SystemLabel.categorySocial], remove: [SystemLabel.categoryForums])])
+    #expect(ops[1].action == "undo-moveToTab")
+    #expect(ops[1].changes == [LabelChange(messageId: "s1", add: [SystemLabel.categorySocial], remove: [SystemLabel.categoryForums],
+                                           intentAdd: [SystemLabel.categorySocial], intentRemove: others(.social))])
     #expect(try thread(store, "s")?.gmailTab == .social)
 }
 
-// A move Gmail hasn't confirmed yet, while Gmail files the message under another category (history brings it in
-// before the op is sent): the move holds here and in what is sent, and undo puts back what Gmail has.
+// A move Gmail hasn't confirmed yet while Gmail files the message under another category (history brings it in):
+// the move holds here and in what is sent, and undo moves it back to the tab it was in when the user moved it.
 
-private func labels(_ store: MailStore, _ id: String) throws -> Set<String> {
-    Set(try store.database.reader.read { db in try MailStore.messageLabels(db, accountId: me.id, messageIds: [id]) }[id] ?? [])
-}
-
-private func onlyOp(_ store: MailStore) throws -> LabelOpPayload {
-    let ops = try store.database.reader.read { db in try PendingOp.fetchAll(db) }
-    try #require(ops.count == 1)
-    return try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[0].payload.utf8))
-}
-
-private func fromGmail(_ store: MailStore, _ labels: [String: [String]]) throws {
-    try store.database.writer.write { db in try MailStore.applyServerLabels(db, accountId: me.id, labels) }
-}
-
-@Test func aCategoryGmailAddsBeforeTheMoveIsSentDoesNotUndoIt() throws {
+@Test func aCategoryGmailAddsBeforeTheMoveIsSentDoesNotWinAndUndoMovesItBack() throws {
     let store = try store([message("m1", thread: "m", at: 100, labels: [SystemLabel.inbox, SystemLabel.categoryPromotions])])
     let token = try store.perform(.moveToTab(.forums), on: [key("m")])
 
@@ -294,53 +301,67 @@ private func fromGmail(_ store: MailStore, _ labels: [String: [String]]) throws 
     try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.categoryPersonal]])
     #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryForums])
     #expect(try thread(store, "m")?.gmailTab == .forums)
-    let change = try #require(try onlyOp(store).changes.first)
-    #expect(Set(change.requestRemove).isSuperset(of: [SystemLabel.categoryPromotions, SystemLabel.categoryPersonal]))
-    // What the move now changes on Gmail's labels, for undo.
-    #expect(Set(change.remove) == [SystemLabel.categoryPromotions, SystemLabel.categoryPersonal] && change.add == [SystemLabel.categoryForums])
+    #expect(Set(try payloads(store)[0].changes[0].requestRemove) == Set(others(.forums)))
 
-    // The same labels again, and the echo of the move once Gmail has made it, leave that record alone.
-    try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.categoryPersonal]])
-    try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryForums]])
-    #expect(try onlyOp(store).changes.first == change)
-
-    // Not sent: undo drops the op and leaves the labels Gmail has.
     try store.undo(token)
-    #expect(try store.database.reader.read { db in try PendingOp.fetchCount(db) } == 0)
-    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.categoryPersonal])
+    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPromotions])
+    #expect(try payloads(store).map(\.action) == ["undo-moveToTab"])
+    // Gmail's newer labels again: the move back holds over them too.
+    try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryPromotions, SystemLabel.categoryPersonal]])
+    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPromotions])
 }
 
-@Test func undoAfterGmailRefiledTheMessageMeanwhilePutsBackGmailsCategory() throws {
+@Test func undoWhileTheMoveIsOnItsWayHoldsOverGmailsRefile() throws {
+    // The reviewer's case: Promotions → Forums is on its way, undo queues the move back, then history shows Gmail
+    // had moved it to Primary first. Both ops replay over that: Promotions alone.
     let store = try store([message("m1", thread: "m", at: 100, labels: [SystemLabel.inbox, SystemLabel.categoryPromotions])])
     let token = try store.perform(.moveToTab(.forums), on: [key("m")])
-    // Gmail moves it from Promotions to Primary, and the op has been sent since.
-    try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryPersonal]])
-    #expect(try thread(store, "m")?.gmailTab == .forums)
-    try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET dispatched = 1") }
-
+    try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight', dispatched = 1") }
     try store.undo(token)
-    let ops = try store.database.reader.read { db in try PendingOp.order(Column("id")).fetchAll(db) }
-    try #require(ops.count == 2)
-    let reverse = try JSONDecoder().decode(LabelOpPayload.self, from: Data(ops[1].payload.utf8))
-    #expect(reverse.changes == [LabelChange(messageId: "m1", add: [SystemLabel.categoryPersonal], remove: [SystemLabel.categoryForums])])
-    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPersonal])
+    try fromGmail(store, ["m1": [SystemLabel.inbox, SystemLabel.categoryPersonal]])
+    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPromotions])
+    let ops = try payloads(store)
+    #expect(ops.map(\.action) == ["moveToTab", "undo-moveToTab"])
+    #expect(Set(ops[1].changes[0].requestRemove) == Set(others(.promotions)), "Primary comes off in Gmail too")
 }
 
-@Test func theThreadsOtherMessagesKeepTheMoveToo() throws {
-    // m2, the newest, is in Forums already; m1 isn't. Gmail then files m2 under Primary too.
+@Test func theThreadsOtherMessagesKeepTheMoveAndGoBackToo() throws {
+    // m2, the newest, is in Forums already; m1 isn't. Gmail then files m2 under Primary.
     let store = try store([
         message("m1", thread: "m", at: 100, labels: [SystemLabel.inbox, SystemLabel.categoryPromotions]),
         message("m2", thread: "m", at: 200, labels: [SystemLabel.inbox, SystemLabel.categoryForums]),
     ])
-    _ = try store.perform(.moveToTab(.forums), on: [key("m")])
-    let payload = try onlyOp(store)
-    #expect(payload.changes.map(\.messageId).sorted() == ["m1", "m2"])
-    #expect(payload.changes.first { $0.messageId == "m2" }.map { $0.add.isEmpty && $0.remove.isEmpty } == true,
+    let token = try store.perform(.moveToTab(.forums), on: [key("m")])
+    let move = try payloads(store)[0]
+    #expect(move.changes.map(\.messageId).sorted() == ["m1", "m2"])
+    #expect(move.changes.first { $0.messageId == "m2" }.map { $0.add.isEmpty && $0.remove.isEmpty } == true,
             "m2 changes nothing here, but Gmail is asked to take off the other categories")
 
-    try fromGmail(store, ["m2": [SystemLabel.inbox, SystemLabel.categoryForums, SystemLabel.categoryPersonal]])
+    try fromGmail(store, ["m2": [SystemLabel.inbox, SystemLabel.categoryPersonal]])
     #expect(try labels(store, "m2") == [SystemLabel.inbox, SystemLabel.categoryForums])
     #expect(try thread(store, "m")?.gmailTab == .forums)
+
+    // Undo before it is sent: both go back to where they were, m2 to Forums, and Gmail is told so.
+    try store.undo(token)
+    #expect(try labels(store, "m1") == [SystemLabel.inbox, SystemLabel.categoryPromotions])
+    #expect(try labels(store, "m2") == [SystemLabel.inbox, SystemLabel.categoryForums])
+    let back = try payloads(store)
+    try #require(back.count == 1)
+    #expect(back[0].changes.first { $0.messageId == "m2" }?.requestAdd == [SystemLabel.categoryForums])
+    try fromGmail(store, ["m2": [SystemLabel.inbox, SystemLabel.categoryPersonal]])
+    #expect(try labels(store, "m2") == [SystemLabel.inbox, SystemLabel.categoryForums])
+}
+
+@Test func otherLabelActionsKeepTheirExactUndo() throws {
+    // Archive, then undo after Gmail may have seen it: the exact reverse, no intent.
+    let store = try store([message("a1", thread: "a", at: 100, labels: [SystemLabel.inbox, SystemLabel.categoryUpdates])])
+    let token = try store.perform(.archive, on: [key("a")])
+    try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET dispatched = 1") }
+    try store.undo(token)
+    let ops = try payloads(store)
+    try #require(ops.count == 2)
+    #expect(ops[0].changes == [LabelChange(messageId: "a1", add: [], remove: [SystemLabel.inbox])])
+    #expect(ops[1].changes == [LabelChange(messageId: "a1", add: [SystemLabel.inbox], remove: [])])
 }
 
 @Test func moveToTabRunsProjectRulesOnCategories() throws {

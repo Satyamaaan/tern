@@ -364,10 +364,10 @@ final class SelfCheck {
         check("…with a toast", model.toasts.last?.title == "Moved to Primary")
         let filed = waitUntil { self.gmailTab(key) == .primary }
         check("…and files it under Gmail's Primary", filed)
-        let change = latestLabelOp(key)
+        let move = latestLabelOp(key)
         check("…queuing the label swap for Gmail",
-              change?.action == "moveToTab" && change?.add == [SystemLabel.categoryPersonal]
-                && Set(change?.remove ?? ["?"]).isSubset(of: InboxTab.allCases.filter { $0 != .primary }.map(\.labelId)))
+              move?.action == "moveToTab" && move?.change.add == [SystemLabel.categoryPersonal]
+                && Set(move?.change.remove ?? ["?"]).isSubset(of: InboxTab.allCases.filter { $0 != .primary }.map(\.labelId)))
         model.showInboxTab(.primary)
         _ = waitUntil { self.model.snapshot.rows[key] != nil }
         check("…where Primary lists it", model.snapshot.rows[key] != nil)
@@ -376,6 +376,9 @@ final class SelfCheck {
         model.undoLast()
         let back = waitUntil { self.model.snapshot.rows[key] != nil && self.gmailTab(key) == before }
         check("undo puts it back in Promotions", back && model.cursor == key)
+        let moveBack = latestLabelOp(key)
+        check("…and queues the move back for Gmail, Primary off",
+              moveBack?.action == "undo-moveToTab" && moveBack?.change.requestRemove.contains(SystemLabel.categoryPersonal) == true)
     }
 
     private func scope() {
@@ -477,14 +480,14 @@ final class SelfCheck {
     }
 
     /// The newest queued label op touching the thread: its action and the first message's change.
-    private func latestLabelOp(_ key: ThreadKey) -> (action: String, add: [String], remove: [String])? {
+    private func latestLabelOp(_ key: ThreadKey) -> (action: String, change: LabelChange)? {
         let op = try? model.store.database.reader.read { db in
             try PendingOp.filter(Column("accountId") == key.accountId && Column("kind") == PendingOp.Kind.modifyLabels.rawValue)
                 .order(Column("id").desc).fetchOne(db)
         }
         guard let op, let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)),
               payload.threadIds.contains(key.threadId), let change = payload.changes.first else { return nil }
-        return (payload.action, change.add, change.remove)
+        return (payload.action, change)
     }
 
     private func isInInbox(_ key: ThreadKey) throws -> Bool {

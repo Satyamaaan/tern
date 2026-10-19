@@ -76,6 +76,9 @@ struct QueuedChanges: Sendable, Hashable {
     let accountId: String
     let changes: [LabelChange]
     let labelsAfter: [String: [String]]
+    /// Move to tab: the Gmail category each message had before it (absent: none), which its undo moves it back
+    /// to. Nil for other actions.
+    var tabsBefore: [String: InboxTab]?
 }
 
 extension LabelChange {
@@ -143,7 +146,16 @@ extension MailStore {
                 let payload = LabelOpPayload(action: action.name, threadIds: threadIds, changes: changes)
                 let op = PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload))
                 try op.insert(db)
-                ops.append(QueuedChanges(opId: db.lastInsertedRowID, accountId: accountId, changes: changes, labelsAfter: newLabels))
+                var queued = QueuedChanges(opId: db.lastInsertedRowID, accountId: accountId, changes: changes, labelsAfter: newLabels)
+                if case .moveToTab = action {
+                    let moved = Set(changes.map(\.messageId))
+                    var tabsBefore: [String: InboxTab] = [:]
+                    for message in messages where moved.contains(message.id) {
+                        tabsBefore[message.id] = InboxTab.allCases.first { message.labelIds.contains($0.labelId) }
+                    }
+                    queued.tabsBefore = tabsBefore
+                }
+                ops.append(queued)
             }
         }
 
@@ -176,21 +188,23 @@ extension MailStore {
     /// Puts threads back by taking each message's exact change back from its current labels, so changes
     /// made since (another action, sync) survive. A queued op is dropped only when Gmail can't have
     /// seen it (it was never dispatched) and nothing has changed its messages since; otherwise the
-    /// exact reverse goes to Gmail after it, as one op per account.
+    /// exact reverse goes to Gmail after it, as one op per account. Move to tab is taken back by moving
+    /// each message back (`movingBack`).
     public func undo(_ token: UndoToken) throws {
         try database.writer.write { db in
             var reverse: [String: [LabelChange]] = [:]
+            var movesBack: [String: [LabelChange]] = [:]
             // Newest first, so each op is checked against the labels it left behind.
             for queued in token.ops.reversed() {
+                if let tabsBefore = queued.tabsBefore {
+                    movesBack[queued.accountId, default: []] += try Self.movingBack(db, queued, to: tabsBefore)
+                    continue
+                }
                 let current = try Self.messageLabels(db, accountId: queued.accountId, messageIds: Array(queued.labelsAfter.keys))
                 let muted = try Setting.fetchOne(db, key: Self.muteLabelKey(queued.accountId))?.value
-                let op = try PendingOp.fetchOne(db, key: queued.opId)
-                // An op still queued may record more than it did here: labels its intent took off that sync
-                // brought in meanwhile (`replayingUnconfirmedChanges`), which undo puts back too.
-                let recorded = op.flatMap { try? JSONDecoder().decode(LabelOpPayload.self, from: Data($0.payload.utf8)) }?.changes
-                let changes = (recorded ?? queued.changes).map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
+                let changes = queued.changes.map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
                 let untouched = queued.labelsAfter.allSatisfy { id, after in current[id].map(Set.init) == Set(after) }
-                if untouched, let op, op.state == .pending, !op.dispatched {
+                if untouched, let op = try PendingOp.fetchOne(db, key: queued.opId), op.state == .pending, !op.dispatched {
                     try op.delete(db)
                 } else {
                     reverse[queued.accountId, default: []] += changes.map(\.reversed)
@@ -212,6 +226,11 @@ extension MailStore {
                 let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: net)
                 try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
             }
+            for (accountId, changes) in movesBack where !changes.isEmpty {
+                let threadIds = token.threads.filter { $0.accountId == accountId }.map(\.threadId)
+                let payload = LabelOpPayload(action: "undo-\(token.action.name)", threadIds: threadIds, changes: changes)
+                try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
+            }
 
             if token.action.changesRuleLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
 
@@ -223,6 +242,36 @@ extension MailStore {
                 }
             }
         }
+    }
+
+    /// Move to tab's undo, a move back like the move itself: each message goes back to the Gmail category it had
+    /// when the user acted, whatever Gmail filed it under since, with every other category off (all of them for
+    /// one that had none). So no message is left with two categories, nor with none unless it had none, and this
+    /// works the same whether the move is queued, on its way, done or failed. The move's op is dropped when Gmail
+    /// can't have seen it or it failed; the move back is sent either way, since Gmail may have refiled the
+    /// messages meanwhile. Returns the changes to send.
+    private static func movingBack(_ db: Database, _ queued: QueuedChanges, to tabsBefore: [String: InboxTab]) throws -> [LabelChange] {
+        if let op = try PendingOp.fetchOne(db, key: queued.opId), (op.state == .pending && !op.dispatched) || op.state == .failed {
+            try op.delete(db)
+        }
+        let ids = queued.changes.map(\.messageId)
+        let current = try messageLabels(db, accountId: queued.accountId, messageIds: ids)
+        var changes: [LabelChange] = []
+        var restore: [String: [String]] = [:]
+        for id in ids {
+            guard var labels = current[id].map(Set.init) else { continue }
+            let before = tabsBefore[id]
+            let add = before.map { [$0.labelId] } ?? []
+            let remove = InboxTab.allCases.filter { $0 != before }.map(\.labelId)
+            changes.append(LabelChange(
+                messageId: id, add: add.filter { !labels.contains($0) }, remove: remove.filter { labels.contains($0) },
+                intentAdd: add, intentRemove: remove))
+            labels.subtract(remove)
+            labels.formUnion(add)
+            restore[id] = labels.sorted()
+        }
+        try setLabels(db, accountId: queued.accountId, restore)
+        return changes
     }
 
     /// Returns snoozed threads whose time has come to the inbox, unread. Returns their keys.

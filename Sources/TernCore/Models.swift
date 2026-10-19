@@ -588,11 +588,11 @@ public struct Contact: TernRecord, Hashable, Identifiable {
 /// Label edits for one message, computed at the moment the user acted.
 public struct LabelChange: Codable, Hashable, Sendable {
     public var messageId: String
-    /// What the message's labels changed by: exactly what undo takes back.
+    /// What the message's labels changed by here: what undo takes back (Move to tab's undo moves it back instead).
     public var add: [String]
     public var remove: [String]
-    /// What the action asks of Gmail when that is more than it changed here: Move to tab takes off every other
-    /// category, also one the message gains before the op reaches Gmail. Nil when it is `add` and `remove`.
+    /// What the action asks of Gmail when that is more than it changed here: Move to tab (and its undo) takes off
+    /// every other category, also one the message gains before the op reaches Gmail. Nil when it is `add` and `remove`.
     public var intentAdd: [String]?
     public var intentRemove: [String]?
 
