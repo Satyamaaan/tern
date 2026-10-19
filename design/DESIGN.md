@@ -183,9 +183,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     without a ring. Selected neighbours join into one block.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
-- Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in that aren't in
-  the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons become Move to Inbox (⇧I),
-  with the same toast and undo, and `e` does nothing.
+- Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in, and notes you
+  sent yourself, that aren't in the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons
+  become Move to Inbox (⇧I), with the same toast and undo, and `e` does nothing.
 - Drafts: on a draft row (the Drafts mailbox, a local draft, a thread of nothing but drafts) the trash keys and the
   `⋯` menu's Move to Trash become **Discard Draft**; a conversation with your draft in it keeps Move to Trash and
   gets Discard Draft in `⋯` and ⌘K. "Draft discarded · Undo" (5 s) brings it back exactly: Gmail's copy is

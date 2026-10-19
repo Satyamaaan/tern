@@ -57,6 +57,25 @@ private func archive(_ store: MailStore, accountId: String? = nil, limit: Int = 
     #expect(try archive(store) == ["withDraft", "labelled", "replied", "archived"], "newest first")
 }
 
+@Test func archiveListsNotesYouSentYourself() throws {
+    let store = try makeStore()
+    func sent(_ id: String, to: [Participant], date: Double, labels: [String] = ["SENT"]) -> MailMessage {
+        MailMessage(accountId: me.id, id: id, threadId: id, date: Date(timeIntervalSince1970: date), fromName: "Me",
+                    fromEmail: me.email, toList: to, subject: id, bodyText: "Milk", bodyState: .full, labelIds: labels, isFromMe: true)
+    }
+    try store.upsertMessages([
+        sent("note", to: [Participant(name: "Me", email: me.email)], date: 100),
+        sent("toWork", to: [Participant(email: "Me@Work.dev")], date: 200),
+        sent("toAnn", to: [Participant(email: "ann@example.com")], date: 300),
+        // An address that only contains yours isn't yours.
+        sent("lookalike", to: [Participant(email: "notme@example.com")], date: 400),
+        sent("noteInInbox", to: [Participant(email: me.email)], date: 500, labels: ["SENT", "INBOX"]),
+        sent("draftNote", to: [Participant(email: me.email)], date: 600, labels: ["DRAFT"]),
+    ])
+    #expect(try archive(store) == ["toWork", "note"])
+    #expect(try archive(store, accountId: me.id, before: Date(timeIntervalSince1970: 200)) == ["note"])
+}
+
 @Test func archiveFollowsTheScopeAndPages() throws {
     let store = try makeStore()
     try store.upsertMessages([
