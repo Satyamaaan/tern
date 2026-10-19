@@ -83,8 +83,8 @@ import Testing
     await #expect(throws: CancellationError.self) { try await call.value }
     // The answer waited for SIGKILL to take the helper that ignored SIGTERM.
     #expect(Date().timeIntervalSince(stopped) >= 0.3)
-    for pid in found { #expect(kill(pid, 0) == -1 && errno == ESRCH, "process \(pid) survived") }
-    #expect(kill(-leader, 0) == -1 && errno == ESRCH, "something of the group survived")
+    for pid in found { #expect(!ProcessGroup.isAlive(pid), "process \(pid) survived") }
+    #expect(ProcessGroup.isGone(leader), "something of the group survived")
     // And the CLI slot was free only then.
     #expect(await gate.occupancy.running == 0)
 }

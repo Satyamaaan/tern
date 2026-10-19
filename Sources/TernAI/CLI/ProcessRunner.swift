@@ -133,7 +133,8 @@ private final class Run: @unchecked Sendable {
 
         let group = DispatchGroup()
         group.enter()
-        DispatchQueue.global(qos: .utility).async { [self] in
+        // Reaped on a thread of its own: a busy shared queue mustn't keep the exit waiting.
+        Thread.detachNewThread { [self] in
             var status: Int32 = 0
             while waitpid(pid, &status, 0) == -1, errno == EINTR {}
             lock.withLock { exitCode = Self.exitCode(status) }
@@ -191,8 +192,7 @@ private final class Run: @unchecked Sendable {
         timer.schedule(deadline: .now() + .milliseconds(10), repeating: .milliseconds(20))
         timer.setEventHandler { [self] in
             let elapsed = Date().timeIntervalSince(started)
-            let gone = kill(-group, 0) == -1 && errno == ESRCH
-            if !gone {
+            if !ProcessGroup.isGone(group) {
                 let sendKill = lock.withLock { () -> Bool in
                     guard elapsed >= killGrace, !killSent else { return false }
                     killSent = true
@@ -286,5 +286,25 @@ private final class Run: @unchecked Sendable {
         case .timedOut: AIError.timedOut
         case .cancelled: CancellationError()
         }
+    }
+}
+
+/// Members of a process group, as the runner sees them when it stops one.
+enum ProcessGroup {
+    /// True when no live process is left in `group`. A zombie doesn't count: it holds nothing but its pid
+    /// until it is reaped, which for an orphaned helper is up to launchd.
+    static func isGone(_ group: pid_t) -> Bool {
+        if kill(-group, 0) == -1, errno == ESRCH { return true }
+        var pids = [pid_t](repeating: 0, count: 512)
+        let bytes = proc_listpids(UInt32(PROC_PGRP_ONLY), UInt32(group), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return false }
+        return !pids.prefix(Int(bytes) / MemoryLayout<pid_t>.size).contains { $0 > 0 && isAlive($0) }
+    }
+
+    /// True for a process that exists and isn't a zombie.
+    static func isAlive(_ pid: pid_t) -> Bool {
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size))
+        return size == Int32(MemoryLayout<proc_bsdinfo>.size) && info.pbi_status != SZOMB
     }
 }
