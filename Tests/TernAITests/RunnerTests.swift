@@ -48,6 +48,57 @@ import Testing
     #expect(!FileManager.default.fileExists(atPath: marker))
 }
 
+@Test func systemRunnerStopsTheWholeProcessGroupBeforeAnswering() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-group-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let pids = directory.appendingPathComponent("pids").path
+    // A fake CLI that starts a helper which ignores SIGTERM and keeps running.
+    let script = """
+        sh -c 'trap "" TERM; echo $$ >> "\(pids)"; while :; do sleep 0.05; done' &
+        echo $$ >> "\(pids)"
+        wait
+        """
+    var runner = SystemProcessRunner()
+    runner.killGrace = 0.3
+    let gate = CLIGate(limit: 1)
+    let call = Task {
+        try await gate.withSlot {
+            try await runner.run(ProcessInvocation(executable: "/bin/sh", arguments: ["-c", script], environment: ["PATH": "/usr/bin:/bin"]), timeout: 30)
+        }
+    }
+    var found: [pid_t] = []
+    for _ in 0..<300 where found.count < 2 {
+        try await Task.sleep(for: .milliseconds(10))
+        found = ((try? String(contentsOfFile: pids, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { pid_t($0) }
+    }
+    #expect(found.count == 2)
+    let leader = try #require(found.last)
+
+    let stopped = Date()
+    call.cancel()
+    await #expect(throws: CancellationError.self) { try await call.value }
+    // The answer waited for SIGKILL to take the helper that ignored SIGTERM.
+    #expect(Date().timeIntervalSince(stopped) >= 0.3)
+    for pid in found { #expect(kill(pid, 0) == -1 && errno == ESRCH, "process \(pid) survived") }
+    #expect(kill(-leader, 0) == -1 && errno == ESRCH, "something of the group survived")
+    // And the CLI slot was free only then.
+    #expect(await gate.occupancy.running == 0)
+}
+
+@Test func systemRunnerTimesOutTheWholeProcessGroup() async throws {
+    var runner = SystemProcessRunner()
+    runner.killGrace = 0.2
+    let started = Date()
+    // The helper ignores SIGTERM and holds stdout open, so only stopping the whole group ends the call.
+    await #expect(throws: AIError.timedOut) {
+        try await runner.run(ProcessInvocation(
+            executable: "/bin/sh", arguments: ["-c", "sh -c 'trap \"\" TERM; while :; do sleep 0.05; done' & wait"],
+            environment: ["PATH": "/usr/bin:/bin"]), timeout: 0.3)
+    }
+    #expect(Date().timeIntervalSince(started) < 3)
+}
+
 @Test func systemRunnerReportsLaunchFailure() async throws {
     await #expect(throws: AIError.self) {
         try await SystemProcessRunner().run(ProcessInvocation(executable: "/nonexistent/codex", arguments: []), timeout: 5)

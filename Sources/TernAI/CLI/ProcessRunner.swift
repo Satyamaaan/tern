@@ -50,15 +50,18 @@ public protocol ProcessRunner: Sendable {
     func run(_ invocation: ProcessInvocation, timeout: TimeInterval) async throws -> ProcessResult
 }
 
-/// The real runner, on Foundation's `Process`.
+/// The real runner. Each CLI runs in a process group of its own, so stopping it (a time-out, a cancelled
+/// task) reaches the helpers it started too, and the call only returns once they are gone.
 public struct SystemProcessRunner: ProcessRunner {
-    /// Seconds between SIGTERM and SIGKILL when stopping a process.
+    /// Seconds between SIGTERM and SIGKILL when stopping a process group.
     public var killGrace: TimeInterval = 2
+    /// Longest wait after SIGKILL for the group to go; the caller is answered then even if it hasn't.
+    public var killWait: TimeInterval = 2
 
     public init() {}
 
     public func run(_ invocation: ProcessInvocation, timeout: TimeInterval) async throws -> ProcessResult {
-        let run = Run(invocation: invocation, killGrace: killGrace)
+        let run = Run(invocation: invocation, killGrace: killGrace, killWait: killWait)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 run.start(timeout: timeout, continuation: continuation)
@@ -69,66 +72,70 @@ public struct SystemProcessRunner: ProcessRunner {
     }
 }
 
-/// One launch: owns the process, its pipes, and the continuation it resumes exactly once.
+/// One launch: owns the child's process group, its pipes, and the continuation it resumes exactly once.
 private final class Run: @unchecked Sendable {
     enum StopReason { case timedOut, cancelled }
 
     private let invocation: ProcessInvocation
     private let killGrace: TimeInterval
-    private let process = Process()
+    private let killWait: TimeInterval
     private let lock = NSLock()
     private var continuation: CheckedContinuation<ProcessResult, Error>?
+    private var answered = false
     private var stopReason: StopReason?
-    private var started = false
+    /// The child's pid, which is also its process group id; 0 until it is launched.
+    private var pid: pid_t = 0
+    private var exitCode: Int32 = 0
     private var stdoutData = Data()
     private var stderrData = Data()
 
-    init(invocation: ProcessInvocation, killGrace: TimeInterval) {
+    init(invocation: ProcessInvocation, killGrace: TimeInterval, killWait: TimeInterval) {
         self.invocation = invocation
         self.killGrace = killGrace
+        self.killWait = killWait
     }
 
     func start(timeout: TimeInterval, continuation: CheckedContinuation<ProcessResult, Error>) {
-        lock.lock()
-        self.continuation = continuation
-        let stoppedEarly = stopReason
-        lock.unlock()
-        if let stoppedEarly {
-            finish(.failure(Self.error(for: stoppedEarly)))
-            return
-        }
-
         let stdout = Pipe()
         let stderr = Pipe()
         let stdin = Pipe()
-        process.executableURL = URL(fileURLWithPath: invocation.executable)
-        process.arguments = invocation.arguments
-        process.environment = invocation.environment
-        if let directory = invocation.currentDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: directory, isDirectory: true)
+        lock.lock()
+        self.continuation = continuation
+        if let stoppedEarly = stopReason {
+            lock.unlock()
+            finish(.failure(Self.error(for: stoppedEarly)))
+            return
         }
-        process.standardOutput = stdout
-        process.standardError = stderr
-        process.standardInput = stdin
-        process.qualityOfService = invocation.qualityOfService
-
-        let group = DispatchGroup()
-        group.enter()
-        process.terminationHandler = { _ in group.leave() }
-        do {
-            try process.run()
-        } catch {
-            group.leave()
+        // Launched under the lock, so `stop` finds either no child (and none is launched) or its pid.
+        let launched = Result {
+            try Self.spawn(
+                invocation, stdin: stdin.fileHandleForReading.fileDescriptor,
+                stdout: stdout.fileHandleForWriting.fileDescriptor, stderr: stderr.fileHandleForWriting.fileDescriptor)
+        }
+        if case .success(let pid) = launched { self.pid = pid }
+        lock.unlock()
+        // The child has its own copies of these ends; closing ours lets the reads end with the child.
+        try? stdin.fileHandleForReading.close()
+        try? stdout.fileHandleForWriting.close()
+        try? stderr.fileHandleForWriting.close()
+        let pid: pid_t
+        switch launched {
+        case .success(let value):
+            pid = value
+        case .failure(let error):
             let name = URL(fileURLWithPath: invocation.executable).lastPathComponent
             finish(.failure(AIError.failed("Couldn't launch \(name): \(error.localizedDescription)")))
             return
         }
-        lock.lock()
-        started = true
-        let stopNow = stopReason != nil
-        lock.unlock()
-        if stopNow { terminate() }
 
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async { [self] in
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1, errno == EINTR {}
+            lock.withLock { exitCode = Self.exitCode(status) }
+            group.leave()
+        }
         read(stdout.fileHandleForReading, into: \.stdoutData, group: group)
         read(stderr.fileHandleForReading, into: \.stderrData, group: group)
 
@@ -147,40 +154,60 @@ private final class Run: @unchecked Sendable {
         group.notify(queue: .global(qos: .utility)) { [self] in
             timer.cancel()
             lock.lock()
-            let result = ProcessResult(exitCode: process.terminationStatus, stdout: stdoutData, stderr: stderrData)
-            let stopped = stopReason
+            let result = ProcessResult(exitCode: exitCode, stdout: stdoutData, stderr: stderrData)
+            let stopped = stopReason != nil
             lock.unlock()
-            finish(stopped.map { .failure(Self.error(for: $0)) } ?? .success(result))
+            // A stopped run is answered by its teardown, once the group is gone.
+            if !stopped { finish(.success(result)) }
         }
     }
 
-    /// Kills the process and answers at once, without waiting for its pipes to close.
+    /// Stops the child's whole process group, then answers.
     func stop(reason: StopReason) {
         lock.lock()
-        guard stopReason == nil else { lock.unlock(); return }
+        guard stopReason == nil, !answered else { lock.unlock(); return }
         stopReason = reason
-        let running = started
+        let pid = pid
         lock.unlock()
-        // Answer before killing, so the exit of the killed process can't be reported as a result.
-        finish(.failure(Self.error(for: reason)))
-        if running { terminate() }
+        guard pid > 0 else {
+            // Not launched, and now it won't be.
+            finish(.failure(Self.error(for: reason)))
+            return
+        }
+        tearDown(pid, reason)
+    }
+
+    /// SIGTERM to the group, SIGKILL after the grace period, and the answer once nothing of the group is
+    /// left, or after `killWait` more (logged): the caller's CLI slot isn't free before then.
+    private func tearDown(_ group: pid_t, _ reason: StopReason) {
+        kill(-group, SIGTERM)
+        DispatchQueue.global(qos: .utility).async { [self] in
+            if !Self.waitForGroup(group, seconds: killGrace) {
+                kill(-group, SIGKILL)
+                if !Self.waitForGroup(group, seconds: killWait) {
+                    aiLog.error("a stopped CLI's processes were still running \(self.killWait, format: .fixed(precision: 1))s after SIGKILL")
+                }
+            }
+            finish(.failure(Self.error(for: reason)))
+        }
+    }
+
+    private static func waitForGroup(_ group: pid_t, seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while true {
+            if kill(-group, 0) == -1, errno == ESRCH { return true }
+            if Date() >= deadline { return false }
+            usleep(20_000)
+        }
     }
 
     private func finish(_ result: Result<ProcessResult, Error>) {
         lock.lock()
         let continuation = continuation
         self.continuation = nil
+        if continuation != nil { answered = true }
         lock.unlock()
         continuation?.resume(with: result)
-    }
-
-    private func terminate() {
-        guard process.isRunning else { return }
-        process.terminate()
-        let pid = process.processIdentifier
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + killGrace) { [process] in
-            if process.isRunning { kill(pid, SIGKILL) }
-        }
     }
 
     private func read(_ handle: FileHandle, into keyPath: ReferenceWritableKeyPath<Run, Data>, group: DispatchGroup) {
@@ -192,6 +219,58 @@ private final class Run: @unchecked Sendable {
             lock.unlock()
             group.leave()
         }
+    }
+
+    /// Launches the child in a new process group (its pid is the group id), with default signal handling,
+    /// no open descriptors but the three pipe ends, and the invocation's environment, directory and
+    /// scheduling class. `Process` can't make a group before the child runs; `setpgid` after launch would
+    /// race the helpers it starts.
+    private static func spawn(_ invocation: ProcessInvocation, stdin: Int32, stdout: Int32, stderr: Int32) throws -> pid_t {
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        let flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_CLOEXEC_DEFAULT
+        posix_spawnattr_setflags(&attributes, Int16(flags))
+        posix_spawnattr_setpgroup(&attributes, 0)
+        var noSignals = sigset_t()
+        sigemptyset(&noSignals)
+        posix_spawnattr_setsigmask(&attributes, &noSignals)
+        var allSignals = sigset_t()
+        sigfillset(&allSignals)
+        posix_spawnattr_setsigdefault(&attributes, &allSignals)
+        if let qos = qosClass(invocation.qualityOfService) { posix_spawnattr_set_qos_class_np(&attributes, qos) }
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, stdin, 0)
+        posix_spawn_file_actions_adddup2(&actions, stdout, 1)
+        posix_spawn_file_actions_adddup2(&actions, stderr, 2)
+        if let directory = invocation.currentDirectory { posix_spawn_file_actions_addchdir_np(&actions, directory) }
+
+        let argv = ([invocation.executable] + invocation.arguments).map { strdup($0) } + [nil]
+        let envp = invocation.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { (argv + envp).forEach { free($0) } }
+        var pid: pid_t = 0
+        let code = posix_spawn(&pid, invocation.executable, &actions, &attributes, argv, envp)
+        guard code == 0 else { throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EPERM) }
+        return pid
+    }
+
+    private static func qosClass(_ quality: QualityOfService) -> qos_class_t? {
+        switch quality {
+        case .userInteractive: QOS_CLASS_USER_INTERACTIVE
+        case .userInitiated: QOS_CLASS_USER_INITIATED
+        case .utility: QOS_CLASS_UTILITY
+        case .background: QOS_CLASS_BACKGROUND
+        default: nil
+        }
+    }
+
+    /// The exit status, or the signal's number for a child killed by one (as `Process` reports it).
+    private static func exitCode(_ status: Int32) -> Int32 {
+        let signal = status & 0x7f
+        return signal == 0 ? (status >> 8) & 0xff : signal
     }
 
     private static func error(for reason: StopReason) -> Error {
