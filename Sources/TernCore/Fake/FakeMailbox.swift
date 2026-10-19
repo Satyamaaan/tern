@@ -2,7 +2,9 @@ import Foundation
 import GRDB
 
 /// Generates a realistic three-account mailbox so the UI, search and speed tests can run without
-/// Google. Deterministic for a given seed.
+/// Google. Deterministic for a given seed. Personal and Northwind mail carries Gmail's category labels
+/// (every tab, Forums only on Personal); Kiteworks is a Workspace account without them, like one with
+/// Gmail's tabs off, so its tabs come from Tern's own categories. Your own messages carry none.
 public enum FakeMailbox {
     public struct Options: Sendable {
         public var messages: Int
@@ -81,7 +83,7 @@ private struct Batch {
 }
 
 private enum Kind: CaseIterable {
-    case people, notification, newsletter, receipt, calendar, promotion, security
+    case people, notification, newsletter, receipt, calendar, promotion, security, social, forum
 
     var category: MailCategory {
         switch self {
@@ -92,6 +94,9 @@ private enum Kind: CaseIterable {
         case .calendar: .calendar
         case .promotion: .promotion
         case .security: .security
+        case .social: .notification
+        // A mailing list reads as a newsletter to Tern's rules (List-Unsubscribe); Gmail files it under Forums.
+        case .forum: .newsletter
         }
     }
 
@@ -100,9 +105,14 @@ private enum Kind: CaseIterable {
         case .people, .calendar: SystemLabel.categoryPersonal
         case .notification, .receipt, .security: SystemLabel.categoryUpdates
         case .newsletter, .promotion: SystemLabel.categoryPromotions
+        case .social: SystemLabel.categorySocial
+        case .forum: SystemLabel.categoryForums
         }
     }
 }
+
+/// Accounts whose mail Gmail doesn't categorise.
+private let uncategorizedAccounts: Set<Int> = [2]
 
 private struct Person {
     var name: String
@@ -255,6 +265,25 @@ private struct Generator {
         Sender(name: "Raycast", email: "hello@raycast.com", subjects: ["Raycast 2.0 is here"], account: 2),
     ]
 
+    static let socialSenders: [Sender] = [
+        Sender(name: "LinkedIn", email: "messages-noreply@linkedin.com", subjects: [
+            "Grace Kim wants to connect", "You appeared in 14 searches this week", "Amara Diallo sent you a message",
+        ], account: 1),
+        Sender(name: "X", email: "notify@x.com", subjects: ["Sam Rivera replied to your post", "Ethan Brooks and 3 others liked your post"], account: 0),
+        Sender(name: "Instagram", email: "no-reply@mail.instagram.com", subjects: ["nina.petrova shared a photo", "You have 2 new followers"], account: 0),
+        Sender(name: "Strava", email: "no-reply@strava.com", subjects: ["Ravi Patel gave you kudos", "Your weekly summary"], account: 0),
+    ]
+
+    static let forumSenders: [Sender] = [
+        Sender(name: "Swift Forums", email: "noreply@forums.swift.org", subjects: [
+            "[Swift Forums] [Pitch] Typed throws in protocols", "[Swift Forums] Summary of the week",
+        ], account: 0),
+        Sender(name: "sqlite-users", email: "sqlite-users@googlegroups.com", subjects: [
+            "Re: WAL checkpoint starvation under load", "FTS5 prefix queries and the trigram tokenizer",
+        ], account: 0),
+        Sender(name: "Rust Users", email: "rust@discoursemail.com", subjects: ["[Rust Users] Lifetimes in async traits"], account: 0),
+    ]
+
     static let securitySenders: [Sender] = [
         Sender(name: "Google", email: "no-reply@accounts.google.com", subjects: ["Security alert", "New sign-in on Mac"], account: 0),
         Sender(name: "GitHub", email: "noreply@github.com", subjects: ["[GitHub] Your sign-in code", "[GitHub] A new SSH key was added"], account: 2),
@@ -272,8 +301,8 @@ private struct Generator {
         var batch = Batch()
         batch.labels = makeLabels()
         let mix: [(Kind, Double)] = [
-            (.people, 0.30), (.notification, 0.30), (.newsletter, 0.11), (.receipt, 0.08),
-            (.calendar, 0.05), (.promotion, 0.13), (.security, 0.03),
+            (.people, 0.30), (.notification, 0.25), (.social, 0.04), (.forum, 0.02), (.newsletter, 0.10),
+            (.receipt, 0.08), (.calendar, 0.05), (.promotion, 0.13), (.security, 0.03),
         ]
         while batch.messages.count < options.messages {
             var roll = Double.random(in: 0..<1, using: &rng)
@@ -358,6 +387,8 @@ private struct Generator {
             case .newsletter: Self.newsletterSenders
             case .receipt: Self.receiptSenders
             case .promotion: Self.promotionSenders
+            case .social: Self.socialSenders
+            case .forum: Self.forumSenders
             default: Self.securitySenders
             }
             let sender = pick(pool)
@@ -367,10 +398,10 @@ private struct Generator {
             let text = automatedText(kind, sender: sender.name, subject: subject)
             let html = kind == .newsletter || kind == .promotion || kind == .receipt
                 ? newsletterHTML(sender: sender.name, subject: subject, text: text) : nil
-            if kind == .newsletter || kind == .promotion {
+            if kind == .newsletter || kind == .promotion || kind == .forum {
                 listUnsubscribe = "<mailto:unsubscribe@\(sender.email.split(separator: "@").last ?? "example.com")>"
             }
-            let count = kind == .notification && chance(0.3) ? int(2...4) : 1
+            let count = (kind == .notification || kind == .forum) && chance(0.3) ? int(2...4) : 1
             var date = start
             for index in 0..<count {
                 parts.append((Participant(name: sender.name, email: sender.email), [me], [], date,
@@ -381,6 +412,7 @@ private struct Generator {
         }
 
         let account = FakeMailbox.accounts[accountIndex]
+        if uncategorizedAccounts.contains(accountIndex) { threadLabels.remove(kind.gmailCategory) }
         let threadId = newId()
         let lastDate = parts.last!.date
         let recentDays = options.now.timeIntervalSince(lastDate) / 86_400
@@ -390,7 +422,7 @@ private struct Generator {
         var inInbox: Bool
         switch kind {
         case .people: inInbox = recentDays < 10 ? chance(0.6) : chance(0.002)
-        case .notification: inInbox = recentDays < 4 ? chance(0.4) : chance(0.001)
+        case .notification, .social: inInbox = recentDays < 4 ? chance(0.4) : chance(0.001)
         case .calendar, .security: inInbox = recentDays < 7 ? chance(0.6) : false
         default: inInbox = recentDays < 10 ? chance(0.35) : chance(0.001)
         }
@@ -411,7 +443,7 @@ private struct Generator {
             if trashed { labels.insert(SystemLabel.trash) }
             if spam { labels.insert(SystemLabel.spam) }
             if starred && index == parts.count - 1 { labels.insert(SystemLabel.starred) }
-            if isMine { labels.remove(SystemLabel.inbox) }
+            if isMine { labels.remove(SystemLabel.inbox); labels.remove(kind.gmailCategory) }
 
             var hasAttachment = false
             if (kind == .people && chance(0.08)) || (kind == .receipt && chance(0.5)) {
@@ -487,6 +519,10 @@ private struct Generator {
             return "Thanks for your purchase.\n\nAmount paid: $\(int(4...480)).\(int(10...99))\nDate: \(options.now.formatted(date: .abbreviated, time: .omitted))\nPayment method: Visa •••• 4242\n\nQuestions? Reply to this email."
         case .promotion:
             return "\(subject)\n\nNew arrivals picked for you. Free shipping on orders over $50.\n\nShop now · Unsubscribe"
+        case .social:
+            return "\(subject)\n\nSee what's new on \(sender).\n\nView · Notification settings"
+        case .forum:
+            return "\(subject)\n\n\(pick(Self.sentences)) \(pick(Self.sentences))\n\nReply to this email to respond, or visit the topic online. Unsubscribe from this list."
         default:
             return "\(subject)\n\nYour code is \(int(100_000...999_999)). It expires in 10 minutes. If this wasn't you, secure your account."
         }
