@@ -67,6 +67,10 @@ svg path { vector-effect: non-scaling-stroke; }
 .line .snip { color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .line .date, .mhead .date { color: var(--text3); flex: none; margin-left: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
 .line .draft { color: var(--ink); font-weight: 500; font-style: italic; flex: none; }
+.dacts, .draftnote { display: flex; gap: 6px; color: var(--text3); font-size: 12px; line-height: 16px; flex: none; }
+.dact { color: var(--text2); font-weight: 500; }
+.dact:hover { color: var(--ink); text-decoration: underline; }
+.draftnote { margin: 12px 0 0 38px; }
 .msg.unread .line .from { font-weight: 600; }
 .msg.open > .line { display: none; }
 .msg:not(.open) > :not(.line) { display: none; }
@@ -157,7 +161,7 @@ svg path { vector-effect: non-scaling-stroke; }
 
 @media print {
   #thread { max-width: none; padding: 0; }
-  .line, .more, .imgnote, .summary.action { display: none !important; }
+  .line, .more, .imgnote, .draftnote, .summary.action { display: none !important; }
   .msg:not(.open) > :not(.line) { display: block; }
   .msg { break-inside: avoid-page; }
 }

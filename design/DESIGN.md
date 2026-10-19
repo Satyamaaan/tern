@@ -178,14 +178,18 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
     radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
-    replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`. Selected: `selected`
-    fill; the cursor row gets `selectedFocus` while the list has the keyboard in the key window, so focus shows
+    replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`; on a draft row Discard
+    and `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus` while the list has the keyboard in the key window, so focus shows
     without a ring. Selected neighbours join into one block.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
 - Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in that aren't in
   the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons become Move to Inbox (⇧I),
   with the same toast and undo, and `e` does nothing.
+- Drafts: on a draft row (the Drafts mailbox, a local draft, a thread of nothing but drafts) the trash keys and the
+  `⋯` menu's Move to Trash become **Discard Draft**; a conversation with your draft in it keeps Move to Trash and
+  gets Discard Draft in `⋯` and ⌘K. "Draft discarded · Undo" (5 s) brings it back exactly: Gmail's copy is
+  deleted only after the undo window. A draft being sent is never discarded.
 - Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
   other lists one Display 17 line in `text2`.
 
@@ -213,7 +217,8 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
-  disclosure, date in tabular `text3`. The focused message (n/p) and a selected attachment get the `selected`
+  disclosure, date in tabular `text3`. Your draft in the conversation shows Edit · Discard on its line (`text2`
+  links); Discard takes the draft alone. The focused message (n/p) and a selected attachment get the `selected`
   fill, no ring. Bodies in the WKWebView (transparent before first paint, sanitized,
   remote images blocked until "Load images"; Tern's own avatars come as `data:` URLs, which the CSP allows while
   it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always

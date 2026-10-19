@@ -124,7 +124,7 @@ extension AppModel {
         }
     }
 
-    private func writeFailed(_ error: Error, unhide keys: [ThreadKey], entry: UndoEntry) {
+    func writeFailed(_ error: Error, unhide keys: [ThreadKey], entry: UndoEntry) {
         undoStack.removeAll { $0.id == entry.id }
         toasts.removeAll { $0.undo?.id == entry.id }
         for key in keys { hidden[key] = nil }

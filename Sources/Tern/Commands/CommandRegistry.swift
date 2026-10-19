@@ -100,8 +100,14 @@ final class CommandRegistry {
                     aliases: ["done", "mark done"], isEnabled: { hasTargets() && !m.inArchive }) { m.perform(.archive, on: m.targets) },
             Command(id: "snooze", title: "Snooze…", group: .actions, keys: [.key("h")], menu: .message,
                     aliases: ["remind", "later"], isEnabled: hasTargets) { m.palette = .snooze(m.targets) },
+            // On draft rows the trash keys discard the draft; the conversation a draft replies to is never trashed for it.
             Command(id: "trash", title: "Move to Trash", group: .actions, keys: [.key("#"), .special(.delete)], menu: .message,
-                    aliases: ["delete"], isEnabled: hasTargets) { m.perform(.trash, on: m.targets) },
+                    aliases: ["delete"], isEnabled: hasTargets,
+                    currentTitle: { m.targetsAreDrafts ? "Discard Draft" : "Move to Trash" }) {
+                if m.targetsAreDrafts { m.discardDrafts(m.targets) } else { m.perform(.trash, on: m.targets) }
+            },
+            Command(id: "discardDraft", title: "Discard Draft", group: .actions, aliases: ["delete draft", "remove draft"],
+                    paletteOnly: true, isEnabled: { m.targetsHoldDrafts }, isVisible: { !m.targetsAreDrafts }) { m.discardDrafts(m.targets) },
             Command(id: "spam", title: "Report Spam", group: .actions, keys: [.key("!")], menu: .message,
                     aliases: ["junk"], isEnabled: hasTargets) { m.perform(.markSpam, on: m.targets) },
             Command(id: "moveToInbox", title: "Move to Inbox", group: .actions, keys: [.key("I")], menu: .message,

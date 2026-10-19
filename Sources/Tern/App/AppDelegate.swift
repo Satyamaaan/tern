@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
     private func wire(_ services: AppServices) {
         services.perform = { [weak model] action, keys in model?.perform(action, on: keys) }
+        services.discardDraft = { [weak model] message, thread in model?.discardDraft(message, in: thread) }
         services.compose = { [weak services] request in
             guard let services else { return }
             Composer.open(request, services: services)

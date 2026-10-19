@@ -125,6 +125,7 @@ enum ShortcutTable {
         "dimRead": "Dim Old Read Mail",
         "senderLogos": "Show or Hide Sender Logos",
         "find": "Find in Conversation or Search",
+        "trash": "Move to Trash or Discard Draft",
     ]
 }
 

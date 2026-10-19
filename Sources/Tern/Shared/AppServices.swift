@@ -15,6 +15,8 @@ final class AppServices {
 
     /// Runs a mail action with the shell's undo toast and selection handling.
     var perform: (MailAction, [ThreadKey]) -> Void = { _, _ in }
+    /// Discards one draft of a conversation (the reader's Discard), with the shell's undo toast.
+    var discardDraft: (MessageKey, ThreadKey) -> Void = { _, _ in }
     /// Opens the composer (new window or inline, decided by the request).
     var compose: (ComposeRequest) -> Void = { _ in }
     /// Opens a Gmail draft stored as a DRAFT message in a composer window, fetching its body first

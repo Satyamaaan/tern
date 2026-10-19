@@ -2,31 +2,35 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The three buttons that replace a row's tags and time on hover: Archive (Move to Inbox in the Archive list),
-/// Snooze, `…`.
+/// The buttons that replace a row's tags and time on hover: Archive (Move to Inbox in the Archive list),
+/// Snooze, `…`; on a draft row, Discard and `…`.
 struct RowHoverBar: View {
     let model: AppModel
     let keys: [ThreadKey]
 
     var body: some View {
         HStack(spacing: 2) {
-            if model.inArchive {
-                HoverButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox, on: keys) }
+            if !keys.isEmpty, keys.allSatisfy(model.isDraftRow) {
+                HoverButton(icon: .trash, help: hint("Discard draft", "trash")) { model.discardDrafts(keys) }
             } else {
-                HoverButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive, on: keys) }
+                if model.inArchive {
+                    HoverButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox, on: keys) }
+                } else {
+                    HoverButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive, on: keys) }
+                }
+                Menu {
+                    SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
+                } label: {
+                    // Menu labels on macOS only render text and images.
+                    Image(nsImage: Icon.snoozed.image(size: 15))
+                        .foregroundStyle(Color(Theme.text2))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(width: 26, height: 24)
+                .help(hint("Snooze", "snooze"))
             }
-            Menu {
-                SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
-            } label: {
-                // Menu labels on macOS only render text and images.
-                Image(nsImage: Icon.snoozed.image(size: 15))
-                    .foregroundStyle(Color(Theme.text2))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 26, height: 24)
-            .help(hint("Snooze", "snooze"))
             HoverButton(icon: .ellipsis, help: "More") {
                 guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
                 // The menu's commands act on the selection, so make the hovered row the selection first.
@@ -84,6 +88,13 @@ enum ThreadMenu {
             item.keyEquivalentModifierMask = key?.menuModifiers ?? []
             item.isEnabled = registry.canRun(command)
             menu.addItem(item)
+            // A conversation with a draft of yours in it: its draft can go without the conversation.
+            if command.id == "trash", let discard = registry["discardDraft"], discard.isVisible(), registry.canRun(discard) {
+                let item = NSMenuItem(title: discard.displayTitle, action: #selector(MenuTarget.run(_:)), keyEquivalent: "")
+                item.target = target
+                item.representedObject = discard.id
+                menu.addItem(item)
+            }
         }
         return menu
     }
