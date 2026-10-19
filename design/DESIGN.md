@@ -50,7 +50,6 @@ Tab and tag icons only, 12–14 px, never their text, never a fill:
 
 | Icon | Light | Dark |
 | --- | --- | --- |
-| Important (tag) | `#7C5CDB` | `#A78BFA` |
 | People (person) | `#2F6FD8` | `#6EA2FF` |
 | Newsletter (leaf) | `#1E9E5A` | `#4CC38A` |
 | Notification (bell) | `#C98500` | `#F0B429` |
@@ -58,8 +57,12 @@ Tab and tag icons only, 12–14 px, never their text, never a fill:
 | Calendar | `#4F5BD5` | `#8C95FF` |
 | Promotion (discount tag) | `#DD6B1D` | `#FF9E57` |
 | Security (shield) | `#C2334A` | `#FF6B81` |
-| Needs reply, All, Other, labels, searches | `ink` / `text2` / `text3` | same |
+| Social tab (heart) | `#7C5CDB` | `#A78BFA` |
+| Needs reply, All, Other, Important, labels, searches | `ink` / `text2` / `text3` | same |
 | Project | the project's colour (Graphite, Blue, Green, Violet, Sand, Rose, Teal, Slate) | same |
+
+Gmail's tabs borrow the category icons: Primary the People person, Promotions the Promotion tag, Updates the
+Notification bell, Forums a quote mark in Receipt's teal; Social is a heart in its own violet.
 
 AI provider marks (onboarding, Settings → AI) are the one other place colour shows: Claude's mark in its own
 `#D97757`, OpenAI's (for Codex) in `text1`. Only ever next to the provider's name (`scripts/brandlogos.py`).
@@ -131,7 +134,7 @@ a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen s
 Hidden title bar (`fullSizeContentView`, transparent), our own background. Minimum 960×600, default 1320×840.
 
 ```
-┌─ ● ● ●  [All 96] Needs reply 24  Important 48  People 41  …  +  ⋯ ───────── (P)(N)(K) 3 accounts  [✎] ┐  52
+┌─ ● ● ●  All  Needs reply 24  [Primary]  Promotions 12  Social 3  …  +  ⋯ ──── (P)(N)(K) 3 accounts  [✎] ┐  52
 │                                       TODAY                                                            │
 │   (F) Figma (4)            • Priya mentioned you in Mobile app — We're leaning…  [🔔 Notification]  4h │  32
 │   (G) Google Drive         • Sofia shared "Lumen — SOW" with you — We hit the…   [◎ Lumen]          4h │
@@ -142,16 +145,22 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 
 ### Title bar (52 px)
 - Traffic lights at (16, 18), then the **tabs**, left-aligned after an 84 px gutter.
-- Tabs: `All` · `Needs reply` · the category tabs `Important · People · Notifications · Newsletters · Other`
-  (split inbox; off in `⋯` → Split Inbox or Settings → Layout) · pinned tabs (projects, labels of the account in scope, saved
-  searches). Each: 14 px icon (hue per the table), title, count (unread; Needs reply counts waiting
-  threads) in tabular `text3`. 28 px tall, radius 6; active = `selected` fill and Medium text; hover = `hover`.
+- Tabs: `All` · `Needs reply` · Gmail's tabs `Primary · Promotions · Social · Updates · Forums` (inbox tabs;
+  off in `⋯` → Inbox Tabs or Settings → Layout) · pinned tabs (projects, labels of the account in scope, saved
+  searches). The inbox opens on Primary (launch, the sidebar's Inbox, `g i`); All is the whole inbox. A Gmail tab
+  other than Primary with nothing in the scope's inbox is hidden, except while it is open. A thread is in the tab
+  of its Gmail category (the newest message from someone else that has one); mail Gmail hasn't categorised goes
+  by Tern's category (promotion and newsletter → Promotions, notification and receipt → Updates, the rest and
+  unclassified mail → Primary). Each: 14 px icon (hue per the table), title, count in tabular `text3`: unread on
+  Promotions, Social, Updates and Forums, waiting threads on Needs reply, none on All and Primary (their unread
+  mail is the list itself; with inbox tabs off All counts its unread). 28 px tall, radius 6; active = `selected`
+  fill and Medium text; hover = `hover`.
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
   pinned shows as a temporary tab at the end while it is open.
 - `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
-  fits), then Unpin, Mark All as Read, Select All, Density, Split Inbox, Reading Pane. Right-click a tab to
+  fits), then Unpin, Mark All as Read, Select All, Density, Inbox Tabs, Reading Pane. Right-click a tab to
   pin or unpin it.
-- Keys: Tab / ⇧Tab cycle the tabs; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 the category tabs.
+- Keys: Tab / ⇧Tab cycle the tabs shown; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 Primary to Forums.
 - Right side: the **account stack** (up to three 20 px letter avatars in account hues, overlapping by 6 px with
   a 2 px `bg` ring) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
   account ⌘1…⌘9, Add account…, Settings…); then **compose**: a 28 px icon button, ink pencil, `hairlineStrong`
@@ -181,10 +190,13 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus`
     while the list has the keyboard in the key window, so focus shows without a ring. Selected neighbours
     join into one block.
+- A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
+  selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label, so
+  Gmail files it there too, and like archive the row leaves a tab it no longer belongs to, with undo.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
-- Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
-  other lists one Display 17 line in `text2`.
+- Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a
+  `text3` tally; other lists one Display 17 line in `text2`.
 
 ### Bottom bar
 A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
@@ -206,7 +218,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
   `raised`. Remembered (Settings → Layout).
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
-  Done, Snooze, `⋯` as icon buttons.
+  Done, Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox tabs on).
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
@@ -302,7 +314,8 @@ closes whatever the preference. `g` chords time out after 1 s and show a small H
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
---snapshot <dir>` writes the list, reader, reading pane, sidebar, search, narrow window, palette, the settings page
+--snapshot <dir>` writes the list, Gmail's tabs (Primary, Promotions with its count, the title bar alone, ⌘K's Move to …),
+reader, reading pane, sidebar, search, narrow window, palette, the settings page
 (every section, search, a shortcut being recorded, in conflict, reserved and kept for text editing, an image sender
 that couldn't be removed), onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
-behaviour and timings.
+behaviour and timings (Gmail's tabs: landing on Primary, Tab / ⇧Tab, counts, a hidden empty tab, Move to Primary and its undo).
