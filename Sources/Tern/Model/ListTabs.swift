@@ -58,7 +58,7 @@ extension AppModel {
         var tabs: [ListTab] = [.all, .needsReply]
         if prefs.splitInbox {
             tabs += InboxTab.allCases
-                .filter { $0 == .primary || counts.tabThreads[$0, default: 0] > 0 || (kind == .inbox && inboxTab == $0) }
+                .filter { $0 == .primary || tabsWithMail.contains($0) || (kind == .inbox && inboxTab == $0) }
                 .map(ListTab.category)
         }
         for key in prefs.pinnedTabs {

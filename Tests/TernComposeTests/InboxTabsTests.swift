@@ -59,9 +59,9 @@ private func withModel(promotions: Int = 4, primary: Int = 2, _ body: (AppModel)
 @MainActor
 @Test func anEmptyTabHidesExceptWhileItIsOpen() throws {
     try withModel { model in
-        var counts = ScopeCounts()
-        counts.tabThreads = [.primary: 2, .promotions: 4]
-        model.counts = counts
+        // Read when the scope is set, before any counts arrive.
+        model.observeScope()
+        #expect(model.tabsWithMail == [.primary, .promotions])
         let gmail = { model.tabs.compactMap { tab -> InboxTab? in if case .category(let inbox) = tab { inbox } else { nil } } }
         #expect(model.tabs.prefix(2) == [.all, .needsReply])
         #expect(gmail() == [.primary, .promotions])
@@ -70,7 +70,7 @@ private func withModel(promotions: Int = 4, primary: Int = 2, _ body: (AppModel)
         model.cycleTab(-1)
         #expect(model.activeTab == .category(.promotions) && gmail() == [.primary, .promotions])
         // Primary shows even when it's empty.
-        model.counts = ScopeCounts()
+        model.tabsWithMail = []
         #expect(gmail() == [.primary, .promotions])
         model.setSplitInbox(false)
         #expect(model.tabs == [.all, .needsReply])

@@ -147,6 +147,77 @@ private func tabbedStore() throws -> MailStore {
     #expect(counts.inboxUnread == 4)
 }
 
+@Test func theTabsWithMailAreProbedWithoutCounting() throws {
+    let store = try tabbedStore()
+    let probe = { (account: String?, sample: Int) in
+        try store.database.reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: account, uncategorisedSample: sample) }
+    }
+    #expect(try probe(nil, 500) == Set(InboxTab.allCases))
+    #expect(try probe(me.id, 500) == Set(InboxTab.allCases))
+    #expect(try probe("other@example.com", 500).isEmpty)
+    // Only the newest uncategorised threads are looked at: Updates, which only an older receipt is in, shows
+    // once the counts come in.
+    #expect(try probe(nil, 1) == [.primary, .promotions, .social, .forums])
+}
+
+private let skipPerf = ProcessInfo.processInfo.environment["TERN_SKIP_PERF"] == "1"
+
+/// 50,000 inbox threads in one account, a third unread; Gmail has categorised `categorised` of every 8, the rest
+/// fall back to Tern's category.
+private func largeInbox(categorised: Int) throws -> MailStore {
+    let store = MailStore(try AppDatabase.inMemory())
+    try store.upsertAccount(me)
+    try store.database.writer.writeWithoutTransaction { db in
+        try db.execute(sql: "PRAGMA foreign_keys = OFF")
+        try db.inTransaction {
+            try db.execute(sql: """
+                WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 49999)
+                INSERT INTO thread_label (accountId, threadId, labelId, lastDate, gmailTab)
+                SELECT ?, 't' || i, 'INBOX', 1000000000 - i,
+                  CASE WHEN i % 8 >= ? THEN NULL
+                    ELSE CASE i % 4 WHEN 0 THEN 'primary' WHEN 1 THEN 'promotions' WHEN 2 THEN 'social' ELSE 'updates' END END
+                FROM n;
+                INSERT INTO thread_label (accountId, threadId, labelId, lastDate, gmailTab)
+                SELECT accountId, threadId, 'UNREAD', lastDate, gmailTab FROM thread_label WHERE labelId = 'INBOX' AND lastDate % 3 = 0;
+                INSERT INTO thread_ai (accountId, threadId, category, classifiedAt)
+                SELECT accountId, threadId,
+                  CASE lastDate % 5 WHEN 0 THEN 'people' WHEN 1 THEN 'newsletter' WHEN 2 THEN 'notification' WHEN 3 THEN 'receipt' ELSE 'other' END, 0
+                FROM thread_label WHERE labelId = 'INBOX' AND gmailTab IS NULL;
+                """, arguments: [me.id, categorised])
+            return .commit
+        }
+        try db.execute(sql: "PRAGMA foreign_keys = ON")
+    }
+    return store
+}
+
+/// The best of `runs` timings of `body`, in milliseconds.
+private func bestTime(runs: Int = 5, _ body: () throws -> Void) rethrows -> Double {
+    var best = Double.infinity
+    for _ in 0..<runs {
+        let start = DispatchTime.now().uptimeNanoseconds
+        try body()
+        best = min(best, Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+    }
+    return best
+}
+
+@Test(.enabled(if: !skipPerf, "TERN_SKIP_PERF=1"))
+func probingTheTabsStaysCheapOnAVeryLargeInbox() throws {
+    // Half categorised, then none (an account Gmail doesn't categorise): the probe looks at the same few rows.
+    for categorised in [4, 0] {
+        let store = try largeInbox(categorised: categorised)
+        var probed = Set<InboxTab>(), counts = ScopeCounts()
+        let probe = try bestTime { probed = try store.database.reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: nil) } }
+        let scoped = try bestTime { _ = try store.database.reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: me.id) } }
+        let count = try bestTime(runs: 3) { counts = try store.scopeCounts(accountId: nil) }
+        print(String(format: "tabs probe, %d of 8 categorised: %.2f ms (one account %.2f ms); full counts off the main thread: %.1f ms",
+                     categorised, probe, scoped, count))
+        #expect(probed == Set(InboxTab.allCases.filter { counts.tabThreads[$0, default: 0] > 0 }))
+        #expect(probe < 5 && scoped < 5, "bounded: \(probe) ms, \(scoped) ms")
+    }
+}
+
 // MARK: Move to tab
 
 @Test func moveToTabSwapsTheCategoryLabelsAndUndoPutsThemBack() throws {

@@ -113,6 +113,9 @@ final class AppModel {
     /// User labels of the account in scope (empty in the unified view).
     var labels: [MailLabel] = []
     var counts = ScopeCounts()
+    /// Gmail's tabs the scope's inbox has mail in, which the tab bar shows (`tabs`). Probed when the scope is set,
+    /// then kept from the counts.
+    var tabsWithMail: Set<InboxTab> = []
     var snapshot = ListSnapshot.empty
     /// True while the demo mailbox is being written on first launch.
     var isSeeding = false

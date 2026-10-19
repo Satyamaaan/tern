@@ -21,28 +21,28 @@ extension AppModel {
                 self.projects = projects
                 self.services.projects = projects
             }
-        observeScope(immediate: true)
+        observeScope()
         reloadList()
     }
 
-    /// Counts and labels depend on the account in scope. At launch (`immediate`) the first counts are read
-    /// before the window first draws, one pass over the inbox's index, so the tabs that have mail are there in
-    /// the first frame instead of moving in after it; after that they arrive off the main thread.
-    func observeScope(immediate: Bool = false) {
+    /// Counts and labels depend on the account in scope. Which of Gmail's tabs have mail is read here first, a
+    /// bounded probe (`fetchTabsWithMail`), so the tab bar is right in the first frame; the counts, one pass over
+    /// the scope's inbox, always arrive off the main thread and then keep it up to date.
+    func observeScope() {
         let reader = store.database.reader
         let accountId = scope.accountId
-        let receive: (ScopeCounts) -> Void = { [weak self] counts in
-            guard let self else { return }
-            self.counts = counts
-            let badge = counts.allAccountsInboxUnread
-            NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
-        }
-        let observation = ValueObservation
+        tabsWithMail = (try? reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: accountId) }) ?? []
+        countsObservation = ValueObservation
             .tracking { db in try MailStore.fetchScopeCounts(db, accountId: accountId) }
             .removeDuplicates()
-        countsObservation = immediate
-            ? observation.startRestarting(in: reader, scheduling: .immediate, onError: Self.log, onChange: receive)
-            : observation.startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log, onChange: receive)
+            .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
+                guard let self else { return }
+                self.counts = counts
+                let tabs = Set(InboxTab.allCases.filter { counts.tabThreads[$0, default: 0] > 0 })
+                if tabs != self.tabsWithMail { self.tabsWithMail = tabs }
+                let badge = counts.allAccountsInboxUnread
+                NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
+            }
         guard let accountId else {
             labelsObservation = nil
             labels = []

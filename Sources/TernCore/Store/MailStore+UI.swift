@@ -125,6 +125,32 @@ extension MailStore {
         return counts
     }
 
+    /// Which of Gmail's tabs the scope's inbox has mail in, bounded for the main thread: an index seek per tab for
+    /// threads Gmail has categorised, and the newest `uncategorisedSample` of those it hasn't (their tab comes from
+    /// Tern's category). A fallback tab whose threads are all older than that sample is missing until the full
+    /// counts (`fetchScopeCounts`) come in.
+    public static func fetchTabsWithMail(_ db: Database, accountId: String?, uncategorisedSample: Int = 500) throws -> Set<InboxTab> {
+        let scoped = accountId == nil ? "" : " AND accountId = ?"
+        let scopeArguments: StatementArguments = accountId.map { [$0] } ?? []
+        var tabs = Set<InboxTab>()
+        let categorised = try db.cachedStatement(sql: """
+            SELECT EXISTS(SELECT 1 FROM thread_label WHERE labelId = 'INBOX'\(scoped) AND gmailTab = ?)
+            """)
+        for tab in InboxTab.allCases where try Bool.fetchOne(categorised, arguments: scopeArguments + [tab]) == true {
+            tabs.insert(tab)
+        }
+        for category in try String?.fetchAll(db, sql: """
+            SELECT DISTINCT ai.category FROM (
+              SELECT accountId, threadId FROM thread_label
+              WHERE labelId = 'INBOX'\(scoped) AND gmailTab IS NULL ORDER BY lastDate DESC LIMIT ?
+            ) t
+            LEFT JOIN thread_ai ai ON ai.accountId = t.accountId AND ai.threadId = t.threadId
+            """, arguments: scopeArguments + [uncategorisedSample]) {
+            tabs.insert(InboxTab(fallback: category.flatMap(MailCategory.init(rawValue:))))
+        }
+        return tabs
+    }
+
     /// Flags or clears "needs reply" by hand. Threads the classifier hasn't seen get a manual entry.
     /// Returns what undo needs to put things back.
     @discardableResult

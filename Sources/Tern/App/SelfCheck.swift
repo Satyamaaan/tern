@@ -313,14 +313,18 @@ final class SelfCheck {
     private func hiddenTabs() {
         let scopes = [Scope.all] + model.accounts.map { Scope.account($0.id) }
         var found: (Scope, InboxTab)?
+        var probes: [Bool] = []
         for scope in scopes {
             model.setScope(scope)
+            let probed = model.tabsWithMail
             wait(0.3)
+            probes.append(probed == Set(InboxTab.allCases.filter { model.counts.tabThreads[$0, default: 0] > 0 }))
             if let empty = InboxTab.allCases.first(where: { $0 != .primary && model.counts.tabThreads[$0, default: 0] == 0 }) {
                 found = (scope, empty)
                 break
             }
         }
+        check("the tabs read when the scope changes are the ones the counts find", !probes.contains(false))
         guard let (scope, empty) = found else { return check("an empty tab in some scope", false) }
         check("an empty tab (\(empty.title), \(scope)) is hidden", !model.tabs.contains(.category(empty)))
         model.select(.category(empty))
@@ -455,7 +459,10 @@ final class SelfCheck {
         print(String(format: "  first page (%d rows): %.1f ms", AppModel.pageSize, Timing.end(interval)))
         interval = Timing.begin("counts")
         _ = try? store.scopeCounts(accountId: nil)
-        print(String(format: "  scope counts: %.1f ms", Timing.end(interval)))
+        print(String(format: "  scope counts (off the main thread): %.1f ms", Timing.end(interval)))
+        interval = Timing.begin("tabs")
+        _ = try? store.database.reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: nil) }
+        print(String(format: "  tabs with mail (main thread, scope change): %.2f ms", Timing.end(interval)))
         interval = Timing.begin("snapshot")
         _ = ListSnapshot(rows: model.rawRows, groupsByDate: true)
         print(String(format: "  list snapshot build: %.2f ms", Timing.end(interval)))

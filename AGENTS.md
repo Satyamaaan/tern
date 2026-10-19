@@ -46,7 +46,9 @@ design/               research and the visual spec (DESIGN.md)
   (`LabelChange.intentAdd`/`intentRemove`: every other category comes off): that is what is sent and what sync
   replays over Gmail's newer labels, while `add`/`remove` stay what undo takes back (measured again when Gmail
   refiles the message before the op lands).
-- `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads.
+- `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads. Scope counts
+  (`fetchScopeCounts`) are a pass over the scope's whole inbox, so they are only ever read off the main thread;
+  the tab bar's Gmail tabs come from a bounded probe (`fetchTabsWithMail`) when the scope is set.
 - `SearchService.search(_:accountId:limit:) -> [ThreadRow]`.
 - `TernSync/GmailAPI.swift` — protocol + DTOs mirroring Gmail API v1 JSON. The engine is tested against an
   in-memory fake implementation; the app uses the HTTP client.

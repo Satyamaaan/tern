@@ -148,7 +148,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 - Tabs: `All` · `Needs reply` · Gmail's tabs `Primary · Promotions · Social · Updates · Forums` (inbox tabs;
   off in `⋯` → Inbox Tabs or Settings → Layout) · pinned tabs (projects, labels of the account in scope, saved
   searches). The inbox opens on Primary (launch, the sidebar's Inbox, `g i`); All is the whole inbox. A Gmail tab
-  other than Primary with nothing in the scope's inbox is hidden, except while it is open. A thread is in the tab
+  other than Primary with nothing in the scope's inbox is hidden, except while it is open; the tabs shown are
+  right in the first frame (a cheap probe), the counts follow off the main thread. A thread is in the tab
   of its Gmail category (the newest message from someone else that has one); mail Gmail hasn't categorised goes
   by Tern's category (promotion and newsletter → Promotions, notification and receipt → Updates, the rest and
   unclassified mail → Primary). Each: 14 px icon (hue per the table), title, count in tabular `text3`: unread on
