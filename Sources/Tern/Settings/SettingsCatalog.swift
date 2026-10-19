@@ -4,7 +4,7 @@ import SwiftUI
 /// the sections finds them across all of them.
 enum SettingsItem: String, CaseIterable, Identifiable {
     case accounts, googleClient
-    case markRead, afterTriage, remoteImages, undoSend, signatures, sendFrom
+    case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
     case theme, density, dimRead, senderLogos
     case readingPane, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
@@ -17,7 +17,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     var section: SettingsSection {
         switch self {
         case .accounts, .googleClient: .accounts
-        case .markRead, .afterTriage, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
+        case .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
         case .theme, .density, .dimRead, .senderLogos: .appearance
         case .readingPane, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
@@ -30,7 +30,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     /// The small caps the item sits under in its section.
     var group: String? {
         switch self {
-        case .markRead, .afterTriage, .remoteImages: "Reading"
+        case .markRead, .afterTriage, .imagesInMail, .remoteImages: "Reading"
         case .undoSend, .signatures, .sendFrom: "Writing"
         case .readingPane, .sidebar: "Window"
         case .splitInbox, .pinnedTabs: "Tabs"
@@ -45,7 +45,8 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .googleClient: "google client oauth id secret cloud"
         case .markRead: "mark as read unread open delay"
         case .afterTriage: "after archive delete trash snooze next previous auto advance"
-        case .remoteImages: "remote images trusted senders privacy load pictures"
+        case .imagesInMail: "images in mail remote pictures logos load automatically ask first block privacy tracking pixels trackers"
+        case .remoteImages: "remote images always load trusted senders allowed pictures"
         case .undoSend: "undo send delay cancel"
         case .signatures: "signature"
         case .sendFrom: "send new mail from default account compose"
@@ -76,6 +77,8 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     func isShown(in model: AppModel) -> Bool {
         switch self {
         case .sendFrom: model.accounts.count > 1
+        // The always-load list only matters while images wait for a click.
+        case .remoteImages: model.prefs.imagesInMail == .ask
         case .demoMail: model.isFake
         default: true
         }
@@ -127,6 +130,7 @@ struct SettingsItemView: View {
         case .googleClient: GoogleClientSection(startEditing: state.editsGoogleClient).padding(.top, 16)
         case .markRead: MarkReadItem()
         case .afterTriage: AfterTriageItem()
+        case .imagesInMail: ImagesInMailItem()
         case .remoteImages: RemoteImagesItem(state: state)
         case .undoSend: UndoSendItem(state: state)
         case .signatures: SignaturesItem(state: state)

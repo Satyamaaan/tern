@@ -55,6 +55,8 @@ final class ReaderModel {
     #if DEBUG
     /// Stands in for `SenderLogos` in the snapshot harness.
     static var logoOverride: ((String) -> Data?)?
+    /// Stands in for the images setting in the snapshot harness, which leaves the user's defaults alone.
+    static var imagesOverride: ImagesInMail?
     #endif
 
     /// Senders whose remote images load, shared by every reader.
@@ -76,6 +78,7 @@ final class ReaderModel {
         self.services = services
         services.reader.model = self
         observeLogos()
+        observeImagesSetting()
         if Self.trustedSenders == nil { Self.trustedSenders = (try? services.store.imageAllowedSenders()) ?? [] }
     }
 
@@ -163,7 +166,30 @@ final class ReaderModel {
     }
 
     private var trust: ReaderTrust {
-        ReaderTrust(senders: Self.trustedSenders ?? [], messages: Self.loadedMessages, remoteImages: engine.blocksRemoteLoads)
+        ReaderTrust(senders: Self.trustedSenders ?? [], messages: Self.loadedMessages, remoteImages: engine.blocksRemoteLoads,
+                    automatic: Self.imagesInMail == .automatic)
+    }
+
+    /// Settings → Mail → Images in mail.
+    static var imagesInMail: ImagesInMail {
+        #if DEBUG
+        if let imagesOverride { return imagesOverride }
+        #endif
+        return Preferences.shared.imagesInMail
+    }
+
+    /// Follows the images setting for as long as this model lives: the open thread renders again with the
+    /// new trust (its signature changes, and bodies are cached per trust).
+    private func observeImagesSetting() {
+        withObservationTracking {
+            _ = Preferences.shared.imagesInMail
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if let detail = self.detail, let key = self.key { self.receive(detail, for: key) }
+                self.observeImagesSetting()
+            }
+        }
     }
 
     // MARK: Sender logos
