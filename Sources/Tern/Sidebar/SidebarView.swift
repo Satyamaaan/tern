@@ -37,6 +37,7 @@ struct SidebarView: View {
         row(.starred, "Starred", .starred)
         row(.drafts, "Drafts", .drafts, count: counts.drafts)
         row(.sent, "Sent", .sent)
+        row(.archive, "Archive", .archive)
         row(.allMail, "All mail", .allMail)
         SidebarRow(title: "More", selected: false, titleColor: Theme.text2) {
             IconView(icon: model.prefs.moreExpanded ? .chevronDown : .ellipsis, size: 16)

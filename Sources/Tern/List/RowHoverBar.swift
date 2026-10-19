@@ -2,14 +2,19 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// The three buttons that replace a row's tags and time on hover: Done, Snooze, `…`.
+/// The three buttons that replace a row's tags and time on hover: Archive (Move to Inbox in the Archive list),
+/// Snooze, `…`.
 struct RowHoverBar: View {
     let model: AppModel
     let keys: [ThreadKey]
 
     var body: some View {
         HStack(spacing: 2) {
-            HoverButton(icon: .done, help: hint("Done", "archive")) { model.perform(.archive, on: keys) }
+            if model.inArchive {
+                HoverButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox, on: keys) }
+            } else {
+                HoverButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive, on: keys) }
+            }
             Menu {
                 SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
             } label: {

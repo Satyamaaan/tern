@@ -178,11 +178,14 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
     radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
-    replace tags and time: Done, Snooze, `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus`
-    while the list has the keyboard in the key window, so focus shows without a ring. Selected neighbours
-    join into one block.
+    replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`. Selected: `selected`
+    fill; the cursor row gets `selectedFocus` while the list has the keyboard in the key window, so focus shows
+    without a ring. Selected neighbours join into one block.
 - Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
+- Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in that aren't in
+  the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons become Move to Inbox (⇧I),
+  with the same toast and undo, and `e` does nothing.
 - Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
   other lists one Display 17 line in `text2`.
 
@@ -206,7 +209,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
   `raised`. Remembered (Settings → Layout).
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
-  Done, Snooze, `⋯` as icon buttons.
+  Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯` as icon buttons.
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
@@ -222,10 +225,11 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
 title bar; remembered; Reduce Motion crossfades). Mailboxes (Inbox, Needs reply, Snoozed, Starred, Drafts,
-Sent, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover; drag rows
-onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and pinned at
-the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when something
-needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts tabular.
+Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover;
+drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
+pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
+something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts
+tabular.
 
 ### ⌘K palette
 Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).

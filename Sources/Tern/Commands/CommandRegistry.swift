@@ -54,7 +54,8 @@ final class CommandRegistry {
         commands = makeCommands()
         index = Dictionary(uniqueKeysWithValues: commands.enumerated().map { ($1.id, $0) })
         defaultKeys = Dictionary(uniqueKeysWithValues: commands.map { ($0.id, $0.keys) })
-        self.overrides = Self.validated(overrides ?? model.prefs.shortcutOverrides, commands: commands, textKeys: textKeys)
+        let saved = Self.renamed(overrides ?? model.prefs.shortcutOverrides)
+        self.overrides = Self.validated(saved, commands: commands, textKeys: textKeys)
         saveOverrides(self.overrides)
         applyOverrides()
     }
@@ -94,8 +95,9 @@ final class CommandRegistry {
 
         // Message
         list += [
+            // Everything in the Archive list is archived already; Move to Inbox takes the archive button's place.
             Command(id: "archive", title: "Archive", group: .actions, keys: [.key("e")], menu: .message,
-                    aliases: ["done", "mark done"], isEnabled: hasTargets) { m.perform(.archive, on: m.targets) },
+                    aliases: ["done", "mark done"], isEnabled: { hasTargets() && !m.inArchive }) { m.perform(.archive, on: m.targets) },
             Command(id: "snooze", title: "Snooze…", group: .actions, keys: [.key("h")], menu: .message,
                     aliases: ["remind", "later"], isEnabled: hasTargets) { m.palette = .snooze(m.targets) },
             Command(id: "trash", title: "Move to Trash", group: .actions, keys: [.key("#"), .special(.delete)], menu: .message,
@@ -177,13 +179,13 @@ final class CommandRegistry {
             ("go.starred", "Starred", .starred, "g s", []),
             ("go.drafts", "Drafts", .drafts, "g d", []),
             ("go.sent", "Sent", .sent, "g t", []),
-            ("go.allMail", "All Mail", .allMail, "g a", ["done", "archive"]),
+            ("go.archive", "Archive", .archive, "g e", ["go to archive", "archived", "done"]),
+            ("go.allMail", "All Mail", .allMail, "g a", ["everything"]),
         ]
         for (id, title, kind, chord, aliases) in mailboxes {
             list.append(Command(id: id, title: title, group: .goTo, chord: chord, menu: .go, aliases: aliases) { m.show(kind) })
         }
         list += [
-            Command(id: "go.done", title: "Done", group: .goTo, chord: "g e", hiddenInPalette: true) { m.show(.allMail) },
             Command(id: "go.spam", title: "Spam", group: .goTo, chord: "g !", menu: .go) { m.show(.spam) },
             Command(id: "go.trash", title: "Trash", group: .goTo, chord: "g #", menu: .go) { m.show(.trash) },
             Command(id: "go.label", title: "Label…", group: .goTo, chord: "g l", menu: .go, section: 1,
@@ -347,6 +349,19 @@ extension CommandRegistry {
         return commands.contains { command in
             !command.isTextSafe && command.menu != nil && !command.paletteOnly && command.menuKey?.matches(event) == true
         }
+    }
+
+    /// Commands whose id changed, old to new. Keys saved under an old id move to the new one.
+    static let renamedIds = ["go.done": "go.archive"]
+
+    /// `saved` with keys under a renamed id moved to its new id, unless the new id has keys of its own.
+    static func renamed(_ saved: ShortcutOverrides) -> ShortcutOverrides {
+        var keys = saved.keys
+        for (old, new) in renamedIds {
+            guard let moved = keys.removeValue(forKey: old) else { continue }
+            if keys[new] == nil { keys[new] = moved }
+        }
+        return ShortcutOverrides(keys: keys)
     }
 
     /// Saved changes as they can apply: only commands that exist and aren't locked, without reserved keys

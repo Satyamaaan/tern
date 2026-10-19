@@ -160,7 +160,11 @@ struct ReaderTopBar: View {
             }
             Spacer(minLength: 0)
             if let key = model.key {
-                ReaderIconButton(icon: .done, help: hint("Done", "archive")) { model.perform(.archive) }
+                if app?.inArchive == true {
+                    ReaderIconButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox) }
+                } else {
+                    ReaderIconButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive) }
+                }
                 ReaderMenuButton(icon: .snoozed, help: hint("Snooze", "snooze")) {
                     SnoozeMenuItems(threads: [key]) { model.pickingSnoozeDate = true }
                 }

@@ -29,6 +29,10 @@ extension AppModel {
         }
     }
 
+    /// The Archive list is on screen: its threads are archived already, so archive buttons move them back to
+    /// the inbox instead.
+    var inArchive: Bool { kind == .archive && !isSearching }
+
     /// Whether the action takes threads out of the list on screen.
     func leavesList(_ action: MailAction) -> Bool {
         if isSearching { return false }
@@ -42,7 +46,7 @@ extension AppModel {
              (.needsReply, .archive), (.needsReply, .snooze), (.needsReply, .moveToLabel):
             return true
         case (.starred, .unstar), (.snoozed, .unsnooze), (.trash, .untrash), (.trash, .moveToInbox),
-             (.spam, .notSpam), (.spam, .moveToInbox):
+             (.spam, .notSpam), (.spam, .moveToInbox), (.archive, .moveToInbox), (.archive, .snooze):
             return true
         case (.label(let id), .removeLabel(let removed)):
             return id == removed
