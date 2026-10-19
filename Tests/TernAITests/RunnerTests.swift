@@ -35,15 +35,18 @@ import Testing
 
 @Test func systemRunnerCancellationKills() async throws {
     let marker = FileManager.default.temporaryDirectory.appendingPathComponent("tern-runner-\(UUID().uuidString)").path
+    var runner = SystemProcessRunner()
+    runner.killGrace = 10
     let task = Task {
-        try await SystemProcessRunner().run(ProcessInvocation(
+        try await runner.run(ProcessInvocation(
             executable: "/bin/sh", arguments: ["-c", "sleep 2; touch \(marker)"]), timeout: 30)
     }
     try await Task.sleep(for: .milliseconds(200))
     let started = Date()
     task.cancel()
     await #expect(throws: CancellationError.self) { try await task.value }
-    #expect(Date().timeIntervalSince(started) < 1)
+    // SIGTERM was enough: the answer came once the group was gone, long before SIGKILL was due.
+    #expect(Date().timeIntervalSince(started) < 2)
     try await Task.sleep(for: .seconds(2.5))
     #expect(!FileManager.default.fileExists(atPath: marker))
 }

@@ -86,6 +86,9 @@ private final class Run: @unchecked Sendable {
     /// The child's pid, which is also its process group id; 0 until it is launched.
     private var pid: pid_t = 0
     private var exitCode: Int32 = 0
+    /// While a stopped group winds down: the timer that checks it, and whether SIGKILL went out.
+    private var teardownTimer: DispatchSourceTimer?
+    private var killSent = false
     private var stdoutData = Data()
     private var stderrData = Data()
 
@@ -178,27 +181,32 @@ private final class Run: @unchecked Sendable {
     }
 
     /// SIGTERM to the group, SIGKILL after the grace period, and the answer once nothing of the group is
-    /// left, or after `killWait` more (logged): the caller's CLI slot isn't free before then.
+    /// left, or after `killWait` more (logged): the caller's CLI slot isn't free before then. Checked on a
+    /// timer, so no thread is held while the group winds down.
     private func tearDown(_ group: pid_t, _ reason: StopReason) {
         kill(-group, SIGTERM)
-        DispatchQueue.global(qos: .utility).async { [self] in
-            if !Self.waitForGroup(group, seconds: killGrace) {
-                kill(-group, SIGKILL)
-                if !Self.waitForGroup(group, seconds: killWait) {
-                    aiLog.error("a stopped CLI's processes were still running \(self.killWait, format: .fixed(precision: 1))s after SIGKILL")
+        let started = Date()
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        lock.withLock { teardownTimer = timer }
+        timer.schedule(deadline: .now() + .milliseconds(10), repeating: .milliseconds(20))
+        timer.setEventHandler { [self] in
+            let elapsed = Date().timeIntervalSince(started)
+            let gone = kill(-group, 0) == -1 && errno == ESRCH
+            if !gone {
+                let sendKill = lock.withLock { () -> Bool in
+                    guard elapsed >= killGrace, !killSent else { return false }
+                    killSent = true
+                    return true
                 }
+                if sendKill { kill(-group, SIGKILL) }
+                guard elapsed >= killGrace + killWait else { return }
+                aiLog.error("a stopped CLI's processes were still running \(self.killWait, format: .fixed(precision: 1))s after SIGKILL")
             }
+            timer.cancel()
+            lock.withLock { teardownTimer = nil }
             finish(.failure(Self.error(for: reason)))
         }
-    }
-
-    private static func waitForGroup(_ group: pid_t, seconds: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while true {
-            if kill(-group, 0) == -1, errno == ESRCH { return true }
-            if Date() >= deadline { return false }
-            usleep(20_000)
-        }
+        timer.resume()
     }
 
     private func finish(_ result: Result<ProcessResult, Error>) {
