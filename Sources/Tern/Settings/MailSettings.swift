@@ -54,8 +54,8 @@ struct ImagesInMailItem: View {
 
     private func detail(_ choice: ImagesInMail) -> String {
         switch choice {
-        case .automatic: "Images load through Tern without cookies. Tracking pixels are always blocked."
-        case .ask: "Images stay hidden until you load them. Tracking pixels are always blocked."
+        case .automatic: "Senders can see when you open their mail. Tracking pixels are always blocked."
+        case .ask: "Images stay hidden until you load them, and senders can see when you do. Tracking pixels are always blocked."
         }
     }
 }
