@@ -78,13 +78,12 @@ extension AccountSync {
     }
 
     static func mentionsPendingMute(_ payload: LabelOpPayload) -> Bool {
-        payload.changes.contains { $0.add.contains(MailStore.pendingMuteLabel) || $0.remove.contains(MailStore.pendingMuteLabel) }
+        payload.changes.contains { ($0.requestAdd + $0.requestRemove).contains(MailStore.pendingMuteLabel) }
     }
 
     static func replacingPendingMute(_ payload: LabelOpPayload, with muted: String) -> LabelOpPayload {
-        func swap(_ ids: [String]) -> [String] { ids.map { $0 == MailStore.pendingMuteLabel ? muted : $0 } }
         var resolved = payload
-        resolved.changes = payload.changes.map { LabelChange(messageId: $0.messageId, add: swap($0.add), remove: swap($0.remove)) }
+        resolved.changes = payload.changes.map { $0.replacingLabel(MailStore.pendingMuteLabel, with: muted) }
         return resolved
     }
 

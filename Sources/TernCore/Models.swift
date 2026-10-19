@@ -588,14 +588,26 @@ public struct Contact: TernRecord, Hashable, Identifiable {
 /// Label edits for one message, computed at the moment the user acted.
 public struct LabelChange: Codable, Hashable, Sendable {
     public var messageId: String
+    /// What the message's labels changed by: exactly what undo takes back.
     public var add: [String]
     public var remove: [String]
+    /// What the action asks of Gmail when that is more than it changed here: Move to tab takes off every other
+    /// category, also one the message gains before the op reaches Gmail. Nil when it is `add` and `remove`.
+    public var intentAdd: [String]?
+    public var intentRemove: [String]?
 
-    public init(messageId: String, add: [String], remove: [String]) {
+    public init(messageId: String, add: [String], remove: [String], intentAdd: [String]? = nil, intentRemove: [String]? = nil) {
         self.messageId = messageId
         self.add = add
         self.remove = remove
+        self.intentAdd = intentAdd
+        self.intentRemove = intentRemove
     }
+
+    /// The labels the op adds when it is sent, and when sync replays it over newer labels from Gmail.
+    public var requestAdd: [String] { intentAdd ?? add }
+    /// The labels the op removes when it is sent, and when sync replays it over newer labels from Gmail.
+    public var requestRemove: [String] { intentRemove ?? remove }
 }
 
 /// A user action already applied locally, waiting to reach Gmail. Written by `MailStore`,

@@ -103,8 +103,8 @@ extension AccountSync {
         var groups: [(add: [String], remove: [String], ids: [String])] = []
         var groupIndex: [String: Int] = [:]
         for change in payload.changes where stored.contains(change.messageId) {
-            let add = Array(Set(change.add)).sorted()
-            let remove = Array(Set(change.remove)).sorted()
+            let add = Array(Set(change.requestAdd)).sorted()
+            let remove = Array(Set(change.requestRemove)).sorted()
             guard !add.isEmpty || !remove.isEmpty else { continue }
             let key = add.joined(separator: ",") + "|" + remove.joined(separator: ",")
             if let index = groupIndex[key] {

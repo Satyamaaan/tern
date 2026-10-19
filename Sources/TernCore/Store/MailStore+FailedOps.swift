@@ -24,12 +24,12 @@ extension MailStore {
         switch op.kind {
         case .modifyLabels:
             guard let payload = try? JSONDecoder().decode(LabelOpPayload.self, from: Data(op.payload.utf8)) else { return false }
-            let named = Set(payload.changes.flatMap { $0.add + $0.remove }).subtracting(SystemLabel.all)
+            let named = Set(payload.changes.flatMap { $0.requestAdd + $0.requestRemove }).subtracting(SystemLabel.all)
             if !labels.isEmpty, !named.isSubset(of: labels) { return false }
             let current = try messageLabels(db, accountId: op.accountId, messageIds: payload.changes.map(\.messageId))
             return payload.changes.contains { change in
                 guard let now = current[change.messageId] else { return false }
-                return !Set(change.add).isSubset(of: now) || !Set(change.remove).isDisjoint(with: now)
+                return !Set(change.requestAdd).isSubset(of: now) || !Set(change.requestRemove).isDisjoint(with: now)
             }
         case .saveDraft, .sendDraft:
             guard let draftId = (try? JSONDecoder().decode(DraftOpPayload.self, from: Data(op.payload.utf8)))?.draftId,

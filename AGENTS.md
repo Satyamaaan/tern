@@ -42,7 +42,10 @@ design/               research and the visual spec (DESIGN.md)
   of its newest message from someone else (`InboxTab.gmailTab`); threads without one fall back to
   `thread_ai.category` (`InboxTab(fallback:)`, unclassified → Primary). Move to tab is `MailAction.moveToTab`.
 - `MailStore.perform(_:on:)` / `undo(_:)` — optimistic actions. Each writes one `PendingOp` per account
-  with a `LabelOpPayload` of exact per-message label changes.
+  with a `LabelOpPayload` of exact per-message label changes. Move to tab also records what it asks of Gmail
+  (`LabelChange.intentAdd`/`intentRemove`: every other category comes off): that is what is sent and what sync
+  replays over Gmail's newer labels, while `add`/`remove` stay what undo takes back (measured again when Gmail
+  refiles the message before the op lands).
 - `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads.
 - `SearchService.search(_:accountId:limit:) -> [ThreadRow]`.
 - `TernSync/GmailAPI.swift` — protocol + DTOs mirroring Gmail API v1 JSON. The engine is tested against an

@@ -35,12 +35,20 @@ public enum MailAction: Codable, Hashable, Sendable {
         }
     }
 
-    /// Adds or removes a user label, which project rules may look at.
-    var changesUserLabels: Bool {
+    /// Adds or removes a label project rules may look at: a user label, or Gmail's category.
+    var changesRuleLabels: Bool {
         switch self {
-        case .addLabel, .removeLabel, .moveToLabel: true
+        case .addLabel, .removeLabel, .moveToLabel, .moveToTab: true
         default: false
         }
+    }
+
+    /// Its labels must hold whatever the messages gain or lose before the op reaches Gmail: Move to tab's
+    /// category replaces every other, also one Gmail files a message under meanwhile. Its changes carry that
+    /// intent (`LabelChange.intentAdd`, `intentRemove`) apart from what they changed here.
+    var keepsIntent: Bool {
+        if case .moveToTab = self { return true }
+        return false
     }
 
     /// True when the thread leaves the current list (the UI then selects the next one).
@@ -93,19 +101,30 @@ extension MailStore {
             var newLabels: [String: [String]] = [:]
 
             for (threadId, threadMessages) in Dictionary(grouping: messages, by: \.threadId) {
+                var threadChanges: [LabelChange] = []
+                var intentOnly: [LabelChange] = []
                 for change in labelChanges(for: action, messages: threadMessages) {
                     guard let message = threadMessages.first(where: { $0.id == change.messageId }) else { continue }
                     var labels = Set(message.labelIds)
                     labels.subtract(change.remove)
                     labels.formUnion(change.add)
-                    let effective = LabelChange(
+                    var effective = LabelChange(
                         messageId: change.messageId,
                         add: change.add.filter { !message.labelIds.contains($0) },
                         remove: change.remove.filter { message.labelIds.contains($0) })
-                    guard !effective.add.isEmpty || !effective.remove.isEmpty else { continue }
+                    if action.keepsIntent {
+                        effective.intentAdd = change.add
+                        effective.intentRemove = change.remove
+                    }
+                    guard !effective.add.isEmpty || !effective.remove.isEmpty else {
+                        if action.keepsIntent { intentOnly.append(effective) }
+                        continue
+                    }
                     newLabels[message.id] = labels.sorted()
-                    changes.append(effective)
+                    threadChanges.append(effective)
                 }
+                // Messages already as asked carry the intent too, so a label one gains meanwhile can't undo the move.
+                if !threadChanges.isEmpty { changes += threadChanges + intentOnly }
                 let key = ThreadKey(accountId: accountId, threadId: threadId)
                 switch action {
                 case .snooze(let until):
@@ -129,7 +148,7 @@ extension MailStore {
         }
 
         // Gmail echoes the change back unchanged, so sync won't re-run label-based project rules.
-        if action.changesUserLabels { try ProjectRules.apply(db, keys: Set(threads)) }
+        if action.changesRuleLabels { try ProjectRules.apply(db, keys: Set(threads)) }
         return UndoToken(action: action, threads: threads, ops: ops, previousSnoozes: previousSnoozes)
     }
 
@@ -165,9 +184,13 @@ extension MailStore {
             for queued in token.ops.reversed() {
                 let current = try Self.messageLabels(db, accountId: queued.accountId, messageIds: Array(queued.labelsAfter.keys))
                 let muted = try Setting.fetchOne(db, key: Self.muteLabelKey(queued.accountId))?.value
-                let changes = queued.changes.map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
+                let op = try PendingOp.fetchOne(db, key: queued.opId)
+                // An op still queued may record more than it did here: labels its intent took off that sync
+                // brought in meanwhile (`replayingUnconfirmedChanges`), which undo puts back too.
+                let recorded = op.flatMap { try? JSONDecoder().decode(LabelOpPayload.self, from: Data($0.payload.utf8)) }?.changes
+                let changes = (recorded ?? queued.changes).map { Self.resolvingPendingMute($0, muted: muted, labels: current[$0.messageId]) }
                 let untouched = queued.labelsAfter.allSatisfy { id, after in current[id].map(Set.init) == Set(after) }
-                if untouched, let op = try PendingOp.fetchOne(db, key: queued.opId), op.state == .pending, !op.dispatched {
+                if untouched, let op, op.state == .pending, !op.dispatched {
                     try op.delete(db)
                 } else {
                     reverse[queued.accountId, default: []] += changes.map(\.reversed)
@@ -190,7 +213,7 @@ extension MailStore {
                 try PendingOp(accountId: accountId, kind: .modifyLabels, payload: try encodeJSON(payload)).insert(db)
             }
 
-            if token.action.changesUserLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
+            if token.action.changesRuleLabels { try ProjectRules.apply(db, keys: Set(token.threads)) }
 
             for (key, until) in token.previousSnoozes {
                 if let until {
