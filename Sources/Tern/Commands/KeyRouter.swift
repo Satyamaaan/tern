@@ -66,6 +66,11 @@ final class KeyRouter {
         }
     }
 
+    func uninstall() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
     // MARK: Routing
 
     func handle(_ event: NSEvent) -> NSEvent? {

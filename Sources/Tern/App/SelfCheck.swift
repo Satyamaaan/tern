@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// `--check`: drives the shell offscreen through triage, undo, search, splits, selection, key routing and
-/// the settings page, and prints PASS/FAIL per step plus timings. It writes to the database, so point `TERN_DB`
-/// at a throwaway copy of a seeded mailbox.
+/// `--check`: drives the shell offscreen through triage, undo, search, splits, selection, key routing, the
+/// settings page and typing through the real event path, and prints PASS/FAIL per step plus timings. It writes
+/// to the database, so point `TERN_DB` at a throwaway copy of a seeded mailbox.
 @MainActor
 final class SelfCheck {
     let model: AppModel
@@ -47,8 +47,11 @@ final class SelfCheck {
         paletteSearch()
         integration()
         settings()
+        typing()
         if ProcessInfo.processInfo.environment["TERN_CHECK_MENUS"] == "1" { printMenus() }
         print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
+        // exit() doesn't wait for the last preference writes (a check putting a setting back) to be saved.
+        UserDefaults.standard.synchronize()
         exit(failures == 0 ? 0 : 1)
     }
 

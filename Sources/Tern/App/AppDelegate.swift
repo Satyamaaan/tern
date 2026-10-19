@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         registry = CommandRegistry(model: model, shell: self)
         model.registry = registry
         wire(services)
-        if options.snapshotDirectory == nil, !CommandLine.arguments.contains("--check") {
+        if options.snapshotDirectory == nil, !CommandLine.arguments.contains("--check"), !options.isTypingCheck {
             let integration = Integration(services: services, model: model)
             integration.wire()
             self.integration = integration
@@ -65,6 +65,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         if CommandLine.arguments.contains("--check") {
             SelfCheck(model: model, registry: registry).run()
         }
+        #if DEBUG
+        if options.isTypingCheck {
+            TypingCheck(model: model, registry: registry).start()
+            return
+        }
+        #endif
         if let directory = options.snapshotDirectory {
             Snapshotter(model: model, registry: registry).run(into: directory)
             return
