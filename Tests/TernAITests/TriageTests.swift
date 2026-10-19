@@ -4,8 +4,12 @@ import Testing
 @testable import TernAI
 import TernCore
 
-private func queue(_ database: AppDatabase, _ provider: FakeProvider, batchSize: Int = 15) -> TriageQueue {
-    TriageQueue(database: database, providers: AIProviders([provider]), batchSize: batchSize, now: { testNow })
+private func queue(_ database: AppDatabase, _ provider: FakeProvider, batchSize: Int = 15, concurrency: Int = 3) -> TriageQueue {
+    TriageQueue(database: database, providers: AIProviders([provider]), batchSize: batchSize, concurrency: concurrency, now: { testNow })
+}
+
+private func key(_ thread: String) -> ThreadKey {
+    ThreadKey(accountId: me.id, threadId: thread)
 }
 
 @Test func triageBatchesThreadsAndWritesVerdicts() async throws {
@@ -207,10 +211,173 @@ private func queue(_ database: AppDatabase, _ provider: FakeProvider, batchSize:
     #expect(await triage.currentStatus.state == .idle)
 }
 
+@Test func triageRunsSeveralCallsAtOnceUpToTheCap() async throws {
+    let database = try makeDatabase((0..<60).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
+    let running = Counter()
+    let provider = FakeProvider { request, _ in
+        await running.enter()
+        try await Task.sleep(for: .milliseconds(100))
+        await running.leave()
+        return triageAnswer(request)
+    }
+    await queue(database, provider, batchSize: 5, concurrency: 3).runPass()
+    #expect(await running.peak == 3)
+    #expect(provider.requests.count == 12, "every thread went out once")
+    #expect(provider.requests.allSatisfy { $0.isBackground })
+    #expect(try aiRows(database).count == 60)
+}
+
+@Test func triageBacksOffOnceWhenConcurrentCallsHitTheUsageLimit() async throws {
+    let database = try makeDatabase((0..<40).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
+    let state = TestState()
+    state.isOn = true
+    let running = Counter()
+    let provider = FakeProvider { request, _ in
+        await running.enter()
+        try await Task.sleep(for: .milliseconds(20))
+        await running.leave()
+        if state.isOn { throw AIError.rateLimited("usage limit reached") }
+        return triageAnswer(request)
+    }
+    let triage = TriageQueue(database: database, providers: AIProviders([provider]), batchSize: 5, concurrency: 3, now: { state.now })
+
+    // Three calls at once all hit the limit: one pause of five minutes, nothing written.
+    await triage.runPass()
+    #expect(provider.requests.count == 3)
+    #expect(await triage.currentStatus.state == .waiting(until: testNow.addingTimeInterval(300), reason: "usage limit reached"))
+    #expect(try aiRows(database).isEmpty)
+    await triage.runPass()
+    #expect(provider.requests.count == 3, "nothing is sent while waiting")
+
+    // Still limited: the next pass tries one call, and the pause doubles once (not once per call).
+    state.now = testNow.addingTimeInterval(301)
+    await triage.runPass()
+    #expect(provider.requests.count == 4)
+    #expect(await triage.currentStatus.state == .waiting(until: state.now.addingTimeInterval(600), reason: "usage limit reached"))
+
+    // The limit lifts: the pass starts with a single call, ramps up, and no thread was dropped.
+    state.isOn = false
+    state.now = state.now.addingTimeInterval(601)
+    let before = await running.atStart.count
+    await triage.runPass()
+    #expect(await running.atStart[before] == 1)
+    #expect(try aiRows(database).count == 40)
+    #expect(provider.requests.count == 4 + 8)
+    #expect(await triage.currentStatus.state == .idle)
+}
+
+@Test func triageResendsThreadsAfterAFailedCall() async throws {
+    let database = try makeDatabase((0..<3).map { TestMail(id: "m\($0)", thread: "t\($0)") })
+    let provider = FakeProvider { request, attempt in
+        if attempt == 1 { throw AIError.timedOut }
+        return triageAnswer(request)
+    }
+    let triage = queue(database, provider)
+    await #expect(throws: AIError.timedOut) { try await triage.processBatch() }
+    let result = try await triage.processBatch()
+    #expect(result.sent == 3 && result.classified == 3)
+}
+
+@Test func triageSendsThreadsOnScreenFirst() async throws {
+    let inbox = (0..<20).map { TestMail(id: "i\($0)", thread: "inbox\($0)", subject: "Inbox \($0)", daysAgo: 1 + Double($0) * 0.1) }
+    let archived = (0..<6).map { TestMail(id: "a\($0)", thread: "old\($0)", subject: "Old \($0)", daysAgo: 10 + Double($0), labels: []) }
+    let database = try makeDatabase(inbox + archived)
+    let provider = FakeProvider { request, _ in triageAnswer(request) }
+    let triage = queue(database, provider, batchSize: 10, concurrency: 1)
+
+    // The rows on screen go first, in screen order and in a batch of their own; threads that don't
+    // need AI (or don't exist) are skipped.
+    await triage.prioritize([key("old4"), key("old1"), key("inbox3"), key("missing"), key("old4")])
+    #expect(try await triage.processBatch().sent == 3)
+    #expect(subjectsIn(provider.requests[0].input) == ["Old 4", "Old 1", "Inbox 3"])
+    // Then the inbox, newest first, then older mail.
+    try await triage.processBatch()
+    #expect(subjectsIn(provider.requests[1].input) == ["Inbox 0", "Inbox 1", "Inbox 2"] + (4...10).map { "Inbox \($0)" })
+    try await triage.processBatch()
+    #expect(subjectsIn(provider.requests[2].input) == (11...19).map { "Inbox \($0)" } + ["Old 0"])
+    try await triage.processBatch()
+    #expect(subjectsIn(provider.requests[3].input) == ["Old 2", "Old 3", "Old 5"])
+}
+
+@Test func triageSplitsThreadsOnScreenAcrossFreeCalls() async throws {
+    let mails = (0..<30).map { TestMail(id: "m\($0)", thread: "t\($0)", subject: "Thread \($0)", daysAgo: 1 + Double($0) * 0.1) }
+    let database = try makeDatabase(mails)
+    let provider = FakeProvider { request, _ in
+        try await Task.sleep(for: .milliseconds(50))
+        return triageAnswer(request)
+    }
+    let triage = queue(database, provider, batchSize: 15, concurrency: 3)
+    let screen = (10..<22).map { key("t\($0)") }
+    await triage.prioritize(screen)
+    await triage.runPass()
+    // Twelve threads on screen over three free calls: no call smaller than five, nothing else mixed in.
+    let first = provider.requests.prefix(3).map { subjectsIn($0.input) }
+    #expect(first.map(\.count) == [5, 5, 2])
+    #expect(Set(first.joined()) == Set((10..<22).map { "Thread \($0)" }))
+    #expect(try aiRows(database).count == 30)
+}
+
+@Test func triageReportsProgressWhileItWorks() async throws {
+    let database = try makeDatabase((0..<40).map { TestMail(id: "m\($0)", thread: "t\($0)", daysAgo: Double($0) * 0.2) })
+    let box = QueueBox()
+    let seen = ProgressLog()
+    let provider = FakeProvider { request, _ in
+        if let progress = await box.queue?.currentStatus.progress { await seen.add(progress) }
+        try await Task.sleep(for: .milliseconds(20))
+        return triageAnswer(request)
+    }
+    let triage = queue(database, provider, batchSize: 10, concurrency: 2)
+    box.queue = triage
+    await triage.runPass()
+    let log = await seen.items
+    #expect(log.count == 4)
+    #expect(log.allSatisfy { $0.total == 40 })
+    #expect(log.map(\.done) == log.map(\.done).sorted() && log.first?.done == 0 && (log.last?.done ?? 40) < 40)
+    let status = await triage.currentStatus
+    #expect(status.progress == nil && status.state == .idle && status.classified == 40)
+}
+
+private final class QueueBox: @unchecked Sendable {
+    var queue: TriageQueue?
+}
+
+private actor ProgressLog {
+    var items: [TriageQueue.Progress] = []
+    func add(_ item: TriageQueue.Progress) { items.append(item) }
+}
+
 private func waitUntil(_ condition: @escaping () -> Bool) async throws {
     for _ in 0..<200 {
         if condition() { return }
         try await Task.sleep(for: .milliseconds(10))
     }
     Issue.record("timed out waiting")
+}
+
+@Test func triagePromptSizeIsPinned() {
+    let owner = me.email
+    let ethan = Participant(name: "Ethan Brooks", email: "ethan@example.com")
+    let team = (1...9).map { Participant(name: "Teammate \($0)", email: "team\($0)@example.com") }
+    let threads = (1...15).map { index in
+        PromptThread(
+            key: ThreadKey(accountId: me.id, threadId: "t\(index)"), subject: "Launch plan \(index)", messageCount: 2,
+            lastDate: testNow, labels: ["inbox", "unread"], messages: [
+                .init(from: Participant(name: "Alex Morgan", email: owner), to: [ethan], cc: [], date: testNow.addingTimeInterval(-7_200),
+                      text: String(repeating: "Sounds good, see my notes. ", count: 11), isFromMe: true),
+                .init(from: ethan, to: team.prefix(3) + [Participant(name: "Alex Morgan", email: owner)] + team.dropFirst(3), cc: [],
+                      date: testNow, text: String(repeating: "Can you confirm the budget by Thursday? ", count: 14), isFromMe: false),
+            ])
+    }
+    let request = Prompts.triage(threads, refs: (1...15).map(String.init), owner: [owner], projects: nil, today: testNow)
+    // What every triage call sends for 15 threads. A change here changes the cost of every call: update
+    // these numbers on purpose, with a measurement.
+    #expect(request.instructions.utf8.count == 1_536)
+    #expect(request.input.utf8.count == 19_641)
+    #expect(request.schema?.utf8.count == 494)
+    // Long recipient lists are cut to four, the owner's address first.
+    #expect(request.input.contains(
+        #"to="Alex Morgan ‹alex@kiteworks.dev›, Teammate 1 ‹team1@example.com›, Teammate 2 ‹team2@example.com›, Teammate 3 ‹team3@example.com› +6 more""#))
+    // The summary comes before needsReply, so the model writes down what is asked first.
+    let schema = request.schema ?? ""
+    #expect(schema.range(of: #""summary""#)!.lowerBound < schema.range(of: #""needsReply""#)!.lowerBound)
 }

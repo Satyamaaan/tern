@@ -24,11 +24,14 @@ enum Prompts {
             tools and services), newsletter (editorial mail the owner subscribed to), receipt (receipts, invoices, \
             orders, bookings, shipping), calendar (invitations and replies to them), promotion (marketing, sales), \
             security (sign-in codes, password resets, security alerts), other.
-            - needsReply: true only when the latest message is from someone else, is written to the owner, and asks \
-            them something or waits on them. Never true for automated mail.
+            - summary: one plain line of at most 110 characters: what it is about, then what the sender asks of the \
+            owner, if anything. No greeting, no quotes, no emoji; don't start with "This email".
+            - needsReply: true when the latest message is from someone else, is written to the owner, and asks or \
+            requests anything of them: a question, an answer, their availability, a decision, a document, a \
+            signature or a review, even politely or with no rush. If your summary says the sender asks, requests or \
+            wants something from the owner, this is true. False when it only informs, thanks, shares or confirms. \
+            Never true for automated mail.
             - priority: 0 can wait, 1 normal, 2 needs attention soon, 3 urgent today.
-            - summary: one plain line of at most 110 characters: what it is about and what is asked. No greeting, \
-            no quotes, no emoji; don't start with "This email".
             """
         if projects != nil {
             rules += "\n- project: the id of the one listed project this thread clearly belongs to, or null."
@@ -49,11 +52,13 @@ enum Prompts {
         var properties = """
             "threadKey":{"type":"string"},\
             "category":{"type":"string","enum":[\(MailCategory.allCases.map { "\"\($0.rawValue)\"" }.joined(separator: ","))]},\
+            "summary":{"type":"string"},\
             "needsReply":{"type":"boolean"},\
-            "priority":{"type":"integer"},\
-            "summary":{"type":"string"}
+            "priority":{"type":"integer"}
             """
-        var required = #""threadKey","category","needsReply","priority","summary""#
+        // The summary comes before needsReply: writing down what is asked first is how a model without
+        // thinking turned on gets needsReply right.
+        var required = #""threadKey","category","summary","needsReply","priority""#
         if withProjects {
             properties += #","project":{"type":["string","null"]}"#
             required += #","project""#
@@ -142,8 +147,8 @@ enum Prompts {
         text += "Messages in thread: \(thread.messageCount)\n"
         for message in thread.messages {
             let from = message.isFromMe ? "the owner" : person(message.from)
-            text += "<message from=\"\(from)\" to=\"\(message.to.map(person).joined(separator: ", "))\""
-            if !message.cc.isEmpty { text += " cc=\"\(message.cc.map(person).joined(separator: ", "))\"" }
+            text += "<message from=\"\(from)\" to=\"\(people(message.to, owner: thread.key.accountId))\""
+            if !message.cc.isEmpty { text += " cc=\"\(people(message.cc, owner: thread.key.accountId))\"" }
             text += " date=\"\(day(message.date, time: true))\">\n\(clean(message.text))\n</message>\n"
         }
         return text + "</thread>\n"
@@ -159,6 +164,14 @@ enum Prompts {
     static func clean(_ text: String) -> String {
         text.replacingOccurrences(of: "<", with: "‹").replacingOccurrences(of: ">", with: "›")
             .replacingOccurrences(of: "\"", with: "'")
+    }
+
+    /// At most `limit` recipients, the owner's address first, then how many more: a long list says
+    /// nothing a model needs beyond "the owner was one of many".
+    static func people(_ list: [Participant], owner: String, limit: Int = 4) -> String {
+        let ordered = list.filter { $0.email.lowercased() == owner } + list.filter { $0.email.lowercased() != owner }
+        let shown = ordered.prefix(limit).map(person).joined(separator: ", ")
+        return list.count > limit ? "\(shown) +\(list.count - limit) more" : shown
     }
 
     private static func person(_ participant: Participant) -> String {
