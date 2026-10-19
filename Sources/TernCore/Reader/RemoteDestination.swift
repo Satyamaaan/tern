@@ -1,13 +1,13 @@
 import Darwin
 import Foundation
 
-/// Where Tern may fetch a mail image from: the public internet, and nothing else. Images load without a
-/// click, so mail must not be able to make the Mac reach itself or its network (a router page, a printer, a
-/// dev server). Loopback, private, link-local, shared, multicast and reserved addresses are refused, in any
-/// form the network stack reads (`3232235777`, `0x7f.1`, `[::ffff:192.168.1.1]`); IPv4 is accepted only as a
-/// plain dotted quad. Local names are refused too.
-/// Only ports 80 and 443 are allowed: mail images live there, and the other ports are where local and
-/// admin services listen. Names are fetched over HTTPS only (`requestURL`).
+/// Where Tern may fetch a mail image from: the public internet, by name, and nothing else. Images load without a
+/// click, so mail must not be able to make the Mac reach itself or its network (a router page, a printer, a dev
+/// server). Local names are refused, a name must resolve to public addresses only, and names are fetched over HTTPS
+/// only (`requestURL`). Addresses written as the host are refused outright, public ones too: a router's WAN address
+/// (through NAT loopback) or a LAN device's global IPv6 address is public and still reaches the user's own network,
+/// and with no name there's no certificate to check, so nothing would stop a request there. Mail images use names.
+/// The address checks (`isPublic`, `literal`) judge what names resolve to.
 public enum RemoteDestination {
     /// An IP address, as the network stack would connect to it.
     public enum Address: Hashable, Sendable {
@@ -22,28 +22,22 @@ public enum RemoteDestination {
         "example", "test", "invalid", "onion", "alt",
     ]
 
-    /// Checks `url` without touching the network: http(s), no user info, port 80 or 443, and a host that is a
-    /// public address or a public-looking name (resolve it with `resolve` before connecting).
-    /// `allowLoopback` lets loopback addresses through on any port, for the snapshot harness's image server in
-    /// debug builds; names stay refused.
+    /// Checks `url` without touching the network: http(s), no user info, port 80 or 443, and a public-looking name
+    /// (resolve it with `resolve` before connecting). An address as the host is refused in any form the network
+    /// stack reads (`3232235777`, `0x7f.1`, `[::ffff:192.168.1.1]`), except that `allowLoopback` lets a loopback
+    /// address through on any port, for the snapshot harness's image server in debug builds.
     public static func allows(_ url: URL, allowLoopback: Bool = false) -> Bool {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               url.user == nil, url.password == nil, let host = host(of: url) else { return false }
-        if let address = literal(host) {
-            if allowLoopback, isLoopback(address) { return true }
-            // Decimal, hex, octal and short IPv4 forms only ever hide where a request goes.
-            if case .v4 = address, !isDottedQuad(host) { return false }
-            return isPublic(address) && standardPort(url.port)
-        }
-        return isPublicName(host) && standardPort(url.port)
+        if let address = literal(host) { return allowLoopback && isLoopback(address) }
+        return isPublicName(host) && (url.port == nil || url.port == 80 || url.port == 443)
     }
 
     /// The URL Tern requests for `url`, or nil when it may not be fetched. Names always go over HTTPS: `http://name/…`
     /// becomes `https://name/…`, and a name on any port but the scheme's own is refused. That TLS is load-bearing
     /// against DNS rebinding: the addresses checked before connecting can't be pinned for the connection, so a name
     /// that answers with a private address by then still needs a certificate for that name, which the router or
-    /// printer behind the address doesn't have, and the request is never sent. A public address literal keeps its
-    /// scheme: no DNS is involved, so there is nothing to rebind.
+    /// printer behind the address doesn't have, and the request is never sent.
     public static func requestURL(for url: URL, allowLoopback: Bool = false) -> URL? {
         guard allows(url, allowLoopback: allowLoopback), let host = host(of: url) else { return nil }
         if literal(host) != nil { return url }
@@ -66,8 +60,6 @@ public enum RemoteDestination {
         return host.isEmpty ? nil : host
     }
 
-    private static func standardPort(_ port: Int?) -> Bool { port == nil || port == 80 || port == 443 }
-
     /// A host the network stack would read as an address, in any of the forms it accepts: dotted, short
     /// (`127.1`), decimal, octal and hex IPv4, and IPv6.
     public static func literal(_ host: String) -> Address? {
@@ -82,16 +74,6 @@ public enum RemoteDestination {
         var address = in_addr()
         guard inet_aton(host, &address) == 1 else { return nil }
         return .v4(UInt32(bigEndian: address.s_addr))
-    }
-
-    /// `a.b.c.d` with four decimal parts of 0–255 and no leading zeros.
-    static func isDottedQuad(_ host: String) -> Bool {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count == 4 && parts.allSatisfy { part in
-            guard (1...3).contains(part.count), part.allSatisfy(\.isASCII), part.allSatisfy(\.isNumber),
-                  part == "0" || !part.hasPrefix("0"), let value = Int(part) else { return false }
-            return value <= 255
-        }
     }
 
     /// A name that can only resolve on the public internet: dotted, plain ASCII, not a local suffix, and not

@@ -60,6 +60,9 @@ func classifiesAddresses(_ host: String, _ isPublic: Bool) throws {
     "https://cdn.example.com:22/", "http://cdn.example.com:0/", "https://user:pw@cdn.example.com/x.png",
     "https://user@cdn.example.com/x.png", "ftp://cdn.example.com/x.png", "file:///etc/passwd", "gopher://cdn.example.com/",
     "http:///x.png", "http://exa mple.com/",
+    // Public addresses too: a router's WAN address or a LAN device's global IPv6 address is public and still home.
+    "http://93.184.216.34/x.png", "https://93.184.216.34/x.png", "http://8.8.8.8/x.png", "http://[2606:4700:4700::1111]/x.png",
+    "https://[2a00:1450:4001:81b::200e]/x.png", "http://[::ffff:93.184.216.34]/x.png", "http://[64:ff9b::5db8:d822]/x.png",
 ])
 func refusesLocalDestinations(_ string: String) {
     guard let url = URL(string: string) else { return }
@@ -69,7 +72,7 @@ func refusesLocalDestinations(_ string: String) {
 @Test(arguments: [
     "https://res.cloudinary.com/acme/image/upload/v1/emails/logo.png", "http://cdn.example.com/x.png",
     "https://cdn.example.com:443/x.png", "http://cdn.example.com:80/x.png", "https://CDN.Example.COM./x.png",
-    "http://93.184.216.34/x.png", "http://[2606:4700:4700::1111]/x.png", "https://img_1.cdn-host.co.uk/a/b.gif",
+    "https://img_1.cdn-host.co.uk/a/b.gif",
 ])
 func allowsPublicDestinations(_ string: String) throws {
     #expect(RemoteDestination.allows(try #require(URL(string: string))), "\(string)")
@@ -99,9 +102,10 @@ func allowsPublicDestinations(_ string: String) throws {
     #expect(try request("https://cdn.example.com:443/a.png") == "https://cdn.example.com/a.png")
     #expect(try request("https://cdn.example.com:80/a.png") == nil)
     #expect(try request("http://cdn.example.com:443/a.png") == nil)
-    // Addresses involve no DNS, so they keep their scheme.
-    #expect(try request("http://93.184.216.34/a.png") == "http://93.184.216.34/a.png")
-    #expect(try request("http://[2606:4700:4700::1111]/a.png") == "http://[2606:4700:4700::1111]/a.png")
+    // Addresses aren't fetched at all, except the harness's loopback server in debug builds, as written.
+    #expect(try request("http://93.184.216.34/a.png") == nil)
+    #expect(try request("https://[2606:4700:4700::1111]/a.png") == nil)
+    #expect(try request("http://93.184.216.34/a.png", loopback: true) == nil)
     #expect(try request("http://127.0.0.1:18766/hero.png", loopback: true) == "http://127.0.0.1:18766/hero.png")
     #expect(try request("http://127.0.0.1:18766/hero.png") == nil)
     #expect(try request("http://printer.local/a.png") == nil)

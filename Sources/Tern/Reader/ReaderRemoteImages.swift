@@ -54,9 +54,10 @@ enum ReaderRemoteImages {
         return directory
     }
 
-    /// Forgets every image on disk and in memory, after an account was removed: its mail's images shouldn't stay.
+    /// Forgets every image on disk and in memory, after an account was removed: its mail's images shouldn't stay,
+    /// and a fetch still under way doesn't store its image afterwards.
     static func clearCache() async {
-        await Task.detached(priority: .utility) { fetcher.cache?.removeAllCachedResponses() }.value
+        await Task.detached(priority: .utility) { fetcher.clearCache() }.value
     }
 
     /// Loopback is refused, except for the snapshot harness's local image server in debug builds

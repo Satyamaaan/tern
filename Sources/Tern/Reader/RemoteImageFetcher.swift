@@ -6,7 +6,8 @@ import TernCore
 /// name resolves to before connecting, and names over HTTPS only; images only, at most `maxBytes`. An image that
 /// arrives goes to an on-disk cache, so a reopened message paints it at once without asking the sender again;
 /// failures are never cached. A URL is fetched once for every image asking for it at the time, and fetches take
-/// turns (`FetchGate`), so the last images of a long newsletter don't time out queued behind its first ones.
+/// turns (`FetchGate`), so the last images of a long newsletter don't time out queued behind its first ones. Every
+/// wait (DNS, the gate, the fetch) ends at once when its caller stops asking.
 final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     enum Failure: Error, Equatable {
         /// Not a public destination, or a redirect to one that isn't.
@@ -26,11 +27,18 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     let cache: URLCache?
     private let allowLoopback: Bool
     private let resolve: @Sendable (String) async -> [RemoteDestination.Address]?
+    /// A lookup taking longer counts as "not public" for that fetch.
+    private let lookupTimeout: Duration
     private var session: URLSession!
     private let gate = FetchGate(total: RemoteImageFetcher.concurrent, perHost: RemoteImageFetcher.perHost)
     private let lock = NSLock()
     private var loads: [Int: Load] = [:]
     private var flights: [URL: Flight] = [:]
+    /// Lookups running now, one per host, shared by every fetch waiting on that host.
+    private var lookups: [String: (id: UUID, task: Task<[RemoteDestination.Address]?, Never>)] = [:]
+    /// Raised by `clearCache`; a fetch that started before it doesn't store what it brings back.
+    private var cacheGeneration = 0
+    private let cacheLock = NSLock()
 
     private final class Load {
         let continuation: CheckedContinuation<(Data, HTTPURLResponse), any Error>
@@ -50,11 +58,12 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     /// `cacheDirectory` nil keeps nothing on disk. Tests pass `protocolClasses` and `resolve` to stand in for
     /// the network.
     init(cacheDirectory: URL?, allowLoopback: Bool = false, maxBytes: Int = 20 * 1_024 * 1_024,
-         protocolClasses: [AnyClass]? = nil,
+         lookupTimeout: Duration = .seconds(5), protocolClasses: [AnyClass]? = nil,
          resolve: @escaping @Sendable (String) async -> [RemoteDestination.Address]? = { await RemoteDestination.resolve($0) }) {
         cache = cacheDirectory.map { URLCache(memoryCapacity: 32 * 1_024 * 1_024, diskCapacity: 200 * 1_024 * 1_024, directory: $0) }
         self.allowLoopback = allowLoopback
         self.maxBytes = maxBytes
+        self.lookupTimeout = lookupTimeout
         self.resolve = resolve
         super.init()
         let configuration = URLSessionConfiguration.ephemeral
@@ -80,6 +89,17 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
     /// Ends the session; the fetcher can't be used afterwards. The app's one fetcher lives as long as the app.
     func invalidate() { session.invalidateAndCancel() }
 
+    /// Gate slots taken and fetches waiting on URLSession right now; both are 0 when nothing is loading.
+    var busy: (slots: Int, loads: Int) { (gate.held, lock.withLock { loads.count }) }
+
+    /// Forgets every image on disk and in memory. A fetch already under way doesn't store its image afterwards.
+    func clearCache() {
+        cacheLock.withLock {
+            cacheGeneration += 1
+            cache?.removeAllCachedResponses()
+        }
+    }
+
     /// The image at `remote` and its MIME type, from the cache or the network. A name is asked for over HTTPS.
     func image(at remote: URL) async throws -> (Data, String) {
         guard let target = RemoteDestination.requestURL(for: remote, allowLoopback: allowLoopback) else { throw Failure.refused }
@@ -101,11 +121,16 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
             }
             return flight
         }
-        let task = lock.withLock { flight.task }
+        // Each caller has its own way out: one that stops asking returns at once, while the fetch carries on for the
+        // others (a task's value doesn't end early when the task awaiting it is cancelled).
+        let answer = FirstAnswer<Result<(Data, String), any Error>>()
+        if let task = lock.withLock({ flight.task }) {
+            Task { answer.offer(await task.result) }
+        }
         return try await withTaskCancellationHandler {
-            guard let task else { throw CancellationError() }
-            return try await task.value
+            try await answer.value.get()
         } onCancel: {
+            answer.offer(.failure(CancellationError()))
             self.abandon(flight, target)
         }
     }
@@ -126,43 +151,96 @@ final class RemoteImageFetcher: NSObject, @unchecked Sendable {
         task?.cancel()
     }
 
-    /// Waits its turn, checks where the name resolves, fetches, and keeps a complete image on disk.
+    /// Checks where the name resolves, waits its turn, fetches, and keeps a complete image on disk. DNS comes before
+    /// the gate, so hosts that are slow to resolve don't hold the slots of the ones that aren't.
     private func load(_ target: URL) async throws -> (Data, String) {
+        let generation = cacheLock.withLock { cacheGeneration }
+        guard await resolvesPublicly(target) else { throw Failure.refused }
+        try Task.checkCancellation()
         let host = RemoteDestination.host(of: target) ?? ""
         try await gate.enter(host)
         defer { gate.leave(host) }
-        guard await resolvesPublicly(target) else { throw Failure.refused }
+        try Task.checkCancellation()
         let request = URLRequest(url: target)
         let (data, response) = try await fetch(request)
         guard let type = Self.imageType(data, declared: response.mimeType) else { throw Failure.notAnImage }
         let noStore = response.value(forHTTPHeaderField: "Cache-Control")?.lowercased().contains("no-store") == true
         if let cache, !noStore, let stored = HTTPURLResponse(url: target, statusCode: 200, httpVersion: "HTTP/1.1",
                                                              headerFields: ["Content-Type": type, "Content-Length": String(data.count)]) {
-            cache.storeCachedResponse(CachedURLResponse(response: stored, data: data, userInfo: nil, storagePolicy: .allowed), for: request)
+            cacheLock.withLock {
+                guard cacheGeneration == generation else { return }
+                cache.storeCachedResponse(CachedURLResponse(response: stored, data: data, userInfo: nil, storagePolicy: .allowed), for: request)
+            }
         }
         return (data, type)
     }
 
+    /// The task is made and its `Load` registered under the lock, and only if the caller hasn't stopped by then, so
+    /// a cancellation at any moment either prevents the task or finds it registered: URLSession reports even a task
+    /// cancelled before `resume()` to `didCompleteWithError`, which must find its `Load` to resume the caller.
     private func fetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let task = session.dataTask(with: request)
+        let started = Started()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                lock.withLock { loads[task.taskIdentifier] = Load(continuation) }
+                let task = lock.withLock { () -> URLSessionDataTask? in
+                    guard !Task.isCancelled else { return nil }
+                    let task = session.dataTask(with: request)
+                    loads[task.taskIdentifier] = Load(continuation)
+                    started.task = task
+                    return task
+                }
+                guard let task else { return continuation.resume(throwing: CancellationError()) }
                 task.resume()
             }
         } onCancel: {
-            task.cancel()
+            lock.withLock { started.task }?.cancel()
         }
     }
 
-    /// Literal addresses were judged by `RemoteDestination`; a name must resolve, and only to public addresses.
-    /// Nothing is remembered: a lookup that failed (offline, just woken) mustn't refuse the host afterwards, and a
-    /// public answer mustn't outlive its DNS record. Repeated lookups are answered by the system's own DNS cache.
+    /// The URLSession task of one fetch, once it exists; read and written under the fetcher's lock.
+    private final class Started: @unchecked Sendable {
+        var task: URLSessionDataTask?
+    }
+
+    /// A name must resolve, and only to public addresses; a loopback address (the harness) was judged already. A
+    /// lookup that takes longer than `lookupTimeout`, or whose caller stops asking, counts as "not public" at once
+    /// and is left to finish on its own (getaddrinfo can't be stopped). Nothing is remembered: a lookup that failed
+    /// (offline, just woken) mustn't refuse the host afterwards, and a public answer mustn't outlive its DNS record.
+    /// Repeated lookups are answered by the system's own DNS cache.
     private func resolvesPublicly(_ url: URL) async -> Bool {
         guard let host = RemoteDestination.host(of: url) else { return false }
         if RemoteDestination.literal(host) != nil { return true }
-        guard let addresses = await resolve(host), !addresses.isEmpty else { return false }
+        let lookup = sharedLookup(host)
+        let answer = FirstAnswer<[RemoteDestination.Address]?>()
+        Task { answer.offer(await lookup.value) }
+        let timeout = Task { [lookupTimeout] in
+            try? await Task.sleep(for: lookupTimeout)
+            answer.offer(nil)
+        }
+        defer { timeout.cancel() }
+        let addresses = await withTaskCancellationHandler {
+            await answer.value
+        } onCancel: {
+            answer.offer(nil)
+        }
+        guard let addresses, !addresses.isEmpty else { return false }
         return addresses.allSatisfy(RemoteDestination.isPublic)
+    }
+
+    /// The lookup of `host` running now, or a new one; it leaves the table when it ends, so it is only shared while
+    /// it runs. Many images on one slow host wait on one lookup instead of a thread each.
+    private func sharedLookup(_ host: String) -> Task<[RemoteDestination.Address]?, Never> {
+        lock.withLock {
+            if let running = lookups[host] { return running.task }
+            let id = UUID()
+            let task = Task.detached { [resolve, weak self] () -> [RemoteDestination.Address]? in
+                let addresses = await resolve(host)
+                self?.lock.withLock { if self?.lookups[host]?.id == id { self?.lookups[host] = nil } }
+                return addresses
+            }
+            lookups[host] = (id, task)
+            return task
+        }
     }
 
     private func fail(_ task: URLSessionTask, _ failure: Failure) {
@@ -298,6 +376,9 @@ private final class FetchGate: @unchecked Sendable {
         self.perHost = perHost
     }
 
+    /// Slots taken now.
+    var held: Int { lock.withLock { running } }
+
     func enter(_ host: String) async throws {
         let id = lock.withLock { () -> UInt64 in
             lastId += 1
@@ -357,5 +438,36 @@ private final class FetchGate: @unchecked Sendable {
     private func admit(_ host: String) {
         running += 1
         runningByHost[host, default: 0] += 1
+    }
+}
+
+/// Hands one waiter the first value offered and drops the rest, so a wait can end with whichever comes first: an
+/// answer, a timeout or the waiter being cancelled.
+private final class FirstAnswer<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var answer: Value?
+    private var waiter: CheckedContinuation<Value, Never>?
+
+    var value: Value {
+        get async {
+            await withCheckedContinuation { continuation in
+                let ready = lock.withLock { () -> Value? in
+                    if let answer { return answer }
+                    waiter = continuation
+                    return nil
+                }
+                if let ready { continuation.resume(returning: ready) }
+            }
+        }
+    }
+
+    func offer(_ value: Value) {
+        let waiting = lock.withLock { () -> CheckedContinuation<Value, Never>? in
+            guard answer == nil else { return nil }
+            answer = value
+            defer { waiter = nil }
+            return waiter
+        }
+        waiting?.resume(returning: value)
     }
 }

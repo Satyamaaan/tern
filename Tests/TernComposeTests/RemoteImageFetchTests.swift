@@ -83,6 +83,13 @@ private func fetcher(_ directory: URL? = nil, maxBytes: Int = 20 * 1_024 * 1_024
     }
 }
 
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func add() { lock.withLock { count += 1 } }
+}
+
 /// DNS answers in turn, one per lookup; the last one repeats.
 private final class Answers: @unchecked Sendable {
     private let lock = NSLock()
@@ -198,27 +205,117 @@ private func failure(_ work: () async throws -> (Data, String)) async -> (any Er
         #expect(await failure { try await images.image(at: URL(string: big)!) } as? RemoteImageFetcher.Failure == .tooBig)
     }
 
-    @Test func namesGoOverHTTPSAndAddressesAsWritten() async throws {
+    @Test func namesGoOverHTTPSAndAddressesNotAtAll() async throws {
         ImageServer.reset([
             "https://cdn.example.com/logo.png": .init(body: png),
             "https://cdn.example.com/logo.png?w=2": .init(body: png),
-            "http://93.184.216.34/x.png": .init(body: png),
             "https://cdn.example.com/r": .init(status: 302, headers: ["Location": "http://images.example.com/a.png"]),
             "https://images.example.com/a.png": .init(body: png),
+            "https://cdn.example.com/to-address": .init(status: 302, headers: ["Location": "http://93.184.216.34/x.png"]),
         ])
         let images = fetcher()
         defer { images.invalidate() }
         #expect(try await images.image(at: URL(string: "http://cdn.example.com/logo.png")!).0 == png)
         #expect(try await images.image(at: URL(string: "http://CDN.example.com:80/logo.png?w=2")!).0 == png)
-        #expect(try await images.image(at: URL(string: "http://93.184.216.34/x.png")!).0 == png, "no DNS, nothing to rebind")
         #expect(try await images.image(at: URL(string: "https://cdn.example.com/r")!).0 == png, "an http redirect to a name is upgraded")
-        #expect(ImageServer.asked == ["https://cdn.example.com/logo.png", "https://cdn.example.com/logo.png?w=2",
-                                      "http://93.184.216.34/x.png", "https://cdn.example.com/r", "https://images.example.com/a.png"])
-        for url in ["https://cdn.example.com:80/x.png", "http://cdn.example.com:443/x.png"] {
+        for url in ["https://cdn.example.com:80/x.png", "http://cdn.example.com:443/x.png", "http://93.184.216.34/x.png",
+                    "https://[2606:4700:4700::1111]/x.png"] {
             #expect(await failure { try await images.image(at: URL(string: url)!) } as? RemoteImageFetcher.Failure == .refused, "\(url)")
         }
+        #expect(await failure { try await images.image(at: URL(string: "https://cdn.example.com/to-address")!) } != nil,
+                "nor through a redirect")
+        #expect(ImageServer.asked == ["https://cdn.example.com/logo.png", "https://cdn.example.com/logo.png?w=2",
+                                      "https://cdn.example.com/r", "https://images.example.com/a.png", "https://cdn.example.com/to-address"])
         #expect(RemoteDestination.requestURL(for: URL(string: "http://cdn.example.com/a%20b.png?q=%2F#f")!)?.absoluteString
             == "https://cdn.example.com/a%20b.png?q=%2F#f", "the rest of the URL stays as it was written")
+    }
+
+    @Test func slowLookupsDontHoldTheGate() async throws {
+        let urls = (0..<12).map { "https://slow\($0).example.com/a.png" } + ["https://fast.example.com/a.png"]
+        ImageServer.reset(Dictionary(uniqueKeysWithValues: urls.map { ($0, ImageServer.Answer(body: png)) }))
+        let images = RemoteImageFetcher(cacheDirectory: nil, lookupTimeout: .milliseconds(300), protocolClasses: [ImageServer.self]) { host in
+            if host.hasPrefix("slow") { try? await Task.sleep(for: .seconds(10)) }
+            return [publicAddress]
+        }
+        defer { images.invalidate() }
+        let slow = urls.dropLast().map { url in Task { try await images.image(at: URL(string: url)!) } }
+        try await Task.sleep(for: .milliseconds(50))
+        let clock = ContinuousClock(), started = clock.now
+        #expect(try await images.image(at: URL(string: "https://fast.example.com/a.png")!).0 == png)
+        #expect(clock.now - started < .milliseconds(200), "twelve hosts stuck in DNS don't hold up the thirteenth")
+        for task in slow {
+            #expect(await failure { try await task.value } as? RemoteImageFetcher.Failure == .refused, "a lookup over time isn't public")
+        }
+        #expect(clock.now - started < .seconds(1) && ImageServer.asked == ["https://fast.example.com/a.png"])
+        #expect(images.busy == (0, 0))
+    }
+
+    @Test func aStoppedImageStopsWaitingForDNS() async throws {
+        ImageServer.reset([:])
+        let images = RemoteImageFetcher(cacheDirectory: nil, protocolClasses: [ImageServer.self]) { _ in
+            try? await Task.sleep(for: .seconds(10))
+            return [publicAddress]
+        }
+        defer { images.invalidate() }
+        let clock = ContinuousClock(), started = clock.now
+        let task = Task { try await images.image(at: URL(string: "https://stuck.example.com/a.png")!) }
+        try await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        #expect(await failure { try await task.value } != nil)
+        #expect(clock.now - started < .seconds(1), "not after the 5 s lookup limit, and not after getaddrinfo")
+        #expect(images.busy == (0, 0) && ImageServer.asked.isEmpty)
+    }
+
+    @Test func cancellingAtAnyMomentLeavesNothingHeld() async throws {
+        let count = 1_500
+        let urls = (0..<count).map { "https://cdn\($0 % 5).example.com/\($0).png" }
+        ImageServer.reset(Dictionary(uniqueKeysWithValues: urls.map {
+            ($0, ImageServer.Answer(body: png, delay: Double.random(in: 0...0.004)))
+        }))
+        let images = RemoteImageFetcher(cacheDirectory: nil, protocolClasses: [ImageServer.self]) { _ in
+            if Bool.random() { try? await Task.sleep(for: .microseconds(Int.random(in: 0...2_000))) }
+            return [publicAddress]
+        }
+        defer { images.invalidate() }
+        let finished = Counter()
+        for (index, url) in urls.enumerated() {
+            let task = Task {
+                _ = try? await images.image(at: URL(string: url)!)
+                finished.add()
+            }
+            // Stopped before it starts, while it waits for DNS or the gate, mid-fetch, from another thread, or never.
+            switch index % 6 {
+            case 0: task.cancel()
+            case 1: Task { await Task.yield(); task.cancel() }
+            case 2: Task { try? await Task.sleep(for: .microseconds(Int.random(in: 0...3_000))); task.cancel() }
+            case 3: DispatchQueue.global().async { task.cancel() }
+            case 4: DispatchQueue.global().asyncAfter(deadline: .now() + .microseconds(Int.random(in: 0...6_000))) { task.cancel() }
+            default: break
+            }
+        }
+        let clock = ContinuousClock(), deadline = clock.now + .seconds(30)
+        while finished.value < count, clock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(finished.value == count, "every caller came back")
+        for _ in 0..<50 where images.busy != (0, 0) { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(images.busy == (0, 0), "no gate slot or URLSession task left behind")
+    }
+
+    @Test func clearingTheCacheMidFetchKeepsItsImageOut() async throws {
+        let directory = scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let logo = "https://cdn.example.com/logo.png"
+        ImageServer.reset([logo: .init(body: png, delay: 0.3)])
+        let images = fetcher(directory)
+        defer { images.invalidate() }
+        let task = Task { try await images.image(at: URL(string: logo)!) }
+        try await Task.sleep(for: .milliseconds(100))
+        images.clearCache()
+        #expect(try await task.value.0 == png, "the image still shows")
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(images.cache?.cachedResponse(for: URLRequest(url: URL(string: logo)!)) == nil, "but isn't kept")
+        _ = try await images.image(at: URL(string: logo)!)
+        #expect(ImageServer.asked == [logo, logo])
+        #expect(images.cache?.cachedResponse(for: URLRequest(url: URL(string: logo)!)) != nil, "a fetch after the clear is kept")
     }
 
     @Test func lookupsAreNeverRemembered() async throws {
@@ -253,12 +350,16 @@ private func failure(_ work: () async throws -> (Data, String)) async -> (any Er
         #expect(results.allSatisfy { $0.0 == png })
         #expect(ImageServer.asked == [logo.absoluteString])
 
-        // One of them stops asking (its message closed): the other still gets the image from the same fetch.
-        ImageServer.reset([logo.absoluteString: .init(body: png, delay: 0.3)])
+        // One of them stops asking (its message closed): it returns at once, and the other still gets the image
+        // from the same fetch.
+        ImageServer.reset([logo.absoluteString: .init(body: png, delay: 0.5)])
         let leaving = Task { try await images.image(at: logo) }
         let staying = Task { try await images.image(at: logo) }
         try await Task.sleep(for: .milliseconds(100))
+        let clock = ContinuousClock(), left = clock.now
         leaving.cancel()
+        #expect(await failure { try await leaving.value } is CancellationError)
+        #expect(clock.now - left < .milliseconds(150), "the one that left didn't wait for the fetch")
         #expect(try await staying.value.0 == png)
         #expect(ImageServer.asked == [logo.absoluteString])
 
