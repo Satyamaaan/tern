@@ -64,12 +64,14 @@ private func directoryIsEmpty(_ path: String) -> Bool {
 @Test func codexArgumentsAreExact() {
     let arguments = CodexCLIProvider.arguments(
         model: "quick-model", effort: .fast, workDirectory: "/tmp/x/work", schemaPath: "/tmp/x/schema.json",
-        answerPath: "/tmp/x/answer.txt", flags: CLIBackend.flags(in: codexHelp))
+        answerPath: "/tmp/x/answer.txt", instructionsPath: "/tmp/x/instructions.md", flags: CLIBackend.flags(in: codexHelp))
     var expected: [String] = [
         "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
         "--sandbox", "read-only", "--color", "never", "--cd", "/tmp/x/work", "--model", "quick-model",
         "-c", #"model_reasoning_effort="low""#, "-c", #"approval_policy="never""#, "-c", #"web_search="disabled""#,
-        "-c", "tools.web_search=false", "-c", "tools.view_image=false",
+        "-c", "tools.web_search=false", "-c", "tools.view_image=false", "-c", "analytics.enabled=false",
+        "-c", #"otel.metrics_exporter="none""#, "-c", "include_permissions_instructions=false",
+        "-c", "include_environment_context=false", "-c", #"model_instructions_file="/tmp/x/instructions.md""#,
     ]
     for feature in CodexCLIProvider.disabledFeatures { expected += ["-c", "features.\(feature)=false"] }
     expected += ["--output-schema", "/tmp/x/schema.json", "--output-last-message", "/tmp/x/answer.txt", "-"]
@@ -136,6 +138,11 @@ private let codexFeatures = """
             #expect(try String(contentsOfFile: schemaPath, encoding: .utf8) == #"{"type":"object"}"#)
             let answerPath = arguments[try #require(arguments.firstIndex(of: "--output-last-message")) + 1]
             try #"{"ok":true}"#.write(toFile: answerPath, atomically: true, encoding: .utf8)
+            // Codex's own coding-agent instructions are replaced by fixed text that holds no mail.
+            let setting = try #require(arguments.first { $0.hasPrefix("model_instructions_file=") })
+            let instructionsPath = String(setting.dropFirst(#"model_instructions_file=""#.count).dropLast())
+            #expect(try String(contentsOfFile: instructionsPath, encoding: .utf8) == CodexCLIProvider.baseInstructions)
+            #expect(invocation.qualityOfService == .default)
             return ProcessResult(exitCode: 0, stdout: "ignored", stderr: "user\nsecret mail text")
         }
     }
@@ -223,8 +230,13 @@ private let codexFeatures = """
     #expect(ClaudeCLIProvider.arguments(for: request, flags: CLIBackend.flags(in: claudeHelp)) == [
         "-p", "--model", "haiku", "--output-format", "json", "--json-schema", #"{"type":"object"}"#,
         "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands",
-        "--setting-sources", "", "--settings", #"{"disableAllHooks":true}"#, "--system-prompt", "Sort these.",
+        "--setting-sources", "", "--settings", #"{"disableAllHooks":true,"alwaysThinkingEnabled":false}"#,
+        "--system-prompt", "Sort these.",
     ])
+    // Careful requests (reply drafts) keep Claude Code's own thinking setting.
+    var careful = request
+    careful.effort = .careful
+    #expect(ClaudeCLIProvider.arguments(for: careful, flags: CLIBackend.flags(in: claudeHelp)).contains(#"{"disableAllHooks":true}"#))
     #expect(ClaudeCLIProvider.stdin(for: request, flags: CLIBackend.flags(in: claudeHelp)) == "mail")
 
     let old = ["-p", "--print", "--model", "--output-format", "--disallowedTools"]

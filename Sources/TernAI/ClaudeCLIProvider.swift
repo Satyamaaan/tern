@@ -3,7 +3,8 @@ import Foundation
 /// Claude Code (`claude -p`), signed in with the user's Claude subscription.
 ///
 /// Each call runs in print mode in an empty temp directory with every tool, MCP server, slash command,
-/// hook and settings file switched off, no saved session, and the prompt on stdin.
+/// hook and settings file switched off, no saved session, and the prompt on stdin. Fast requests also
+/// switch off extended thinking.
 public struct ClaudeCLIProvider: AIProvider {
     public let id = "claude"
     public let displayName = "Claude Code"
@@ -78,7 +79,12 @@ public struct ClaudeCLIProvider: AIProvider {
         if has("--no-session-persistence") { arguments.append("--no-session-persistence") }
         if has("--disable-slash-commands") { arguments.append("--disable-slash-commands") }
         if has("--setting-sources") { arguments += ["--setting-sources", ""] }
-        if has("--settings") { arguments += ["--settings", #"{"disableAllHooks":true}"#] }
+        if has("--settings") {
+            // Fast requests run without extended thinking. Claude Code turns it on by default, and Haiku then
+            // thinks for 10-17k tokens per triage batch: about 90 s instead of 8 s, for much the same verdicts.
+            let thinking = request.effort == .fast ? #","alwaysThinkingEnabled":false"# : ""
+            arguments += ["--settings", #"{"disableAllHooks":true"# + thinking + "}"]
+        }
         if !request.instructions.isEmpty, has("--system-prompt") { arguments += ["--system-prompt", request.instructions] }
         return arguments
     }

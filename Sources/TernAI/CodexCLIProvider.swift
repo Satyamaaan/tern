@@ -4,7 +4,8 @@ import Foundation
 ///
 /// Each call runs ephemerally in an empty temp directory with a read-only sandbox, the user's config
 /// (and so its MCP servers), rules and hooks ignored, every tool-giving feature this version reports
-/// switched off (plugins and apps included), and the prompt on stdin.
+/// switched off (plugins and apps included), Codex's coding-agent instructions and usage analytics
+/// replaced or switched off, and the prompt on stdin.
 public struct CodexCLIProvider: AIProvider {
     public let id = "codex"
     public let displayName = "Codex"
@@ -67,9 +68,11 @@ public struct CodexCLIProvider: AIProvider {
             schemaPath = url.path
         }
         let answerPath = directory.file("answer.txt").path
+        let instructionsURL = directory.file("instructions.md")
+        try Data(Self.baseInstructions.utf8).write(to: instructionsURL)
         let arguments = Self.arguments(
-            model: model, effort: request.effort, workDirectory: directory.work.path,
-            schemaPath: schemaPath, answerPath: answerPath, flags: flags, enabledFeatures: enabled)
+            model: model, effort: request.effort, workDirectory: directory.work.path, schemaPath: schemaPath,
+            answerPath: answerPath, instructionsPath: instructionsURL.path, flags: flags, enabledFeatures: enabled)
         let stdin = Self.stdin(for: request, schemaEnforced: schemaPath != nil)
 
         let result = try await backend.runModel(
@@ -131,9 +134,17 @@ public struct CodexCLIProvider: AIProvider {
         return names
     }
 
+    /// Replaces Codex's own coding-agent instructions, about 3,500 tokens on every call that a mail
+    /// request doesn't need. The request's instructions still lead the prompt, so a version that doesn't
+    /// know `model_instructions_file` (it ignores unknown settings) gets the same rules.
+    static let baseInstructions = """
+        You answer requests from the Tern mail app. Follow the instructions in the user message exactly and \
+        answer only in the format it asks for. You have no tools.
+        """
+
     static func arguments(
         model: String?, effort: AIRequest.Effort, workDirectory: String, schemaPath: String?,
-        answerPath: String, flags: Set<String>, enabledFeatures: [String] = []
+        answerPath: String, instructionsPath: String? = nil, flags: Set<String>, enabledFeatures: [String] = []
     ) -> [String] {
         // An unreadable help text means an unknown version: assume today's flags.
         let has = { (flag: String) in flags.isEmpty || flags.contains(flag) }
@@ -149,7 +160,14 @@ public struct CodexCLIProvider: AIProvider {
             "-c", "web_search=\"disabled\"",
             "-c", "tools.web_search=false",
             "-c", "tools.view_image=false",
+            // Usage analytics and metrics go out when the process exits and add a second or more to every call.
+            "-c", "analytics.enabled=false",
+            "-c", "otel.metrics_exporter=\"none\"",
+            // No sandbox or shell description: there are no tools to describe.
+            "-c", "include_permissions_instructions=false",
+            "-c", "include_environment_context=false",
         ]
+        if let instructionsPath { arguments += ["-c", "model_instructions_file=\"\(instructionsPath)\""] }
         for feature in featuresToDisable(enabled: enabledFeatures) { arguments += ["-c", "features.\(feature)=false"] }
         if let schemaPath { arguments += ["--output-schema", schemaPath] }
         if has("--output-last-message") { arguments += ["--output-last-message", answerPath] }
