@@ -97,13 +97,19 @@ actor CLIBackend {
         return try await runner.run(invocation(path, arguments, stdin: nil, directory: nil), timeout: timeout)
     }
 
-    /// A model call: waits for a gate slot, runs in `directory`, sends `stdin`.
-    func runModel(_ arguments: [String], stdin: String, directory: String, timeout: TimeInterval) async throws -> ProcessResult {
+    /// A model call: waits for a gate slot, runs in `directory`, sends `stdin`, with `environment` added to
+    /// the child's. A background call takes a background slot and runs at utility priority.
+    func runModel(
+        _ arguments: [String], stdin: String, directory: String, timeout: TimeInterval, background: Bool = false,
+        environment: [String: String] = [:]
+    ) async throws -> ProcessResult {
         let path = try await requireBinary()
-        let invocation = invocation(path, arguments, stdin: Data(stdin.utf8), directory: directory)
+        var invocation = invocation(path, arguments, stdin: Data(stdin.utf8), directory: directory)
+        invocation.environment.merge(environment) { _, new in new }
+        if background { invocation.qualityOfService = .utility }
         let runner = runner
         let started = Date()
-        let result = try await gate.withSlot { try await runner.run(invocation, timeout: timeout) }
+        let result = try await gate.withSlot(background: background) { [invocation] in try await runner.run(invocation, timeout: timeout) }
         aiLog.info("\(self.config.name, privacy: .public) exited \(result.exitCode) after \(Date().timeIntervalSince(started), format: .fixed(precision: 1))s")
         return result
     }

@@ -35,17 +35,71 @@ import Testing
 
 @Test func systemRunnerCancellationKills() async throws {
     let marker = FileManager.default.temporaryDirectory.appendingPathComponent("tern-runner-\(UUID().uuidString)").path
+    var runner = SystemProcessRunner()
+    runner.killGrace = 10
     let task = Task {
-        try await SystemProcessRunner().run(ProcessInvocation(
+        try await runner.run(ProcessInvocation(
             executable: "/bin/sh", arguments: ["-c", "sleep 2; touch \(marker)"]), timeout: 30)
     }
     try await Task.sleep(for: .milliseconds(200))
     let started = Date()
     task.cancel()
     await #expect(throws: CancellationError.self) { try await task.value }
-    #expect(Date().timeIntervalSince(started) < 1)
+    // SIGTERM was enough: the answer came once the group was gone, long before SIGKILL was due.
+    #expect(Date().timeIntervalSince(started) < 2)
     try await Task.sleep(for: .seconds(2.5))
     #expect(!FileManager.default.fileExists(atPath: marker))
+}
+
+@Test func systemRunnerStopsTheWholeProcessGroupBeforeAnswering() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-group-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let pids = directory.appendingPathComponent("pids").path
+    // A fake CLI that starts a helper which ignores SIGTERM and keeps running.
+    let script = """
+        sh -c 'trap "" TERM; echo $$ >> "\(pids)"; while :; do sleep 0.05; done' &
+        echo $$ >> "\(pids)"
+        wait
+        """
+    var runner = SystemProcessRunner()
+    runner.killGrace = 0.3
+    let gate = CLIGate(limit: 1)
+    let call = Task {
+        try await gate.withSlot {
+            try await runner.run(ProcessInvocation(executable: "/bin/sh", arguments: ["-c", script], environment: ["PATH": "/usr/bin:/bin"]), timeout: 30)
+        }
+    }
+    var found: [pid_t] = []
+    for _ in 0..<300 where found.count < 2 {
+        try await Task.sleep(for: .milliseconds(10))
+        found = ((try? String(contentsOfFile: pids, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { pid_t($0) }
+    }
+    #expect(found.count == 2)
+    let leader = try #require(found.last)
+
+    let stopped = Date()
+    call.cancel()
+    await #expect(throws: CancellationError.self) { try await call.value }
+    // The answer waited for SIGKILL to take the helper that ignored SIGTERM.
+    #expect(Date().timeIntervalSince(stopped) >= 0.3)
+    for pid in found { #expect(!ProcessGroup.isAlive(pid), "process \(pid) survived") }
+    #expect(ProcessGroup.isGone(leader), "something of the group survived")
+    // And the CLI slot was free only then.
+    #expect(await gate.occupancy.running == 0)
+}
+
+@Test func systemRunnerTimesOutTheWholeProcessGroup() async throws {
+    var runner = SystemProcessRunner()
+    runner.killGrace = 0.2
+    let started = Date()
+    // The helper ignores SIGTERM and holds stdout open, so only stopping the whole group ends the call.
+    await #expect(throws: AIError.timedOut) {
+        try await runner.run(ProcessInvocation(
+            executable: "/bin/sh", arguments: ["-c", "sh -c 'trap \"\" TERM; while :; do sleep 0.05; done' & wait"],
+            environment: ["PATH": "/usr/bin:/bin"]), timeout: 0.3)
+    }
+    #expect(Date().timeIntervalSince(started) < 3)
 }
 
 @Test func systemRunnerReportsLaunchFailure() async throws {
@@ -54,12 +108,6 @@ import Testing
     }
 }
 
-private actor Counter {
-    var current = 0
-    var peak = 0
-    func enter() { current += 1; peak = max(peak, current) }
-    func leave() { current -= 1 }
-}
 
 @Test func gateRunsAtMostTwoAtOnce() async throws {
     let gate = CLIGate(limit: 2)
@@ -94,6 +142,54 @@ private actor Counter {
     await #expect(throws: CancellationError.self) { try await waiter.value }
     try await holder.value
     #expect(try await gate.withSlot { "free" } == "free")
+}
+
+@Test func gateKeepsASlotForOnDemandCalls() async throws {
+    let gate = CLIGate(limit: 2, backgroundLimit: 1)
+    let latch = Latch()
+    let holder = Task { try await gate.withSlot(background: true) { await latch.wait() } }
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    let waiting = Task { try await gate.withSlot(background: true) { "background" } }
+    for _ in 0..<200 where await gate.occupancy.waiting == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    // A second background call waits for the first; an on-demand call doesn't wait for either.
+    let occupancy = await gate.occupancy
+    #expect(occupancy.running == 1 && occupancy.waiting == 1)
+    #expect(try await gate.withSlot { "on demand" } == "on demand")
+    await latch.release()
+    try await holder.value
+    #expect(try await waiting.value == "background")
+}
+
+@Test func gateServesWaitingOnDemandCallsFirst() async throws {
+    let gate = CLIGate(limit: 1)
+    let latch = Latch()
+    let order = Recorder()
+    let holder = Task { try await gate.withSlot(background: true) { await latch.wait() } }
+    for _ in 0..<200 where await gate.occupancy.running == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    let background = Task { try await gate.withSlot(background: true) { await order.add("background") } }
+    for _ in 0..<200 where await gate.occupancy.waiting < 1 { try await Task.sleep(for: .milliseconds(5)) }
+    let onDemand = Task { try await gate.withSlot { await order.add("on demand") } }
+    for _ in 0..<200 where await gate.occupancy.waiting < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    await latch.release()
+    try await holder.value
+    try await background.value
+    try await onDemand.value
+    #expect(await order.items == ["on demand", "background"])
+}
+
+@Test func backgroundCallsRunAtUtilityPriority() async throws {
+    let runner = FakeRunner { invocation in
+        if invocation.arguments == ["--help"] { return ProcessResult(exitCode: 0, stdout: "--output-format --model -p --settings") }
+        return ProcessResult(exitCode: 0, stdout: #"{"is_error":false,"result":"ok"}"#)
+    }
+    let provider = ClaudeCLIProvider(
+        runner: runner,
+        locator: CLILocator(home: "/Users/test", environment: [:], isExecutable: { $0 == "/opt/homebrew/bin/claude" }, listDirectory: { _ in [] }, runner: runner),
+        gate: CLIGate(limit: 2, backgroundLimit: 1), environment: [:])
+    _ = try await provider.complete(AIRequest(instructions: "", input: "x", isBackground: true))
+    #expect(runner.invocations.last?.qualityOfService == .utility)
+    _ = try await provider.complete(AIRequest(instructions: "", input: "x"))
+    #expect(runner.invocations.last?.qualityOfService == .default)
 }
 
 @Test func providerPassesTimeoutAndPropagatesCancellation() async throws {

@@ -64,12 +64,14 @@ private func directoryIsEmpty(_ path: String) -> Bool {
 @Test func codexArgumentsAreExact() {
     let arguments = CodexCLIProvider.arguments(
         model: "quick-model", effort: .fast, workDirectory: "/tmp/x/work", schemaPath: "/tmp/x/schema.json",
-        answerPath: "/tmp/x/answer.txt", flags: CLIBackend.flags(in: codexHelp))
+        answerPath: "/tmp/x/answer.txt", instructionsPath: "/tmp/x/instructions.md", flags: CLIBackend.flags(in: codexHelp))
     var expected: [String] = [
         "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules",
         "--sandbox", "read-only", "--color", "never", "--cd", "/tmp/x/work", "--model", "quick-model",
         "-c", #"model_reasoning_effort="low""#, "-c", #"approval_policy="never""#, "-c", #"web_search="disabled""#,
-        "-c", "tools.web_search=false", "-c", "tools.view_image=false",
+        "-c", "tools.web_search=false", "-c", "tools.view_image=false", "-c", "analytics.enabled=false",
+        "-c", #"otel.metrics_exporter="none""#, "-c", "include_permissions_instructions=false",
+        "-c", "include_environment_context=false", "-c", #"model_instructions_file="/tmp/x/instructions.md""#,
     ]
     for feature in CodexCLIProvider.disabledFeatures { expected += ["-c", "features.\(feature)=false"] }
     expected += ["--output-schema", "/tmp/x/schema.json", "--output-last-message", "/tmp/x/answer.txt", "-"]
@@ -80,6 +82,7 @@ private func directoryIsEmpty(_ path: String) -> Bool {
         flags: ["--sandbox", "--cd", "--model", "--config", "--color"])
     #expect(!old.contains("--ephemeral") && !old.contains("--output-last-message") && !old.contains("--model"))
     #expect(old.contains(#"model_reasoning_effort="medium""#))
+    #expect(!old.contains { $0.hasPrefix("model_instructions_file") }, "careful requests keep Codex's own instructions")
     #expect(old.last == "-")
 }
 
@@ -136,6 +139,11 @@ private let codexFeatures = """
             #expect(try String(contentsOfFile: schemaPath, encoding: .utf8) == #"{"type":"object"}"#)
             let answerPath = arguments[try #require(arguments.firstIndex(of: "--output-last-message")) + 1]
             try #"{"ok":true}"#.write(toFile: answerPath, atomically: true, encoding: .utf8)
+            // Codex's own coding-agent instructions are replaced by fixed text that holds no mail.
+            let setting = try #require(arguments.first { $0.hasPrefix("model_instructions_file=") })
+            let instructionsPath = String(setting.dropFirst(#"model_instructions_file=""#.count).dropLast())
+            #expect(try String(contentsOfFile: instructionsPath, encoding: .utf8) == CodexCLIProvider.baseInstructions)
+            #expect(invocation.qualityOfService == .default)
             return ProcessResult(exitCode: 0, stdout: "ignored", stderr: "user\nsecret mail text")
         }
     }
@@ -225,6 +233,11 @@ private let codexFeatures = """
         "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands",
         "--setting-sources", "", "--settings", #"{"disableAllHooks":true}"#, "--system-prompt", "Sort these.",
     ])
+    // Fast requests switch extended thinking off; careful ones (reply drafts) keep Claude Code's default.
+    #expect(ClaudeCLIProvider.environment(for: request) == ["MAX_THINKING_TOKENS": "0"])
+    var careful = request
+    careful.effort = .careful
+    #expect(ClaudeCLIProvider.environment(for: careful).isEmpty)
     #expect(ClaudeCLIProvider.stdin(for: request, flags: CLIBackend.flags(in: claudeHelp)) == "mail")
 
     let old = ["-p", "--print", "--model", "--output-format", "--disallowedTools"]
@@ -268,6 +281,7 @@ private let codexFeatures = """
     #expect(call.arguments[0...2] == ["-p", "--model", "sonnet"])
     #expect(String(decoding: try #require(call.stdin), as: UTF8.self) == "MAIL")
     #expect(call.environment["CLAUDECODE"] == nil && call.environment["CLAUDE_CODE_ENTRYPOINT"] == nil)
+    #expect(call.environment["MAX_THINKING_TOKENS"] == "0" && call.environment["HOME"] == "/Users/test")
 
     // Without an auth command in the help, availability is not probed (it would start a session).
     let oldRunner = FakeRunner { _ in ProcessResult(exitCode: 0, stdout: "Usage: claude [options]") }

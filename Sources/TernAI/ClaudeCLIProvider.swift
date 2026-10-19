@@ -3,7 +3,8 @@ import Foundation
 /// Claude Code (`claude -p`), signed in with the user's Claude subscription.
 ///
 /// Each call runs in print mode in an empty temp directory with every tool, MCP server, slash command,
-/// hook and settings file switched off, no saved session, and the prompt on stdin.
+/// hook and settings file switched off, no saved session, and the prompt on stdin. Fast requests also
+/// switch off extended thinking.
 public struct ClaudeCLIProvider: AIProvider {
     public let id = "claude"
     public let displayName = "Claude Code"
@@ -52,7 +53,9 @@ public struct ClaudeCLIProvider: AIProvider {
         defer { directory.remove() }
         let arguments = Self.arguments(for: request, flags: flags)
         let stdin = Self.stdin(for: request, flags: flags)
-        let result = try await backend.runModel(arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout)
+        let result = try await backend.runModel(
+            arguments, stdin: stdin, directory: directory.work.path, timeout: request.timeout, background: request.isBackground,
+            environment: Self.environment(for: request))
         do {
             return try Self.answer(from: result, provider: displayName)
         } catch AIError.notSignedIn(let provider) {
@@ -80,6 +83,14 @@ public struct ClaudeCLIProvider: AIProvider {
         if has("--settings") { arguments += ["--settings", #"{"disableAllHooks":true}"#] }
         if !request.instructions.isEmpty, has("--system-prompt") { arguments += ["--system-prompt", request.instructions] }
         return arguments
+    }
+
+    /// Fast requests run without extended thinking. Claude Code turns it on by default, and Haiku then
+    /// thinks for 10-17k tokens per triage batch: about 90 s instead of 8 s, for much the same verdicts.
+    /// An environment variable rather than a setting: in print mode a settings value an older version
+    /// doesn't know would drop the whole `--settings` JSON, `disableAllHooks` included.
+    static func environment(for request: AIRequest) -> [String: String] {
+        request.effort == .fast ? ["MAX_THINKING_TOKENS": "0"] : [:]
     }
 
     static func stdin(for request: AIRequest, flags: Set<String>) -> String {

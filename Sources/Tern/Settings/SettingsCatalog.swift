@@ -8,7 +8,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     case theme, density, dimRead, senderLogos
     case readingPane, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
-    case aiAbout, aiProvider, aiModel, aiProjects
+    case aiAbout, aiProvider, aiSorting, aiModel, aiProjects
     case shortcuts
     case updates, database, searchIndex, demoMail
 
@@ -21,7 +21,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .theme, .density, .dimRead, .senderLogos: .appearance
         case .readingPane, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
-        case .aiAbout, .aiProvider, .aiModel, .aiProjects: .ai
+        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects: .ai
         case .shortcuts: .shortcuts
         case .updates, .database, .searchIndex, .demoMail: .advanced
         }
@@ -62,6 +62,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .notifyImportant: "only important notifications"
         case .aiAbout: "ai privacy provider"
         case .aiProvider: "ai provider claude code codex"
+        case .aiSorting: "ai sorting classify triage progress status paused"
         case .aiModel: "ai model"
         case .aiProjects: "suggest projects ai"
         case .shortcuts: "shortcuts keys"
@@ -80,6 +81,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         // The always-load list only matters while images wait for a click.
         case .remoteImages: model.prefs.imagesInMail == .ask
         case .demoMail: model.isFake
+        case .aiSorting: model.services.aiSorting?.isShown ?? false
         default: true
         }
     }
@@ -147,6 +149,7 @@ struct SettingsItemView: View {
         case .notifyImportant: NotifyImportantItem()
         case .aiAbout: AIAboutItem()
         case .aiProvider: AIProviderItem(state: state)
+        case .aiSorting: AISortingItem()
         case .aiModel: AIModelItem(state: state)
         case .aiProjects: AIProjectsItem(state: state)
         case .shortcuts: ShortcutSettings(state: state)

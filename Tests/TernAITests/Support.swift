@@ -106,3 +106,57 @@ func aiRows(_ database: AppDatabase) throws -> [String: ThreadAI] {
         Dictionary(uniqueKeysWithValues: try ThreadAI.fetchAll(db).map { ($0.threadId, $0) })
     }
 }
+
+/// Counts calls running at once.
+actor Counter {
+    var current = 0
+    var peak = 0
+    /// How many were running (this one included) as each call started, in order.
+    var atStart: [Int] = []
+    func enter() { current += 1; peak = max(peak, current); atStart.append(current) }
+    func leave() { current -= 1 }
+}
+
+/// Holds callers until released.
+actor Latch {
+    private var open = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if open { return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func release() {
+        open = true
+        waiting.forEach { $0.resume() }
+        waiting = []
+    }
+}
+
+actor Recorder {
+    var items: [String] = []
+    func add(_ item: String) { items.append(item) }
+}
+
+/// A clock and a switch tests can move while a queue runs.
+final class TestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date = testNow
+    private var flag = false
+
+    var now: Date {
+        get { lock.withLock { date } }
+        set { lock.withLock { date = newValue } }
+    }
+
+    var isOn: Bool {
+        get { lock.withLock { flag } }
+        set { lock.withLock { flag = newValue } }
+    }
+}
+
+/// Subjects of the threads in a triage prompt, in order.
+func subjectsIn(_ text: String) -> [String] {
+    text.components(separatedBy: "\n").filter { $0.hasPrefix("Subject: ") }.map { String($0.dropFirst("Subject: ".count)) }
+}

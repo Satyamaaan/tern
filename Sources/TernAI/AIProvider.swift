@@ -52,10 +52,13 @@ public struct AIRequest: Hashable, Sendable {
     public var effort: Effort
     /// Seconds before the CLI is killed.
     public var timeout: TimeInterval
+    /// Work nobody is waiting on (triage): it queues behind on-demand calls for a CLI slot and the CLI
+    /// runs at a lower scheduling priority.
+    public var isBackground: Bool
 
     public init(
         instructions: String, input: String, schema: String? = nil, model: String? = nil,
-        effort: Effort = .fast, timeout: TimeInterval = 120
+        effort: Effort = .fast, timeout: TimeInterval = 120, isBackground: Bool = false
     ) {
         self.instructions = instructions
         self.input = input
@@ -63,6 +66,7 @@ public struct AIRequest: Hashable, Sendable {
         self.model = model
         self.effort = effort
         self.timeout = timeout
+        self.isBackground = isBackground
     }
 }
 
