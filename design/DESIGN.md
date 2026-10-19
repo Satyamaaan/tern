@@ -188,8 +188,10 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   become Move to Inbox (⇧I), with the same toast and undo, and `e` does nothing.
 - Drafts: on a draft row (the Drafts mailbox, a local draft, a thread of nothing but drafts) the trash keys and the
   `⋯` menu's Move to Trash become **Discard Draft**; a conversation with your draft in it keeps Move to Trash and
-  gets Discard Draft in `⋯` and ⌘K. "Draft discarded · Undo" (5 s) brings it back exactly: Gmail's copy is
-  deleted only after the undo window. A draft being sent is never discarded.
+  gets Discard Draft in `⋯` and ⌘K. "Draft discarded · Undo" (5 s, wall-clock) brings it back exactly: Gmail's
+  copy is deleted only after the undo window, and an undo too late for that says so. A selection of draft rows and
+  conversations is discarded and trashed together ("Trash and Discard Drafts", one toast, one undo). A draft
+  being sent is never discarded; the toast counts only the drafts that were.
 - Empty: inbox zero is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
   other lists one Display 17 line in `text2`.
 

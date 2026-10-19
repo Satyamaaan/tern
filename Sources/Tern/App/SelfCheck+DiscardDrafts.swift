@@ -44,9 +44,54 @@ extension SelfCheck {
             self.messages(row).contains { $0.id == message.messageId } && self.pendingDeletes() == 0
         } && waitUntil { self.model.snapshot.rows[row] != nil })
 
+        mixedDelete()
         readerDraftActions()
         model.show(.inbox)
         wait(0.2)
+    }
+
+    /// Delete on a draft row and a conversation together: the draft is discarded and the conversation trashed,
+    /// with one toast and one undo. The fake mailbox's drafts all answer someone, so a new message drafted on
+    /// the phone is added for it.
+    private func mixedDelete() {
+        let store = model.store
+        guard let accountId = model.services.accounts.first?.id else { return check("mixed delete: an account", false) }
+        let note = MailMessage(accountId: accountId, id: "selfcheck-phone-draft", threadId: "selfcheck-phone-draft", date: Date(),
+                               fromEmail: accountId, toList: [Participant(email: "pat@example.com")], subject: "Self-check phone draft",
+                               bodyText: "See you Friday", bodyState: .full, labelIds: [SystemLabel.draft], isFromMe: true)
+        do { try store.database.writer.write { db in try MailStore.upsertServerMessages(db, [note]) } } catch {
+            return check("mixed delete: add a draft", false)
+        }
+        defer { _ = try? store.database.writer.write { db in try MailStore.deleteMessages(db, accountId: accountId, ids: [note.id]) } }
+        model.show(.allMail)
+        let draft = note.threadKey
+        _ = waitUntil { self.model.snapshot.rows[draft] != nil }
+        guard model.isDraftRow(draft), let conversation = model.snapshot.order.first(where: { !model.holdsDraft($0) }),
+              let message = try? model.services.drafts.draftMessage(inThread: draft) else {
+            return check("mixed delete: a draft row and a conversation in All mail", false)
+        }
+        for key in [draft, conversation] {
+            model.setCursor(key, open: false)
+            model.toggleChecked()
+        }
+        model.focusList()
+        check("with a draft and a conversation selected, delete is Trash and Discard Drafts",
+              registry["trash"]?.displayTitle == "Trash and Discard Drafts")
+        let undos = model.undoStack.count
+        send("\u{7f}", keyCode: 51)
+        check("…both leave in the same frame, with one toast and one undo",
+              model.snapshot.rows[draft] == nil && model.snapshot.rows[conversation] == nil
+                && model.toasts.last?.title == "Moved 1 to Trash and discarded a draft" && model.undoStack.count == undos + 1)
+        check("…the draft goes and the conversation is in Trash", waitUntil {
+            self.messages(draft).allSatisfy { !$0.isDraft } && ((try? self.model.store.threadRows(in: Mailbox(.trash), limit: 50))?
+                .contains { $0.id == conversation } ?? false)
+        })
+        send("z")
+        check("…z brings back both", waitUntil {
+            self.messages(draft).contains { $0.id == message.messageId } && self.pendingDeletes() == 0
+                && !((try? self.model.store.threadRows(in: Mailbox(.trash), limit: 50))?.contains { $0.id == conversation } ?? true)
+        })
+        model.clearSelection()
     }
 
     /// The reader shows a conversation's draft with Edit and Discard; Discard takes the draft alone.

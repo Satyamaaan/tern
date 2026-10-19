@@ -37,6 +37,22 @@ public struct DiscardedDrafts: Sendable, Hashable {
     public var count: Int { items.count }
 }
 
+/// What `restore` brought back.
+public struct RestoredDrafts: Sendable, Hashable {
+    /// Back as they were.
+    public var exact = 0
+    /// Local drafts whose Gmail copy was already deleted: back, saving a new copy.
+    public var resaved = 0
+    /// Gmail drafts Tern had no row for that Gmail had already deleted: gone.
+    public var lost = 0
+
+    public init(exact: Int = 0, resaved: Int = 0, lost: Int = 0) {
+        self.exact = exact
+        self.resaved = resaved
+        self.lost = lost
+    }
+}
+
 extension DraftStore {
     /// `DraftOpPayload.draftId` of the deletion of a Gmail draft Tern had no local row for.
     static let gmailDraftPrefix = "gmail-message:"
@@ -155,40 +171,53 @@ extension DraftStore {
 
     /// Undo of `discardDrafts`. While a draft's Gmail deletion hasn't started it is dropped and the draft
     /// comes back exactly: its local row with its saves and sends, its DRAFT message and attachments (so it
-    /// shows in the lists and the reader again), its thread's classification and projects. A local draft
-    /// whose Gmail copy is already gone comes back without it and saves a new one; a Gmail draft Tern had no
-    /// row for can't come back then. Returns false when something couldn't.
-    @discardableResult
-    public func restore(_ discarded: DiscardedDrafts, now: Date = Date()) throws -> Bool {
+    /// shows in the lists and the reader again), its thread's classification and projects. A save that was on
+    /// its way at the discard and finished since left its Gmail ids on the deletion; the draft takes them and
+    /// saves again, so its message comes back through sync. A local draft whose Gmail copy is already gone
+    /// comes back without it and saves a new one; a Gmail draft Tern had no row for can't come back then.
+    public func restore(_ discarded: DiscardedDrafts, now: Date = Date()) throws -> RestoredDrafts {
         try database.writer.write { db in
-            var complete = true
+            var result = RestoredDrafts()
             var messages: [MailMessage] = []
             var attachments: [MailAttachment] = []
             for item in discarded.items {
                 let held = try PendingOp.fetchOne(db, key: item.deleteOpId)
                 let stopped = held.map { $0.state == .pending && !$0.dispatched } ?? false
+                let payload = held.flatMap { try? JSONDecoder().decode(DraftOpPayload.self, from: Data($0.payload.utf8)) }
                 if stopped { _ = try held?.delete(db) }
-                guard stopped || item.draft != nil else {
-                    complete = false
+                guard var draft = item.draft else {
+                    if stopped, let message = item.message {
+                        messages.append(message)
+                        attachments += item.attachments
+                        result.exact += 1
+                    } else {
+                        result.lost += 1
+                    }
                     continue
                 }
-                if var draft = item.draft {
-                    if !stopped {
-                        draft.gmailDraftId = nil
-                        draft.gmailMessageId = nil
-                    }
-                    try draft.insert(db)
-                    for op in item.ops {
-                        var copy = op
-                        copy.id = nil
-                        try copy.insert(db)
-                    }
-                    if !stopped, item.ops.isEmpty, !DraftContent(stored: draft).isBlank { try Self.queueSave(db, draft, now: now) }
+                let saved = stopped && payload.map { $0.gmailDraftId != draft.gmailDraftId || $0.gmailMessageId != draft.gmailMessageId } == true
+                if !stopped {
+                    draft.gmailDraftId = nil
+                    draft.gmailMessageId = nil
+                } else if saved, let payload {
+                    draft.gmailDraftId = payload.gmailDraftId
+                    draft.gmailMessageId = payload.gmailMessageId
                 }
-                if stopped, let message = item.message {
+                try draft.insert(db)
+                for op in item.ops {
+                    var copy = op
+                    copy.id = nil
+                    try copy.insert(db)
+                }
+                if !stopped || saved, !item.ops.contains(where: { $0.kind == .saveDraft || $0.kind == .sendDraft }),
+                   !DraftContent(stored: draft).isBlank {
+                    try Self.queueSave(db, draft, now: now)
+                }
+                if stopped, !saved, let message = item.message {
                     messages.append(message)
                     attachments += item.attachments
                 }
+                if stopped { result.exact += 1 } else { result.resaved += 1 }
             }
             try MailStore.upsertServerMessages(db, messages, attachments: attachments)
             for ai in discarded.threadAI where try MailThread.exists(db, key: ["accountId": ai.accountId, "id": ai.threadId]) {
@@ -199,7 +228,7 @@ extension DraftStore {
                 && Project.exists(db, key: project.projectId) {
                 try project.insert(db, onConflict: .ignore)
             }
-            return complete
+            return result
         }
     }
 }

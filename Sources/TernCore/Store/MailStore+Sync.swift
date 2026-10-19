@@ -89,12 +89,14 @@ extension MailStore {
         guard !messages.isEmpty || !attachments.isEmpty else { return }
         var messages = messages
         var attachments = attachments
-        // A draft discarded here stays out while its deletion waits to go to Gmail (the undo window).
+        // A draft discarded here stays out while its deletion waits to go to Gmail (the undo window). The same
+        // message sent from Gmail meanwhile isn't a draft any more, and comes in.
         if messages.contains(where: \.isDraft) {
             let discarded = try discardedDraftMessages(db)
-            if !discarded.isEmpty {
-                messages.removeAll { discarded.contains($0.key) }
-                attachments.removeAll { discarded.contains(MessageKey(accountId: $0.accountId, messageId: $0.messageId)) }
+            let dropped = Set(messages.filter { $0.isDraft && discarded.contains($0.key) }.map(\.key))
+            if !dropped.isEmpty {
+                messages.removeAll { dropped.contains($0.key) }
+                attachments.removeAll { dropped.contains(MessageKey(accountId: $0.accountId, messageId: $0.messageId)) }
             }
         }
         if !attachments.isEmpty {

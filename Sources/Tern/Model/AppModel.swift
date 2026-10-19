@@ -432,7 +432,7 @@ struct Toast: Identifiable, Equatable {
     var title: String
     var undo: UndoEntry?
 
-    static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
+    static func == (a: Toast, b: Toast) -> Bool { a.id == b.id && a.title == b.title }
 }
 
 /// Something `z` can put back. The toast appears in the same frame as the action, before the write

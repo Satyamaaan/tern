@@ -89,7 +89,7 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
         draftId: draft.id, gmailDraftId: "r-1", gmailMessageId: "d1", rfcMessageId: "<d1@phone.example>"))
     #expect(FileManager.default.fileExists(atPath: draft.attachments[0].path), "files stay until Gmail's copy is deleted")
 
-    #expect(try store.restore(discarded, now: t0.addingTimeInterval(3)))
+    #expect(try store.restore(discarded, now: t0.addingTimeInterval(3)) == RestoredDrafts(exact: 1))
     #expect(try store.draft(id: draft.id) == draft)
     #expect(try mail(store).threadDetail(key("news"))?.messages.map(\.id) == ["m1", "d1"])
     #expect(try draftRows(store) == ["solo", "news"])
@@ -115,7 +115,7 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     #expect(try payload(queued[0]) == DraftOpPayload(
         draftId: DraftStore.gmailDraftPrefix + "d2", gmailMessageId: "d2", rfcMessageId: "<d2@web.example>"))
 
-    #expect(try store.restore(discarded))
+    #expect(try store.restore(discarded) == RestoredDrafts(exact: 1))
     let detail = try #require(try mail(store).threadDetail(key("solo")))
     #expect(detail.messages.map(\.id) == ["d2"] && detail.attachments["d2"]?.map(\.filename) == ["plan.pdf"])
     #expect(detail.projects.map(\.id) == ["p1"] && detail.ai?.category == .other)
@@ -138,7 +138,7 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     #expect(try payload(ops(store)[0]) == DraftOpPayload(draftId: local.id), "a draft Gmail never had leaves only its files to clean up")
     #expect(try mail(store).threadRows(in: .unifiedInbox).map(\.thread.id) == ["news"])
 
-    #expect(try store.restore(discarded))
+    #expect(try store.restore(discarded) == RestoredDrafts(exact: 3))
     #expect(Set(try draftRows(store)) == [localRow.threadId, "news", "solo"])
     #expect(try store.draft(id: local.id) == local)
     #expect(try ops(store).isEmpty)
@@ -169,7 +169,7 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     let sends = try ops(store).filter { $0.kind == .sendDraft }.compactMap { try? payload($0).draftId }
     #expect(sends == ["sending", "claimed", "staged"])
 
-    #expect(try store.restore(discarded))
+    #expect(try store.restore(discarded) == RestoredDrafts(exact: 1))
     #expect(try store.draft(id: "waiting")?.state == .queued)
     #expect(try ops(store).filter { $0.kind == .sendDraft }.compactMap { try? payload($0).draftId }.sorted() == ["claimed", "sending", "staged", "waiting"])
 }
@@ -183,14 +183,14 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     try await store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight', dispatched = 1") }
 
     // The local draft comes back without the Gmail copy that's going, and saves a new one.
-    #expect(try store.restore(reply, now: t0.addingTimeInterval(20)))
+    #expect(try store.restore(reply, now: t0.addingTimeInterval(20)) == RestoredDrafts(resaved: 1))
     let back = try #require(try store.draft(id: draft.id))
     #expect(back.gmailDraftId == nil && back.gmailMessageId == nil && back.bodyHtml == draft.bodyHtml && back.attachments == draft.attachments)
     #expect(try message(store, "d1") == nil)
     #expect(try ops(store).map(\.kind) == [.deleteDraft, .deleteDraft, .saveDraft])
 
     // A Gmail draft Tern had no row for has nothing left to bring back.
-    #expect(try !store.restore(solo))
+    #expect(try store.restore(solo) == RestoredDrafts(lost: 1))
     #expect(try message(store, "d2") == nil)
 }
 
@@ -206,4 +206,22 @@ private func linkReply(_ store: DraftStore) async throws -> Draft {
     try store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'failed'") }
     try store.database.writer.write { db in try MailStore.upsertServerMessages(db, [d2]) }
     #expect(try message(store, "d2") != nil)
+}
+
+@Test func aDiscardedDraftSentFromGmailMeanwhileComesInAsSent() throws {
+    let store = try makeStore()
+    let d2 = try #require(try message(store, "d2"))
+    _ = try store.discardDrafts(inThreads: [key("solo")], holdFor: hold, now: t0)
+
+    // Sent on the phone during the undo window: the same message, now in Sent.
+    let sent = MailMessage(accountId: me.id, id: "d2", threadId: "solo", date: d2.date, fromEmail: me.email, toList: d2.toList,
+                           subject: d2.subject, bodyText: d2.bodyText, bodyState: .full, labelIds: ["SENT"], isFromMe: true,
+                           hasAttachments: true, rfcMessageId: d2.rfcMessageId)
+    let file = MailAttachment(accountId: me.id, messageId: "d2", partId: "1", attachmentId: "att-1", filename: "plan.pdf",
+                              mimeType: "application/pdf", size: 10)
+    try store.database.writer.write { db in try MailStore.upsertServerMessages(db, [sent], attachments: [file]) }
+    let stored = try #require(try message(store, "d2"))
+    #expect(!stored.isDraft && stored.labelIds == ["SENT"])
+    #expect(try mail(store).threadDetail(key("solo"))?.attachments["d2"]?.map(\.filename) == ["plan.pdf"])
+    #expect(try draftRows(store) == ["news"])
 }

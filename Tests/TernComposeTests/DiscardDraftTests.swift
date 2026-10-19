@@ -161,3 +161,62 @@ private func ops(_ model: AppModel) throws -> [PendingOp] {
     await settle(model, 0.1)
     #expect(try model.store.threadDetail(news)?.messages.map(\.id) == ["m1", "d1"])
 }
+
+@MainActor
+@Test func deletingDraftsAndConversationsTogetherDiscardsTheOneAndTrashesTheOtherWithOneUndo() async throws {
+    let (model, registry, _) = try makeModel()
+    model.show(.allMail)
+    #expect(Set(model.snapshot.order) == [news, solo])
+    model.selectAll()
+    #expect(model.targetsMixDrafts && registry["trash"]?.displayTitle == "Trash and Discard Drafts")
+
+    registry.run("trash")
+    #expect(model.snapshot.order.isEmpty, "both leave in the same frame")
+    #expect(model.toasts.map(\.title) == ["Moved 1 to Trash and discarded a draft"] && model.undoStack.count == 1)
+    await settle(model)
+    #expect(try model.store.threadRows(in: Mailbox(.trash)).map(\.id) == [news])
+    #expect(try drafts(model) == [news.threadId, MailThread.localDraftPrefix + "note"], "trash leaves a conversation's draft alone")
+    #expect(try ops(model).map(\.kind).sorted { $0.rawValue < $1.rawValue } == [.deleteDraft, .modifyLabels])
+
+    model.undoLast()
+    await settle(model, 0.1)
+    #expect(try model.store.threadRows(in: Mailbox(.trash)).isEmpty)
+    #expect(try drafts(model) == [news.threadId, solo.threadId, MailThread.localDraftPrefix + "note"])
+    #expect(try ops(model).isEmpty, "the trash and the Gmail deletion are both called off")
+    model.reloadList()
+    #expect(Set(model.snapshot.order) == [news, solo])
+}
+
+@MainActor
+@Test func whenSomeDraftsAreBeingSentTheToastCountsOnlyTheOnesDiscarded() async throws {
+    let (model, registry, local) = try makeModel()
+    try await model.store.database.writer.write { db in
+        try db.execute(sql: "UPDATE draft SET state = 'queued' WHERE id = 'note'")
+        try PendingOp(accountId: me.id, kind: .sendDraft, payload: try encodeJSON(DraftOpPayload(draftId: "note")), state: .inflight,
+                      dispatched: true).insert(db)
+    }
+    model.show(.drafts)
+    model.selectAll()
+    registry.run("trash")
+    #expect(model.toasts.last?.title == "3 drafts discarded")
+    await settle(model, 0.6)
+    #expect(model.toasts.map(\.title) == ["2 drafts discarded", "A draft being sent can't be discarded"])
+    #expect(model.toasts.first?.undo != nil && model.undoStack.count == 1)
+    #expect(model.snapshot.rows[local] != nil)
+}
+
+@MainActor
+@Test func anUndoTooLateForGmailSaysSo() async throws {
+    let (model, registry, local) = try makeModel()
+    model.show(.drafts)
+    model.selectAll()
+    registry.run("trash")
+    await settle(model)
+    // The engine picked the deletions up before the undo arrived (say the Mac slept through the window).
+    try await model.store.database.writer.write { db in try db.execute(sql: "UPDATE pending_op SET state = 'inflight', dispatched = 1") }
+    model.undoLast()
+    await settle(model, 0.1)
+    #expect(model.toasts.last?.title == "Too late: Gmail already deleted 2 drafts")
+    #expect(try drafts(model) == [local.threadId], "the draft written here comes back, and saves itself again")
+    #expect(try model.services.drafts.draft(id: "note")?.bodyHtml == "<p>Milk</p>")
+}

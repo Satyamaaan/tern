@@ -103,8 +103,8 @@ final class CommandRegistry {
             // On draft rows the trash keys discard the draft; the conversation a draft replies to is never trashed for it.
             Command(id: "trash", title: "Move to Trash", group: .actions, keys: [.key("#"), .special(.delete)], menu: .message,
                     aliases: ["delete"], isEnabled: hasTargets,
-                    currentTitle: { m.targetsAreDrafts ? "Discard Draft" : "Move to Trash" }) {
-                if m.targetsAreDrafts { m.discardDrafts(m.targets) } else { m.perform(.trash, on: m.targets) }
+                    currentTitle: { m.targetsAreDrafts ? "Discard Draft" : m.targetsMixDrafts ? "Trash and Discard Drafts" : "Move to Trash" }) {
+                m.trashOrDiscard(m.targets)
             },
             Command(id: "discardDraft", title: "Discard Draft", group: .actions, aliases: ["delete draft", "remove draft"],
                     paletteOnly: true, isEnabled: { m.targetsHoldDrafts }, isVisible: { !m.targetsAreDrafts }) { m.discardDrafts(m.targets) },

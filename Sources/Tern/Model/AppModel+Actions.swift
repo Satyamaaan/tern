@@ -143,7 +143,8 @@ extension AppModel {
         let toast = Toast(title: title, undo: undo)
         toasts.append(toast)
         if toasts.count > 3 { toasts.removeFirst(toasts.count - 3) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        // Wall-clock time, so a Mac that slept through the toast doesn't offer an undo whose window has passed.
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + duration) { [weak self] in
             MainActor.assumeIsolated {
                 self?.toasts.removeAll { $0.id == toast.id }
                 if let undo { self?.undoStack.removeAll { $0.id == undo.id && $0.expires } }

@@ -250,6 +250,8 @@ public actor FakeGmail: GmailAPI {
     public func labels(of id: String) -> [String]? { store[id]?.labelIds }
     public var allMessageIds: [String] { sortedMessages().map(\.id) }
     public var draftIds: [String] { Array(drafts.keys) }
+    /// The message a draft holds now.
+    public func draftMessageId(_ id: String) -> String? { drafts[id] }
 
     public func ids(inThread threadId: String) -> [String] {
         sortedMessages().filter { $0.threadId == threadId }.map(\.id)
@@ -436,7 +438,11 @@ public actor FakeGmail: GmailAPI {
         try await begin(.drafts, units: GmailQuota().listDrafts)
         let matching = drafts.compactMap { draftId, messageId -> (draftId: String, message: GmailMessage)? in
             guard let message = store[messageId] else { return nil }
-            if let query, !query.isEmpty, !matchesQuery(query, message) { return nil }
+            if let query, !query.isEmpty {
+                // Search, like messages.list's, only knows what the index has caught up with.
+                if let indexedIds, !indexedIds.contains(message.id) { return nil }
+                if !matchesQuery(query, message) { return nil }
+            }
             return (draftId, message)
         }.sorted { lhs, rhs in
             let left = Int64(lhs.message.internalDate ?? "0") ?? 0, right = Int64(rhs.message.internalDate ?? "0") ?? 0
