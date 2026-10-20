@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Settings → Accounts → Google client: the stored client ID, masked, with Replace… to paste a new ID
-/// and secret or import the JSON file Google offers when the client is created.
+/// Settings → Accounts → Google clients: each stored client ID, masked, with the accounts that sign in
+/// through it, Add… to paste another ID and secret or import the JSON file Google offers when the client is
+/// created, and Remove while there is more than one. Accounts keep the client they signed in with, so a
+/// Workspace whose admin only allows its own apps can use its own client next to a personal one.
 struct GoogleClientSection: View {
     @Environment(AppServices.self) private var services
     /// Starts with the editor open (snapshots).
@@ -13,36 +15,60 @@ struct GoogleClientSection: View {
     @State private var clientSecret = ""
     @State private var message: String?
     @State private var working = false
-    @State private var stored: String?
+    @State private var clients: [GoogleClientInfo] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsRow(title: "Google client", detail: detail, icon: .key) {
+            SettingsRow(title: clients.count > 1 ? "Google clients" : "Google client", detail: detail, icon: .key) {
                 if !editing {
-                    Button(stored == nil ? "Add…" : "Replace…") { editing = true }
+                    Button(clients.isEmpty ? "Add…" : "Add another…") { message = nil; editing = true }
                         .buttonStyle(TernButtonStyle(.secondary))
                 }
             }
             if editing { editor }
+            ForEach(clients) { client in
+                SettingsRow(title: GoogleClientText.masked(client.id), detail: usage(client)) {
+                    if clients.count > 1 {
+                        Button("Remove") { remove(client) }
+                            .buttonStyle(TernButtonStyle(.secondary))
+                            .disabled(working)
+                    }
+                }
+                .padding(.leading, 26)
+            }
+            if !editing, let message {
+                Text(message)
+                    .font(.ui(12, .medium))
+                    .foregroundStyle(Color(Theme.ink))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            }
         }
         .onAppear {
-            stored = services.googleClientId()
+            reload()
             if startEditing { editing = true }
         }
+        .onChange(of: services.accounts) { reload() }
+        .onChange(of: services.googleClientsChanged) { reload() }
         .googleClientFileDrop { data in importFile(data) }
     }
 
     private var detail: String {
-        guard let stored else { return "Not set. Tern reads Gmail through your own Google Cloud client." }
-        return "\(GoogleClientText.masked(stored)) · Desktop app · in your Keychain"
+        if clients.isEmpty { return "Not set. Tern reads Gmail through your own Google Cloud client." }
+        return "Desktop app · in your Keychain. Add another when a Workspace only lets in its own apps."
+    }
+
+    private func usage(_ client: GoogleClientInfo) -> String {
+        let used = client.emails.isEmpty ? "No accounts yet" : client.emails.joined(separator: ", ")
+        return client.id == clients.first?.id && clients.count > 1 ? "\(used) · used for new accounts first" : used
     }
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
             GoogleClientFields(clientId: $clientId, clientSecret: $clientSecret)
-            Text(stored == nil
+            Text(clients.isEmpty
                  ? "Drop the client_secret_….json file Google offered when you created the client, or paste its ID and secret."
-                 : "Accounts connected with the old client will ask you to sign in again.")
+                 : "Accounts keep the client they signed in with. Saving a client that's already here updates its secret.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
                 .fixedSize(horizontal: false, vertical: true)
@@ -94,12 +120,30 @@ struct GoogleClientSection: View {
         }
     }
 
+    private func remove(_ client: GoogleClientInfo) {
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                try await services.removeGoogleClient(client.id)
+                message = nil
+            } catch {
+                message = GoogleClientText.message(for: error)
+            }
+            reload()
+        }
+    }
+
     private func close() {
         editing = false
         clientId = ""
         clientSecret = ""
         message = nil
-        stored = services.googleClientId()
+        reload()
+    }
+
+    private func reload() {
+        clients = services.googleClients()
     }
 }
 
@@ -139,6 +183,12 @@ enum GoogleClientText {
         let base = clientId.hasSuffix(suffix) ? String(clientId.dropLast(suffix.count)) : clientId
         guard base.count > 8 else { return String(repeating: "•", count: max(4, base.count)) + suffix }
         return base.prefix(4) + "••••" + base.suffix(4) + suffix
+    }
+
+    /// "1234••••abcd": short enough for a menu item.
+    static func short(_ clientId: String) -> String {
+        let masked = masked(clientId)
+        return masked.hasSuffix(".apps.googleusercontent.com") ? String(masked.dropLast(".apps.googleusercontent.com".count)) : masked
     }
 
     static func message(for error: Error) -> String {

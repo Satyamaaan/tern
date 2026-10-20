@@ -59,7 +59,9 @@ public enum GoogleClientConfigError: Error, Equatable, Sendable {
     case unreadableFile
 }
 
-/// Saves the OAuth client in the Keychain (service `dev.tern.mail.oauth-client`).
+/// Saves the user's OAuth clients in the Keychain (service `dev.tern.mail.oauth-client`). The first one
+/// is the default, under the item `default`; each other one is under its client ID. Several clients let
+/// accounts from different places sign in, e.g. a Workspace whose admin only allows its own apps.
 public struct GoogleClientConfigStore: Sendable {
     static let account = "default"
     private let secrets: any SecretStore
@@ -68,19 +70,63 @@ public struct GoogleClientConfigStore: Sendable {
         self.secrets = secrets
     }
 
+    /// The default client: the one accounts use when they were connected before Tern kept more than one.
     public func load() throws -> GoogleClientConfig? {
-        guard let data = try secrets.data(service: GoogleKeychain.clientService, account: Self.account) else { return nil }
+        try config(at: Self.account)
+    }
+
+    /// Every client, the default first, then the others by client ID. A client stored twice (a removal that
+    /// stopped halfway) is listed once.
+    public func loadAll() throws -> [GoogleClientConfig] {
+        let others = try secrets.accounts(service: GoogleKeychain.clientService).filter { $0 != Self.account }
+        var seen = Set<String>()
+        return try ([load()] + others.map { try config(at: $0) }).compactMap { $0 }.filter { seen.insert($0.clientId).inserted }
+    }
+
+    /// Validates, then saves as the default client, replacing the one there.
+    public func save(_ config: GoogleClientConfig) throws {
+        try config.validate()
+        try write(config, at: Self.account)
+    }
+
+    /// Validates, then adds a client. The first one becomes the default; a client already stored under
+    /// the same ID gets the new secret.
+    public func add(_ config: GoogleClientConfig) throws {
+        try config.validate()
+        if let current = try load(), current.clientId != config.clientId {
+            try write(config, at: config.clientId)
+        } else {
+            try write(config, at: Self.account)
+        }
+    }
+
+    /// Removes a client. When it was the default, the next one takes its place. Safe to repeat after a
+    /// failure partway.
+    public func remove(clientId: String) throws {
+        try secrets.remove(service: GoogleKeychain.clientService, account: clientId)
+        guard let current = try load(), current.clientId == clientId else { return }
+        let others = try secrets.accounts(service: GoogleKeychain.clientService).filter { $0 != Self.account && $0 != clientId }
+        if let next = try others.compactMap({ try config(at: $0) }).first {
+            try write(next, at: Self.account)
+            try secrets.remove(service: GoogleKeychain.clientService, account: next.clientId)
+        } else {
+            try secrets.remove(service: GoogleKeychain.clientService, account: Self.account)
+        }
+    }
+
+    /// Removes every client.
+    public func delete() throws {
+        for account in try secrets.accounts(service: GoogleKeychain.clientService) {
+            try secrets.remove(service: GoogleKeychain.clientService, account: account)
+        }
+    }
+
+    private func config(at account: String) throws -> GoogleClientConfig? {
+        guard let data = try secrets.data(service: GoogleKeychain.clientService, account: account) else { return nil }
         return try? JSONDecoder().decode(GoogleClientConfig.self, from: data)
     }
 
-    /// Validates, then saves.
-    public func save(_ config: GoogleClientConfig) throws {
-        try config.validate()
-        let data = try JSONEncoder().encode(config)
-        try secrets.set(data, service: GoogleKeychain.clientService, account: Self.account)
-    }
-
-    public func delete() throws {
-        try secrets.remove(service: GoogleKeychain.clientService, account: Self.account)
+    private func write(_ config: GoogleClientConfig, at account: String) throws {
+        try secrets.set(try JSONEncoder().encode(config), service: GoogleKeychain.clientService, account: account)
     }
 }

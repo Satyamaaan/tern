@@ -35,11 +35,13 @@ final class Integration {
     enum Failure: LocalizedError {
         case noGoogleClient
         case differentAccount(String)
+        case keychainLocked
 
         var errorDescription: String? {
             switch self {
             case .noGoogleClient: "Add your Google OAuth client first (Settings → Accounts)."
             case .differentAccount(let email): "You signed in as \(email). Choose the same account to reconnect it."
+            case .keychainLocked: "Tern couldn't read this account from your Keychain. Unlock it and try again."
             }
         }
     }
@@ -87,12 +89,19 @@ final class Integration {
     private func wireGoogle() {
         services.hasGoogleClient = { (try? GoogleClientConfigStore().load()) != nil }
         services.googleClientId = { (try? GoogleClientConfigStore().load())?.clientId }
+        services.googleClients = { [weak self] in
+            guard let self, let google = self.googleAccounts else { return [] }
+            let emails = self.services.accounts.map(\.id)
+            return google.clientIds.map { id in
+                GoogleClientInfo(id: id, emails: emails.filter { google.clientId(for: $0) == id })
+            }
+        }
 
         services.saveGoogleClient = { [weak self] clientId, clientSecret in
             let config = GoogleClientConfig(
                 clientId: clientId.trimmingCharacters(in: .whitespacesAndNewlines),
                 clientSecret: clientSecret.trimmingCharacters(in: .whitespacesAndNewlines))
-            try self?.useGoogleClient(config)
+            try self?.addGoogleClient(config)
         }
 
         services.importGoogleClient = { [weak self] data in
@@ -100,12 +109,19 @@ final class Integration {
             do { config = try GoogleClientConfig(downloadedJSON: data) } catch let error as GoogleClientConfigError {
                 throw ClientProblem(error)
             }
-            try self?.useGoogleClient(config)
+            try self?.addGoogleClient(config)
         }
 
-        services.connectAccount = { [weak self] in
+        services.removeGoogleClient = { [weak self] clientId in
+            try GoogleClientConfigStore().remove(clientId: clientId)
+            self?.reloadGoogleClients()
+            if self?.services.lastSavedGoogleClientId == clientId { self?.services.lastSavedGoogleClientId = nil }
+            self?.services.googleClientsChanged += 1
+        }
+
+        services.connectAccountWith = { [weak self] clientId in
             guard let self, let google = self.googleAccounts else { throw Failure.noGoogleClient }
-            let info = try await google.connect { url in
+            let info = try await google.connect(clientId: clientId) { url in
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
             let account = try await self.saveAccount(info)
@@ -115,10 +131,17 @@ final class Integration {
             }
             return account
         }
+        services.connectAccount = { [weak self] in
+            guard let self else { throw Failure.noGoogleClient }
+            return try await self.services.connectAccountWith(nil)
+        }
 
         services.reauthAccount = { [weak self] account in
             guard let self, let google = self.googleAccounts else { throw Failure.noGoogleClient }
-            let info = try await google.connect(loginHint: account.email) { url in
+            // The account's own client; a Keychain that can't be read stops here rather than use another.
+            let clientId: String?
+            do { clientId = try google.storedClientId(for: account.email) } catch { throw Failure.keychainLocked }
+            let info = try await google.connect(clientId: clientId, loginHint: account.email) { url in
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
             guard info.email.lowercased() == account.id else { throw Failure.differentAccount(info.email) }
@@ -152,15 +175,24 @@ final class Integration {
         }
     }
 
-    /// Validates and stores the user's OAuth client; accounts sign in through it from now on.
-    private func useGoogleClient(_ config: GoogleClientConfig) throws {
+    /// Validates and stores one of the user's OAuth clients. Accounts keep the client they signed in
+    /// with; the first client is the default for new ones.
+    private func addGoogleClient(_ config: GoogleClientConfig) throws {
         do {
-            try config.validate()
-            try GoogleClientConfigStore().save(config)
+            try GoogleClientConfigStore().add(config)
         } catch let error as GoogleClientConfigError {
             throw ClientProblem(error)
         }
-        google = GoogleAccounts(config: config)
+        reloadGoogleClients()
+        services.lastSavedGoogleClientId = config.clientId
+        services.googleClientsChanged += 1
+    }
+
+    /// Reads the clients from the Keychain again and hands every syncing account a Gmail client built from
+    /// them, so a removed client or a new secret takes effect without a restart.
+    private func reloadGoogleClients() {
+        google = try? GoogleAccounts()
+        for account in services.accounts { sync?.reauthorized(accountId: account.id) }
     }
 
     /// What went wrong with an entered or imported OAuth client, in words for the person entering it.

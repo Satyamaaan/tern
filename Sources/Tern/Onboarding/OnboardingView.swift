@@ -203,6 +203,7 @@ struct OnboardingView: View {
             HStack(spacing: 10) {
                 Dot(color: Theme.accountColor(account.colorIndex), size: 8)
                     .frame(width: 16)
+                    .accessibilityHidden(true)
                 Text(account.email).font(.ui(13)).foregroundStyle(Color(Theme.text1)).lineLimit(1)
                 Spacer()
                 Text(account.syncState == .live ? "Synced" : "Syncing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
@@ -314,7 +315,8 @@ struct OnboardingView: View {
         Task {
             defer { working = false }
             do {
-                _ = try await services.connectAccount()
+                // The client entered on step 1, even when an earlier one is the default.
+                _ = try await services.connectAccountWith(services.lastSavedGoogleClientId)
                 message = nil
             } catch {
                 message = error.localizedDescription

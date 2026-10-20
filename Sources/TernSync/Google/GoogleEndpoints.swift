@@ -34,9 +34,10 @@ public enum GoogleScope {
 
 /// Keychain service names.
 public enum GoogleKeychain {
-    /// The user's OAuth client (id and secret).
+    /// The user's OAuth clients (id and secret).
     public static let clientService = "dev.tern.mail.oauth-client"
-    /// Refresh tokens; the Keychain account is the lowercased email address.
+    /// Each account's `GoogleCredential` (refresh token and issuing client); the Keychain account is the
+    /// lowercased email address.
     public static let tokenService = "dev.tern.mail.google"
 }
 

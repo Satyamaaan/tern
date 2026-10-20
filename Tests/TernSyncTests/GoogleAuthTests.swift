@@ -84,6 +84,92 @@ import Testing
         #expect(try store.load() == nil)
     }
 
+    @Test func clientStoreKeepsSeveralClients() throws {
+        let secrets = MemorySecretStore()
+        let store = GoogleClientConfigStore(secrets: secrets)
+        let work = GoogleClientConfig(clientId: "999-workspace.apps.googleusercontent.com", clientSecret: "GOCSPX-work")
+        let other = GoogleClientConfig(clientId: "555-other.apps.googleusercontent.com", clientSecret: "GOCSPX-other")
+        try store.add(testConfig)
+        try store.add(work)
+        try store.add(other)
+        #expect(try store.load() == testConfig)
+        #expect(try store.loadAll() == [testConfig, other, work])
+
+        // Adding a client that is already there updates its secret.
+        let newSecret = GoogleClientConfig(clientId: work.clientId, clientSecret: "GOCSPX-new")
+        try store.add(newSecret)
+        #expect(try store.loadAll() == [testConfig, other, newSecret])
+
+        // Removing the default puts the next one in its place.
+        try store.remove(clientId: testConfig.clientId)
+        #expect(try store.load() == other)
+        #expect(try store.loadAll() == [other, newSecret])
+        try store.remove(clientId: newSecret.clientId)
+        #expect(try store.loadAll() == [other])
+        try store.remove(clientId: other.clientId)
+        #expect(try store.loadAll().isEmpty)
+        #expect(try secrets.accounts(service: "dev.tern.mail.oauth-client").isEmpty)
+    }
+
+    @Test func aRemovalThatStoppedHalfwayCanBeRepeated() throws {
+        let secrets = MemorySecretStore()
+        let store = GoogleClientConfigStore(secrets: secrets)
+        let work = GoogleClientConfig(clientId: "999-workspace.apps.googleusercontent.com", clientSecret: "GOCSPX-work")
+        // Removing the default promoted `work` but failed to delete its own item: it is stored twice.
+        try store.save(work)
+        try secrets.set(try JSONEncoder().encode(work), service: GoogleKeychain.clientService, account: work.clientId)
+        #expect(try store.loadAll() == [work])
+        // Trying the original removal again changes nothing more.
+        try store.remove(clientId: testConfig.clientId)
+        #expect(try store.loadAll() == [work])
+        try store.remove(clientId: work.clientId)
+        #expect(try store.loadAll().isEmpty)
+    }
+
+    @Test func credentialsFromBeforeSeveralClientsStillRead() {
+        #expect(GoogleCredential(data: Data("1//old".utf8)) == GoogleCredential(refreshToken: "1//old", clientId: nil))
+        #expect(GoogleCredential(data: Data()) == nil)
+        #expect(GoogleCredential(data: Data(#"{"refreshToken":""}"#.utf8)) == nil)
+        let current = GoogleCredential(refreshToken: "1//new", clientId: "999-workspace.apps.googleusercontent.com")
+        #expect(GoogleCredential(data: try! current.encoded()) == current)
+    }
+
+    @Test func eachAccountRefreshesThroughTheClientItSignedInWith() async throws {
+        let google = Self.fakeGoogle()
+        let secrets = MemorySecretStore()
+        let work = GoogleClientConfig(clientId: "999-workspace.apps.googleusercontent.com", clientSecret: "GOCSPX-work")
+        let accounts = try #require(GoogleAccounts(configs: [testConfig, work], secrets: secrets, session: google.session))
+        #expect(accounts.clientIds == [testConfig.clientId, work.clientId])
+        // Accounts from before Tern kept several clients use the default one.
+        #expect(accounts.clientId(for: "old@example.com") == testConfig.clientId)
+
+        let browser = Self.browser({ "state=\($0)&code=abc" })
+        _ = try await accounts.connect(clientId: work.clientId) { browser($0) }
+        let consent = try #require(google.requests.first { $0.url.path == "/token" }).form
+        #expect(consent["client_id"] == work.clientId)
+        #expect(accounts.clientId(for: "ME@example.com") == work.clientId)
+        #expect(try accounts.storedClientId(for: "me@example.com") == work.clientId)
+        #expect(try accounts.storedClientId(for: "old@example.com") == nil)
+
+        // A refresh for the account goes through its own client, even from a new GoogleAccounts.
+        let reloaded = try #require(GoogleAccounts(configs: [testConfig, work], secrets: secrets, session: google.session))
+        _ = try await reloaded.api(for: "me@example.com").profile()
+        let refresh = try #require(google.requests.last { $0.form["grant_type"] == "refresh_token" }).form
+        #expect(refresh["client_id"] == work.clientId)
+        #expect(refresh["client_secret"] == work.clientSecret)
+
+        // A client that is gone falls back to the default; an unknown one can't sign in.
+        let without = try #require(GoogleAccounts(configs: [testConfig], secrets: secrets, session: google.session))
+        #expect(without.clientId(for: "me@example.com") == testConfig.clientId)
+        await #expect(throws: GoogleAccountsError.unknownClient) {
+            try await without.connect(clientId: work.clientId) { _ in }
+        }
+
+        await accounts.signOut("me@example.com")
+        #expect(!accounts.hasCredentials(for: "me@example.com"))
+        #expect(try #require(google.requests.last).url.absoluteString == "https://oauth2.googleapis.com/revoke")
+    }
+
     @Test func accountsLoadTheSavedClient() throws {
         let secrets = MemorySecretStore()
         #expect(try GoogleAccounts(secrets: secrets) == nil)
@@ -235,7 +321,8 @@ import Testing
                                           pictureURL: URL(string: "https://lh3.googleusercontent.com/a/x")))
         #expect(accounts.hasCredentials(for: "ME@example.com"))
         #expect(accounts.connectedEmails() == ["me@example.com"])
-        #expect(try secrets.data(service: "dev.tern.mail.google", account: "me@example.com") == Data("1//refresh-secret".utf8))
+        let stored = try #require(try secrets.data(service: "dev.tern.mail.google", account: "me@example.com"))
+        #expect(GoogleCredential(data: stored) == GoogleCredential(refreshToken: "1//refresh-secret", clientId: testConfig.clientId))
 
         // The code exchange proves possession of the verifier behind the challenge it sent.
         let exchange = try #require(google.requests.first { $0.url.path == "/token" }).form

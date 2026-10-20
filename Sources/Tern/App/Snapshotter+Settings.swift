@@ -19,8 +19,14 @@ extension Snapshotter {
         let prefs = model.prefs
         let saved = (sidebar: prefs.sidebarOpen, section: prefs.settingsSection, pinned: prefs.pinnedTabs)
         let googleClientId = services.googleClientId
+        let googleClients = services.googleClients
         let availability = services.aiAvailability
         services.googleClientId = { "1234567890-abcdefghijklmnop.apps.googleusercontent.com" }
+        let emails = model.accounts.map(\.id)
+        services.googleClients = {
+            [GoogleClientInfo(id: "1234567890-abcdefghijklmnop.apps.googleusercontent.com", emails: Array(emails.dropLast())),
+             GoogleClientInfo(id: "9876543210-zyxwvutsrqponmlk.apps.googleusercontent.com", emails: Array(emails.suffix(1)))]
+        }
         services.aiAvailability = Self.fakeAvailability(claude: .ready, codex: .signedOut)
         // Rows for the lists: two pinned tabs and a sender whose images load.
         prefs.pinnedTabs = model.projects.prefix(2).compactMap { ListTab.project($0.id).pinKey } + ["search:invoice"]
@@ -115,6 +121,7 @@ extension Snapshotter {
         prefs.settingsSection = saved.section
         prefs.pinnedTabs = saved.pinned
         services.googleClientId = googleClientId
+        services.googleClients = googleClients
         services.aiAvailability = availability
     }
 

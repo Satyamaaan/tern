@@ -208,6 +208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     }
 
     func addAccount() {
+        // With several Google clients the user picks one there.
+        if services.googleClients().count > 1 { return model.openSettings(.accounts) }
         Task {
             do {
                 _ = try await services.connectAccount()

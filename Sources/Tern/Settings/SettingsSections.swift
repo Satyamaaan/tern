@@ -12,6 +12,8 @@ struct AccountsItem: View {
     @Environment(AppServices.self) private var services
     let state: SettingsState
     @State private var message: String?
+    /// The stored Google clients, read from the Keychain when the page opens and when accounts change.
+    @State private var clients: [GoogleClientInfo] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,12 +35,19 @@ struct AccountsItem: View {
                 }
             }
             HStack(spacing: 12) {
-                Button("Add Gmail account") { add() }.buttonStyle(TernButtonStyle(.primary))
+                if clients.count > 1 {
+                    MenuPickerButton(title: "Add Gmail account", kind: .primary, size: .regular) { clientMenu() }
+                } else {
+                    Button("Add Gmail account") { add(nil) }.buttonStyle(TernButtonStyle(.primary))
+                }
                 if let message { Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
             }
             .padding(.top, 16)
             .padding(.bottom, 12)
         }
+        .onAppear { clients = services.googleClients() }
+        .onChange(of: services.accounts) { clients = services.googleClients() }
+        .onChange(of: services.googleClientsChanged) { clients = services.googleClients() }
     }
 
     private func syncText(_ account: Account) -> String {
@@ -51,10 +60,21 @@ struct AccountsItem: View {
         }
     }
 
-    private func add() {
+    private func add(_ clientId: String?) {
         Task {
-            do { _ = try await services.connectAccount(); message = nil } catch { message = error.localizedDescription }
+            do { _ = try await services.connectAccountWith(clientId); message = nil } catch { message = error.localizedDescription }
         }
+    }
+
+    /// Which Google client to sign in through, named by its masked ID and the accounts already using it.
+    private func clientMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem("Sign in through", enabled: false) {})
+        for client in clients {
+            let used = client.emails.isEmpty ? "" : "  ·  " + client.emails.joined(separator: ", ")
+            menu.addItem(ClosureMenuItem(GoogleClientText.short(client.id) + used) { add(client.id) })
+        }
+        return menu
     }
 
     private func reauth(_ account: Account) {

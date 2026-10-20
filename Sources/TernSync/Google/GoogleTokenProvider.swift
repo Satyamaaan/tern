@@ -32,6 +32,13 @@ public actor GoogleTokenProvider: GmailAccessTokenSource {
     /// access prompt dismissed) is reported as `.network` so callers retry later instead of asking
     /// the user to sign in again.
     public init(email: String, auth: GoogleAuth, secrets: any SecretStore, clock: GoogleClock = .live) {
+        self.init(email: email, auth: { _ in auth }, secrets: secrets, clock: clock)
+    }
+
+    /// Like `init(email:auth:secrets:clock:)`, refreshing through the client the stored credential names
+    /// (`auth` gets its client ID, nil for a credential from before Tern kept more than one client).
+    public init(email: String, auth: @escaping @Sendable (_ clientId: String?) -> GoogleAuth, secrets: any SecretStore,
+                clock: GoogleClock = .live) {
         let account = email.lowercased()
         self.init(clock: clock) {
             let stored: Data?
@@ -40,10 +47,8 @@ public actor GoogleTokenProvider: GmailAccessTokenSource {
             } catch {
                 throw GmailAPIError.network("Keychain unavailable: \(error)")
             }
-            guard let stored, let refreshToken = String(data: stored, encoding: .utf8), !refreshToken.isEmpty else {
-                throw GmailAPIError.unauthorized
-            }
-            return try await auth.refresh(refreshToken: refreshToken)
+            guard let stored, let credential = GoogleCredential(data: stored) else { throw GmailAPIError.unauthorized }
+            return try await auth(credential.clientId).refresh(refreshToken: credential.refreshToken)
         }
     }
 
