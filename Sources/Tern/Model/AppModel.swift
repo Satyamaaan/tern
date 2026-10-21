@@ -45,6 +45,8 @@ enum ListAnimation {
     case none
     /// Rows leave after a triage action: 160 ms collapse.
     case collapse
+    /// Rows come back after an undo: they slide into place (160 ms).
+    case restore
     /// A different list: reload and scroll to the top.
     case reset
 }
@@ -99,7 +101,9 @@ final class AppModel {
         }
     }
     var showsShortcuts = false
-    /// Pending `g` chord, shown in a small HUD.
+    /// The `g` chord waiting for its second key.
+    var chordPending: String?
+    /// The chord's hint, shown only once the user hesitates (`Motion.hesitation`) with a chord pending.
     var chordHUD: String?
     var projectEditor: ProjectDraft?
     /// Threads waiting on a custom snooze date.
@@ -123,6 +127,8 @@ final class AppModel {
     var isSeeding = false
     /// False until the first rows for the current list arrive.
     var listLoaded = false
+    /// The list was just emptied by triage, so inbox zero arrives with its drawing; any other empty list is static.
+    var emptiedByTriage = false
     var hasMore = false
     /// The open thread (keyboard cursor).
     var cursor: ThreadKey?
@@ -147,6 +153,8 @@ final class AppModel {
     @ObservationIgnored var limit = AppModel.pageSize
     @ObservationIgnored var hidden: [ThreadKey: HiddenState] = [:]
     @ObservationIgnored var pendingCursor: ThreadKey?
+    /// Threads an undo is putting back; their return to the list slides them in (`ListAnimation.restore`).
+    @ObservationIgnored var restoring: Set<ThreadKey> = []
     @ObservationIgnored var undoStack: [UndoEntry] = []
     @ObservationIgnored var rowsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var countsObservation: AnyDatabaseCancellable?

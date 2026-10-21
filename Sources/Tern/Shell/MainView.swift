@@ -36,7 +36,9 @@ struct MainView: View {
         .tint(Color(Theme.ink))
         .ignoresSafeArea()
         .overlay(alignment: .top) { overlays }
-        .overlay(alignment: .bottom) { chordHUD }
+        .overlay(alignment: .bottom) {
+            chordHUD.animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.overlay), value: model.chordHUD)
+        }
         .animation(paneAnimation, value: model.prefs.sidebarOpen)
         .animation(paneAnimation, value: model.prefs.readingPane)
         .animation(paneAnimation, value: model.readerExpanded)
@@ -166,9 +168,11 @@ struct MainView: View {
                     .onTapGesture { palette.close(); model.showsShortcuts = false }
             }
             if model.palette != nil {
+                // Opens with a quick fade; closes at once, since the command it ran has already changed what is
+                // under it.
                 PaletteView(controller: palette)
                     .padding(.top, 96)
-                    .transition(.scale(scale: 0.98, anchor: .top).combined(with: .opacity))
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
             }
             if model.showsShortcuts {
                 ShortcutSheet()
@@ -176,7 +180,7 @@ struct MainView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: model.palette != nil)
+        .animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.overlay), value: model.palette != nil)
         .animation(.easeOut(duration: 0.12), value: model.showsShortcuts)
     }
 
@@ -194,7 +198,8 @@ struct MainView: View {
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairline), lineWidth: 1))
             .overlayShadow()
             .padding(.bottom, 80)
-            .transition(.opacity)
+            // Rises in once the user hesitates; gone at once when the chord completes.
+            .transition(.asymmetric(insertion: reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)), removal: .identity))
         }
     }
 
@@ -281,14 +286,22 @@ struct ReaderColumn: View {
 
 private struct MultiSelectionView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let count: Int
 
     var body: some View {
         VStack(spacing: 10) {
-            Text("\(count) conversations selected")
-                .font(.display(20))
-                .tracking(-0.3)
-                .foregroundStyle(Color(Theme.text1))
+            // The number rolls as the selection grows or shrinks (a crossfade with Reduce Motion).
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("\(count)")
+                    .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(count)))
+                Text(" conversations selected")
+            }
+            .font(.display(20))
+            .tracking(-0.3)
+            .foregroundStyle(Color(Theme.text1))
+            .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.enter), value: count)
+            .accessibilityElement(children: .combine)
             HStack(spacing: 14) {
                 hint("e", "archive")
                 hint("h", "snooze")
