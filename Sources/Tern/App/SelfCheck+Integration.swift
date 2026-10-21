@@ -10,6 +10,7 @@ extension SelfCheck {
     func integration() {
         readerWiring()
         hiddenReader()
+        hiddenReaderWaits()
         menuBar()
         inlineReplies()
         sendAndArchive()
@@ -88,6 +89,80 @@ extension SelfCheck {
         model.back()
         settle(0.2)
     }
+
+    /// A thread that needs a reply, hidden before its quick replies are asked for, never asks the AI while off screen;
+    /// a logo or a new images setting that arrives meanwhile reaches the page only once it is back.
+    private func hiddenReaderWaits() {
+        let pane = model.prefs.readingPane, images = model.prefs.imagesInMail, ai = services.ai
+        defer {
+            model.prefs.readingPane = pane
+            model.prefs.imagesInMail = images
+            services.ai = ai
+            #if DEBUG
+            ReaderModel.logoOverride = nil
+            #endif
+        }
+        model.prefs.readingPane = false
+        services.ai = AIActions(summarize: { _ in [] }, suggestReplies: { _ in [] }, draftReply: { _, _ in "" },
+                                naturalLanguageQuery: { _ in "" })
+        model.show(.inbox)
+        model.showInboxTab(.primary)
+        model.focusList()
+        settle(0.3)
+        let order = model.snapshot.order
+        guard let reader = services.reader.model,
+              let key = order.dropLast().first(where: { model.row($0)?.needsReply == true }) else {
+            return check("hidden reader waits: a thread that needs a reply", false)
+        }
+        model.setCursor(key, open: false)
+        model.open()
+        guard waitUntil(3, { reader.key == key && reader.detail?.ai?.needsReply == true }) else {
+            return check("hidden reader waits: the thread opens", false)
+        }
+        model.back()
+        model.moveCursor(1)
+        let hidden = ReaderModel.work
+        settle(1.6)
+        check("a reader hidden before its quick replies asks no AI", ReaderModel.work.quickReplies == hidden.quickReplies)
+
+        #if DEBUG
+        ReaderModel.logoOverride = { _ in Self.checkLogo }
+        if let png = Self.checkLogo { SenderLogos.shared.install(png, forDomain: "tern-check.invalid") }
+        settle(0.3)
+        check("a logo that arrives doesn't touch a hidden reader", ReaderModel.work == hidden)
+        model.moveCursor(-1)
+        model.open()
+        check("back on screen it sends the logo once, without a paint, and asks for quick replies",
+              waitUntil { ReaderModel.work.logoUpdates == hidden.logoUpdates + 1 && ReaderModel.work.quickReplies == hidden.quickReplies + 1 }
+                && ReaderModel.work.rendered == hidden.rendered)
+        #endif
+
+        model.back()
+        model.moveCursor(1)
+        settle(0.2)
+        let hiddenAgain = ReaderModel.work
+        model.prefs.imagesInMail = images == .automatic ? .ask : .automatic
+        settle(0.4)
+        check("a new images setting doesn't touch a hidden reader", ReaderModel.work == hiddenAgain)
+        model.moveCursor(-1)
+        model.open()
+        settle(0.4)
+        print("  hidden reader catching up with a new images setting: \(hiddenAgain) → \(ReaderModel.work)")
+        check("back on screen it catches up with the images setting in at most one paint",
+              reader.key == key && ReaderModel.work.rendered - hiddenAgain.rendered <= 1)
+        model.back()
+        settle(0.2)
+    }
+
+    #if DEBUG
+    /// A 2 px PNG, for a logo that arrives while the check runs.
+    private static let checkLogo: Data? = {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }()
+    #endif
 
     private func readerWiring() {
         model.show(.inbox)
