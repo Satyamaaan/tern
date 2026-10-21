@@ -158,6 +158,8 @@ private func tabbedStore() throws -> MailStore {
     // Only the newest uncategorised threads are looked at: Updates, which only an older receipt is in, shows
     // once the counts come in.
     #expect(try probe(nil, 1) == [.primary, .promotions, .social, .forums])
+    #expect(try probe(me.id, 1) == [.primary, .promotions, .social, .forums])
+    #expect(try probe(nil, 0) == [.primary, .promotions, .social, .forums])
 }
 
 private let skipPerf = ProcessInfo.processInfo.environment["TERN_SKIP_PERF"] == "1"
@@ -204,8 +206,8 @@ private func bestTime(runs: Int = 5, _ body: () throws -> Void) rethrows -> Doub
 
 @Test(.enabled(if: !skipPerf, "TERN_SKIP_PERF=1"))
 func probingTheTabsStaysCheapOnAVeryLargeInbox() throws {
-    // Half categorised, then none (an account Gmail doesn't categorise): the probe looks at the same few rows.
-    for categorised in [4, 0] {
+    // Include no fallback rows: LIMIT must bound the work even when it cannot fill the sample.
+    for categorised in [8, 4, 0] {
         let store = try largeInbox(categorised: categorised)
         var probed = Set<InboxTab>(), counts = ScopeCounts()
         let probe = try bestTime { probed = try store.database.reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: nil) } }
