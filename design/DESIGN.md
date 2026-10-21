@@ -130,6 +130,8 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
 All radius 6. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+While held, text buttons also shrink to 97 % and icon buttons to 95 % (100 ms, house curve; the fill stays
+instant; no shrink with Reduce Motion).
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
 a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
 `hairlineStrong` border, radius 4 inside 6. Switches are tinted `ink`.
@@ -257,7 +259,9 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   sees a light colour scheme: its `prefers-color-scheme: dark` styles and `color-scheme` never apply. Attachments
   as chips. Quoted text behind a `•••` toggle.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
-  replies on hover; `r` or a click expands the inline reply card in place.
+  replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
+  (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
+  already in it; only the card moves, never the web view, and it closes at once.
 
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the

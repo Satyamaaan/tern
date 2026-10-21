@@ -107,7 +107,6 @@ struct ReaderView: View {
         .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
         .onChange(of: panel != nil, initial: true) { model.setLayout(panel: panel != nil) }
-        .animation(.easeOut(duration: 0.12), value: model.toast)
     }
 
     /// What the reader should be doing: one change when the key and the visibility change together.
