@@ -188,8 +188,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     right-aligned: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25").
   - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
   - **Avatar**: a rounded square (radius a quarter of its side): the sender's domain logo (`SenderLogos`, full
-    bleed on white with a faint ring; a logo that is its own rounded tile, like GitHub's, is cropped to the tile
-    and backed with its edge colour so no white corners show, `LogoTile`), else one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
+    bleed on white; a logo that is its own rounded tile with see-through corners is cropped just inside the tile
+    and backed with its own colour so no white corners show; a faint ring only for white-edged logos in light
+    mode, never in dark, where it reads as a border; `LogoTile`), else one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
     as rows come into view; rows on screen refresh when one arrives. Spam and Trash show initials only (no
     fetch, no cached logo), in the list and the reader.
   - **Sender names** drop a bot's `[bot]`: `vercel[bot]` reads "Vercel".

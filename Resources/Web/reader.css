@@ -97,7 +97,8 @@ svg path { vector-effect: non-scaling-stroke; }
 .av.logo::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
-:root[data-theme="dark"] .av.logo::after { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+/* White-backed logos hold their edge on a dark page without a ring; on a dark tile one reads as a border. */
+:root[data-theme="dark"] .av.logo::after { box-shadow: none; }
 .mhead {
   display: flex; gap: 10px; align-items: flex-start; padding: 14px 8px 0; margin: 0 -8px; border-radius: 6px; min-width: 0;
   position: relative; isolation: isolate;

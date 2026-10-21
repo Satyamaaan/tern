@@ -53,6 +53,10 @@ enum Avatar {
         image.draw(in: rect, from: tile.source, operation: .sourceOver,
                    fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         NSGraphicsContext.restoreGraphicsState()
+        // Only a white-edged logo on a light list needs the ring to hold its edge; on anything else it reads
+        // as a border.
+        let dark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        guard tile.edgeIsLight, !tile.isTile, !dark else { return }
         let ring = shape.path(in: rect.insetBy(dx: 0.25, dy: 0.25))
         ring.lineWidth = 0.5
         Theme.avatarRing.setStroke()

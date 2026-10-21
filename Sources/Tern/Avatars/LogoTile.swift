@@ -3,18 +3,28 @@ import AppKit
 /// How a logo fills a rounded avatar. Many site icons are drawn as their own tile: an opaque rounded
 /// square with see-through corners, sometimes inside a transparent margin (GitHub's, most app icons).
 /// Clipped as they are onto white, the white shows in their corners and the avatar gets two sets of
-/// corners. Such a logo is cropped to its tile and backed with the tile's own edge colour, so only the
-/// avatar's corners show. Other logos fill the avatar on white.
+/// corners. Such a logo is cropped to just inside its tile (its own corners, soft edge and any border
+/// fall outside the avatar) and backed with the tile's own colour, so only the avatar's corners show.
+/// Other logos fill the avatar on white.
 struct LogoTile {
     /// The part of the image to draw, in the image's own coordinates (origin bottom left).
     let source: NSRect
     /// What goes behind it.
     let backdrop: NSColor
+    /// The logo is its own tile: it has a solid edge and needs no ring.
+    var isTile = false
+    /// The picture's outer edge is near white (on its white backing): on a light list it needs a faint
+    /// ring to hold its edge. Elsewhere a ring only reads as a border.
+    var edgeIsLight = false
+
+    /// How far inside the tile the crop sits, as a share of its side: past the tile's own rounded
+    /// corners, soft edge and border.
+    static let zoom: CGFloat = 0.06
 
     /// The fit for `image`, worked out once per image.
     static func fit(_ image: NSImage) -> LogoTile {
         if let known = cache.object(forKey: image) { return known.value }
-        let fit = measure(image) ?? LogoTile(source: .zero, backdrop: .white)
+        let fit = measure(image) ?? LogoTile(source: .zero, backdrop: .white, edgeIsLight: true)
         cache.setObject(Box(fit), forKey: image)
         return fit
     }
@@ -51,8 +61,9 @@ struct LogoTile {
         return cache
     }()
 
-    /// Samples the image at 64 × 64: finds the opaque area, then calls it a tile when its middles are
-    /// opaque and its corners aren't. Nil for anything that isn't a tile.
+    /// Samples the image at 64 × 64: how light its outer edge is, then whether it is a tile (its opaque
+    /// area is a rounded square: solid middles and shoulders, see-through corners). Nil when the image
+    /// can't be drawn.
     private static func measure(_ image: NSImage) -> LogoTile? {
         let side = 64
         guard image.size.width > 0, image.size.height > 0,
@@ -67,6 +78,18 @@ struct LogoTile {
 
         // Rows from the top, as the bitmap stores them.
         func alpha(_ x: Int, _ y: Int) -> CGFloat { rep.colorAt(x: x, y: y)?.alphaComponent ?? 0 }
+        // The edge as it shows on the white backing: see-through counts as white.
+        var light: CGFloat = 0, count: CGFloat = 0
+        for i in stride(from: 0, to: side, by: 2) {
+            for (x, y) in [(i, 0), (i, side - 1), (0, i), (side - 1, i)] {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                let luminance = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                light += color.alphaComponent * luminance + (1 - color.alphaComponent)
+                count += 1
+            }
+        }
+        let plain = LogoTile(source: .zero, backdrop: .white, edgeIsLight: count == 0 || light / count > 0.88)
+
         var minX = side, minY = side, maxX = -1, maxY = -1
         for y in 0..<side {
             for x in 0..<side where alpha(x, y) > 0.5 {
@@ -76,25 +99,33 @@ struct LogoTile {
         }
         let width = maxX - minX + 1, height = maxY - minY + 1
         // A tile is roughly square and most of the picture.
-        guard maxX >= 0, width >= side / 2, abs(width - height) <= 3 else { return nil }
+        guard maxX >= 0, width >= side / 2, abs(width - height) <= 3 else { return plain }
 
-        let inset = max(1, width / 32)
+        // Sampled well inside the edge, past a drawn border.
+        let inset = max(2, width / 14)
         let midX = (minX + maxX) / 2, midY = (minY + maxY) / 2
         let middles = [(midX, minY + inset), (midX, maxY - inset), (minX + inset, midY), (maxX - inset, midY)]
         let corners = [(minX, minY), (maxX, minY), (minX, maxY), (maxX, maxY)]
-        guard middles.allSatisfy({ alpha($0.0, $0.1) > 0.9 }), corners.allSatisfy({ alpha($0.0, $0.1) < 0.6 }) else { return nil }
+        // A tenth of the way in along the diagonals a rounded square is already solid; a circle (a round
+        // logo, best left whole on white) isn't yet.
+        let diagonal = width / 10
+        let shoulders = [(minX + diagonal, minY + diagonal), (maxX - diagonal, minY + diagonal),
+                         (minX + diagonal, maxY - diagonal), (maxX - diagonal, maxY - diagonal)]
+        guard middles.allSatisfy({ alpha($0.0, $0.1) > 0.9 }), corners.allSatisfy({ alpha($0.0, $0.1) < 0.6 }),
+              shoulders.allSatisfy({ alpha($0.0, $0.1) > 0.9 }) else { return plain }
 
         var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
         for (x, y) in middles {
-            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return nil }
+            guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return plain }
             red += color.redComponent; green += color.greenComponent; blue += color.blueComponent
         }
         let backdrop = NSColor(deviceRed: red / 4, green: green / 4, blue: blue / 4, alpha: 1)
 
         // Back to the image's coordinates, bottom-left origin.
         let scaleX = image.size.width / CGFloat(side), scaleY = image.size.height / CGFloat(side)
-        let source = NSRect(x: CGFloat(minX) * scaleX, y: CGFloat(side - 1 - maxY) * scaleY,
-                            width: CGFloat(width) * scaleX, height: CGFloat(height) * scaleY)
-        return LogoTile(source: source, backdrop: backdrop)
+        let tile = NSRect(x: CGFloat(minX) * scaleX, y: CGFloat(side - 1 - maxY) * scaleY,
+                          width: CGFloat(width) * scaleX, height: CGFloat(height) * scaleY)
+        let source = tile.insetBy(dx: tile.width * zoom, dy: tile.height * zoom)
+        return LogoTile(source: source, backdrop: backdrop, isTile: true)
     }
 }
