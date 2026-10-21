@@ -34,6 +34,23 @@ enum Density: String, CaseIterable, Identifiable {
     var title: String { rawValue.capitalized }
 }
 
+/// How the open conversation shows without the reading pane.
+enum ReaderOverlay: String, CaseIterable, Identifiable {
+    /// It covers the whole list.
+    case full
+    /// It slides in from the right over part of the list, which stays in reach beside it.
+    case panel
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .full: "Full width"
+        case .panel: "Slide-over"
+        }
+    }
+}
+
 /// Where the cursor goes when the open conversation leaves the list (archive, delete, snooze, move).
 enum AfterTriage: String, CaseIterable, Identifiable {
     /// The conversation below it, else the one above.
@@ -116,6 +133,8 @@ final class Preferences {
     var sidebarOpen: Bool { didSet { save("sidebarOpen", sidebarOpen) } }
     /// ⌘\: list and reader side by side instead of the reader opening over the list.
     var readingPane: Bool { didSet { save("readingPane", readingPane) } }
+    /// Without the reading pane: the open conversation over the whole list, or in a panel from the right.
+    var readerOverlay: ReaderOverlay { didSet { save("readerOverlay", readerOverlay.rawValue) } }
     /// Width of the list next to the reading pane.
     var listWidth: Double { didSet { save("listWidth", listWidth) } }
     /// Tabs the user pinned after the inbox tabs, as `ListTab.pinKey` strings.
@@ -145,6 +164,7 @@ final class Preferences {
         splitInbox = defaults.object(forKey: "splitInbox") as? Bool ?? true
         sidebarOpen = defaults.bool(forKey: "sidebarOpen")
         readingPane = defaults.bool(forKey: "readingPane")
+        readerOverlay = ReaderOverlay(rawValue: defaults.string(forKey: "readerOverlay") ?? "") ?? .full
         listWidth = defaults.object(forKey: "listWidth") as? Double ?? 452
         pinnedTabs = defaults.stringArray(forKey: "pinnedTabs") ?? []
         moreExpanded = defaults.bool(forKey: "moreExpanded")

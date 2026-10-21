@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 import TernCore
 
-// Settings → Layout: the reading pane and the sidebar (⌘\ and ⌃⌘S), the inbox tabs and the pinned tabs.
+// Settings → Layout: the reading pane and how conversations open without it, the sidebar (⌘\ and ⌃⌘S), the
+// inbox tabs and the pinned tabs.
 
 struct ReadingPaneItem: View {
     @Environment(AppModel.self) private var model
@@ -10,6 +11,18 @@ struct ReadingPaneItem: View {
     var body: some View {
         SettingsRow(title: "Reading pane", detail: "Show the open conversation beside the list instead of over it.") {
             InkToggle(isOn: Binding(get: { model.prefs.readingPane }, set: { if $0 != model.prefs.readingPane { model.toggleReadingPane() } }))
+        }
+    }
+}
+
+/// Without the reading pane: the open conversation over the whole list, or in a panel from the right.
+struct ReaderOverlayItem: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var prefs = model.prefs
+        SettingsRow(title: "Open conversations", detail: "Without the reading pane: over the whole list, or sliding in from the right beside it.") {
+            SegmentedPicker(options: ReaderOverlay.allCases, selection: $prefs.readerOverlay) { $0.title }
         }
     }
 }

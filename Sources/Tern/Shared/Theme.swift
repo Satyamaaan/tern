@@ -29,6 +29,8 @@ enum Theme {
     static let inkHover = dynamic(light: 0x2E2E33, dark: 0xD9D9D5)
     /// `ink` while pressed.
     static let inkPressed = dynamic(light: 0x45454B, dark: 0xC4C4BF)
+    /// Recipient addresses in the slide-over's message headers: the reader's one muted blue.
+    static let link = dynamic(light: 0x3D6A92, dark: 0xA3C0D8)
     /// Soft neutral fill for "needs you" chips and other soft states.
     static let inkSoft = dynamic(light: 0xE4E4E0, dark: 0x303030)
     /// Label on an `ink` fill.

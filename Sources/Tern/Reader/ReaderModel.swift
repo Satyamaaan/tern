@@ -350,6 +350,10 @@ final class ReaderModel {
             if let id = message["id"] as? String { editDraft(messageId: id) }
         case "discardDraft":
             if let id = message["id"] as? String { discardDraft(messageId: id) }
+        case "tagMenu":
+            popUp(tagMenu(), message)
+        case "messageMenu":
+            popUp(messageMenu(), message)
         default:
             break
         }
@@ -782,6 +786,74 @@ final class ReaderModel {
                 operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
             }
         }
+    }
+
+    // MARK: Slide-over
+
+    /// The conversation's senders, newest first and each once, for the slide-over's avatar stack.
+    var participants: [Participant] {
+        var seen = Set<String>()
+        return (detail?.messages ?? []).reversed().map(\.from).filter { seen.insert($0.email.lowercased()).inserted }
+    }
+
+    /// Files sent in the conversation, oldest first; pictures shown in the text aren't counted.
+    var attachments: [MailAttachment] {
+        guard let detail else { return [] }
+        return detail.messages.flatMap { detail.attachments[$0.id] ?? [] }.filter { !($0.isInline && $0.contentId != nil) }
+    }
+
+    func openAttachment(_ attachment: MailAttachment) {
+        withFile(attachment) { NSWorkspace.shared.open($0) }
+    }
+
+    /// The slide-over's page layout, sent before the next paint.
+    func setLayout(panel: Bool) { engine.setLayout(panel: panel) }
+
+    /// A menu the page asked for under one of its buttons (`x`, `y` in page coordinates).
+    private func popUp(_ menu: NSMenu, _ message: [String: Any]) {
+        let point = NSPoint(x: message["x"] as? Double ?? 0, y: message["y"] as? Double ?? 0)
+        menu.popUp(positioning: nil, at: point, in: engine.webView)
+    }
+
+    /// The + after the tags: the account's labels and the projects, each a checkmark to flip.
+    private func tagMenu() -> NSMenu {
+        let menu = NSMenu()
+        guard let detail else { return menu }
+        let thread = detail.thread
+        let labels = NSMenu()
+        for label in self.labels(for: thread.accountId) {
+            let on = thread.labelIds.contains(label.id)
+            let item = ReaderMenuItem(label.name) { [weak self] in self?.setLabel(label.id, on: !on) }
+            item.state = on ? .on : .off
+            labels.addItem(item)
+        }
+        if labels.items.isEmpty { labels.addItem(NSMenuItem(title: "No labels", action: nil, keyEquivalent: "")) }
+        let labelItem = NSMenuItem(title: "Label", action: nil, keyEquivalent: "")
+        labelItem.submenu = labels
+        menu.addItem(labelItem)
+        let projects = NSMenu()
+        for project in services?.projects ?? [] {
+            let on = detail.projects.contains { $0.id == project.id }
+            let item = ReaderMenuItem(project.name) { [weak self] in self?.setProject(project.id, on: !on) }
+            item.state = on ? .on : .off
+            projects.addItem(item)
+        }
+        if projects.items.isEmpty { projects.addItem(NSMenuItem(title: "No projects", action: nil, keyEquivalent: "")) }
+        let projectItem = NSMenuItem(title: "Project", action: nil, keyEquivalent: "")
+        projectItem.submenu = projects
+        menu.addItem(projectItem)
+        return menu
+    }
+
+    /// ··· beside a message: answering and the original.
+    private func messageMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ReaderMenuItem("Reply") { [weak self] in self?.reply(all: false) })
+        menu.addItem(ReaderMenuItem("Reply All") { [weak self] in self?.reply(all: true) })
+        menu.addItem(ReaderMenuItem("Forward") { [weak self] in self?.forward() })
+        menu.addItem(.separator())
+        menu.addItem(ReaderMenuItem("Show Original") { [weak self] in self?.showOriginal() })
+        return menu
     }
 
     func showOriginal() {

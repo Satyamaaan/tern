@@ -68,7 +68,9 @@ final class AppModel {
     var inboxTab: InboxTab?
     var focus: Focus = .list
     /// Without the reading pane, whether the open thread covers the list.
-    var readerExpanded = false
+    var readerExpanded = false { didSet { if !readerExpanded { readerWide = false } } }
+    /// The slide-over panel stretched over the whole list (its expand button), until the thread closes.
+    var readerWide = false
 
     // MARK: Search
 
@@ -196,6 +198,9 @@ final class AppModel {
 
     /// The list fills the window and the open thread covers it (no reading pane, ⌘\).
     var listOnly: Bool { !prefs.readingPane }
+
+    /// Without the reading pane, the open thread slides in from the right over part of the list.
+    var readerInPanel: Bool { listOnly && prefs.readerOverlay == .panel && !readerWide }
 
     /// The reader is on screen: beside the list, or over it.
     var readerVisible: Bool { prefs.readingPane || readerExpanded }
@@ -401,6 +406,12 @@ final class AppModel {
 
     /// ⌘\: the reading pane beside the list, or the reader opening over it. Under the settings page (Layout)
     /// only the preference changes; closing the page settles the open thread and the keyboard.
+    /// The slide-over panel's expand button: the open thread over the whole list, or back in the panel.
+    func toggleReaderWide() {
+        guard listOnly, prefs.readerOverlay == .panel, readerExpanded else { return }
+        readerWide.toggle()
+    }
+
     func toggleReadingPane() {
         prefs.readingPane.toggle()
         guard !settingsOpen else { return }

@@ -94,6 +94,8 @@ final class ReaderWebEngine: NSObject {
         run("Tern.setTheme(t)", ["t": dark ? "dark" : "light"])
     }
     func clear() { run("Tern.clear()") }
+    /// The page's layout: "panel" in the slide-over, "column" elsewhere.
+    func setLayout(panel: Bool) { run("Tern.setLayout(l)", ["l": panel ? "panel" : "column"]) }
 
     /// Installs the content blocker that refuses every http(s) load. Mail isn't shown until it settles;
     /// if it can't be compiled, `blocksRemoteLoads` stays false and the reader loads no remote images.

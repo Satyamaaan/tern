@@ -161,9 +161,68 @@ svg path { vector-effect: non-scaling-stroke; }
 .msg.open { padding-bottom: 18px; }
 .msg.open + .msg, .msg.open + .more { margin-top: 0; }
 
+/* Only the slide-over draws these. */
+.chip-add, .mmenu, .to-addr { display: none; }
+:root:not([data-layout="panel"]) .chips:not(:has(.chip)) { display: none; }
+:root[data-layout="panel"] .summary[hidden] { display: none; }
+
+/* The slide-over (Settings → Layout → Open conversations): a left-aligned column 42 px in from both edges, the
+   subject over outlined tags and a +, each message on one line with ··· beside the date, and bodies in line
+   with the pictures. */
+:root[data-layout="panel"] #thread { max-width: 804px; padding: 18px 42px 32px; }
+:root[data-layout="panel"] .subject { margin-bottom: 9px; }
+:root[data-layout="panel"] .chips { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+:root[data-layout="panel"] .chip {
+  height: 20px; padding: 0 9px 0 7px; border-radius: 10px; background: transparent; font: 500 11px/20px var(--ui);
+  box-shadow: inset 0 0 0 1px var(--hairlineStrong); color: var(--text1);
+}
+:root[data-layout="panel"] .chip svg { width: 12px; height: 12px; }
+:root[data-layout="panel"] .chip-add {
+  display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; flex: none;
+  box-shadow: inset 0 0 0 1px var(--hairlineStrong); color: var(--text2);
+}
+.chip-add svg { width: 12px; height: 12px; }
+.chip-add:hover { background: var(--hover); color: var(--text1); }
+:root[data-layout="panel"] .msg, :root[data-layout="panel"] .more { border-top-color: var(--hairlineStrong); }
+:root[data-layout="panel"] .msgs > :first-child { border-top-color: transparent; }
+:root[data-layout="panel"] .line { height: 41px; margin: 2px 0; padding: 0 10px 0 9px; gap: 0; }
+:root[data-layout="panel"] .line .av { width: 18px; height: 18px; margin: 0 6px 0 1px; font-size: 7.5px; }
+:root[data-layout="panel"] .line .from { width: 98px; max-width: none; padding-right: 5px; font-weight: 400; }
+:root[data-layout="panel"] .msg.unread .line .from { font-weight: 600; }
+:root[data-layout="panel"] .line .snip { color: var(--text1); margin-right: 16px; }
+:root[data-layout="panel"] .line .draft { margin-right: 8px; }
+:root[data-layout="panel"] .mmenu {
+  display: grid; place-items: center; width: 22px; height: 22px; margin: 0 7px 0 auto; border-radius: 4px; flex: none;
+  color: var(--text3);
+}
+/* Times share one right-aligned width, so the ··· stand in a column. */
+:root[data-layout="panel"] .line .date { min-width: 54px; text-align: right; }
+.mmenu svg { width: 15px; height: 15px; }
+.mmenu:hover { background: var(--hover); color: var(--text1); }
+:root[data-layout="panel"] .line .date, :root[data-layout="panel"] .mhead .date { color: var(--text1); margin-left: 0; }
+:root[data-layout="panel"] .mhead { padding: 17px 10px 0 9px; margin: 0; gap: 6px; }
+:root[data-layout="panel"] .mhead .av { margin-top: 1px; }
+:root[data-layout="panel"] .mhead .name { font-weight: 400; }
+:root[data-layout="panel"] .mhead .addr { color: var(--text2); }
+:root[data-layout="panel"] .mhead .addr::before { content: "<"; }
+:root[data-layout="panel"] .mhead .addr::after { content: ">"; }
+:root[data-layout="panel"] .mhead .to { display: none; }
+:root[data-layout="panel"] .to-addr {
+  display: block; margin-top: 3px; color: var(--text3); font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis;
+}
+.to-addr .rcpt { color: var(--link); }
+.to-addr:hover .rcpt { text-decoration: underline; }
+:root[data-layout="panel"] .mhead .date { line-height: 22px; }
+:root[data-layout="panel"] .mhead .mmenu { margin-left: auto; }
+:root[data-layout="panel"] .mbody { margin: 21px 0 0 9px; max-width: none; font: 12px/17px var(--ui); }
+:root[data-layout="panel"] .mbody[data-mode="rich"] { margin-left: 0; }
+:root[data-layout="panel"] :is(.details, .imgnote, .atts) { margin-left: 9px; }
+:root[data-layout="panel"] .draftnote { margin-left: 9px; }
+
 @media print {
   #thread { max-width: none; padding: 0; }
-  .line, .more, .imgnote, .draftnote, .summary.action { display: none !important; }
+  .line, .more, .imgnote, .draftnote, .summary.action, .chip-add, .mmenu { display: none !important; }
   .msg:not(.open) > :not(.line) { display: block; }
   .msg { break-inside: avoid-page; }
 }

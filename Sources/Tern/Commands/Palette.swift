@@ -183,6 +183,7 @@ final class PaletteController {
         "go.drafts": .drafts, "go.sent": .sent, "go.archive": .archive, "go.allMail": .allMail, "go.spam": .spam, "go.trash": .trash,
         "go.label": .label, "go.project": .folder, "newProject": .plus, "addAccount": .plus,
         "settings": .settings, "shortcuts": .keyboard, "toggleSidebar": .sidebar, "listOnly": .readingPane,
+        "readerOverlay": .panelClose, "readerWide": .expand,
         "splitInbox": .inbox, "appearance.toggle": .sun,
         "moveToTab.primary": .tab(.primary), "moveToTab.promotions": .tab(.promotions), "moveToTab.social": .tab(.social),
         "moveToTab.updates": .tab(.updates), "moveToTab.forums": .tab(.forums),
