@@ -72,6 +72,7 @@ final class Integration {
                 MainActor.assumeIsolated {
                     self?.startSync()
                     self?.startNotifications()
+                    self?.startAccountPhotos()
                 }
             }
         }
@@ -82,6 +83,26 @@ final class Integration {
         let notifications = MailNotifications(services: services, prefs: model.prefs)
         notifications.start()
         self.notifications = notifications
+    }
+
+    /// Reads the accounts' kept photos, then asks Google again for those missing or a week old.
+    func startAccountPhotos() {
+        let store = services.store
+        let google = googleAccounts
+        Task { @MainActor in
+            let accounts = (try? await Task.detached { try store.accounts() }.value) ?? []
+            AccountPhotos.shared.start(accountIds: accounts.map(\.id))
+            guard let google else { return }
+            let pictures = await Task.detached(priority: .utility) { () -> [(String, URL?)] in
+                let directory = AccountPhotos.defaultDirectory
+                var pictures: [(String, URL?)] = []
+                for account in accounts where AccountPhotos.isStale(account.id, in: directory) && google.hasCredentials(for: account.email) {
+                    if let info = try? await google.profile(for: account.email) { pictures.append((account.id, info.pictureURL)) }
+                }
+                return pictures
+            }.value
+            for (id, url) in pictures { AccountPhotos.shared.refresh(id, pictureURL: url) }
+        }
     }
 
     // MARK: Google
@@ -125,6 +146,7 @@ final class Integration {
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
             let account = try await self.saveAccount(info)
+            AccountPhotos.shared.refresh(account.id, pictureURL: info.pictureURL)
             if let sync = self.sync {
                 // Signing in again with an account that was already there resumes its sync.
                 if sync.status(for: account.id) == nil { sync.addAccount(account) } else { sync.reauthorized(accountId: account.id) }
@@ -145,6 +167,7 @@ final class Integration {
                 DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             }
             guard info.email.lowercased() == account.id else { throw Failure.differentAccount(info.email) }
+            AccountPhotos.shared.refresh(account.id, pictureURL: info.pictureURL)
             if let sync = self.sync {
                 sync.reauthorized(accountId: account.id)
                 return
@@ -171,6 +194,7 @@ final class Integration {
                 }.value
             }
             await ReaderRemoteImages.clearCache()
+            AccountPhotos.shared.remove(account.id)
             await self.googleAccounts?.signOut(account.email)
         }
     }

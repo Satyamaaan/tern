@@ -107,6 +107,13 @@ public final class GoogleAccounts: Sendable {
         account(for: email.lowercased()).client
     }
 
+    /// The account's Google profile (name and photo), read with its own token.
+    public func profile(for email: String) async throws -> GoogleAccountInfo {
+        let email = email.lowercased()
+        let token = try await account(for: email).tokens.accessToken()
+        return try await auth(for: email).userInfo(accessToken: token)
+    }
+
     /// Whether a refresh token is stored for `email`. It may still have been revoked.
     public func hasCredentials(for email: String) -> Bool {
         (try? secrets.data(service: GoogleKeychain.tokenService, account: email.lowercased())) != nil

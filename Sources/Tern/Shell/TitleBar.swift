@@ -334,6 +334,7 @@ struct AccountStack: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Switch account  \(model.registry?["scope.all"]?.shortcutText.map { "\($0), " } ?? "")⌘1–⌘9")
+        .accessibilityLabel("Switch account, \(title)")
         .opacity(model.accounts.isEmpty ? 0 : 1)
     }
 
@@ -381,26 +382,43 @@ enum AccountMenu {
     }
 }
 
-/// An account's round letter avatar in its own hue.
+/// An account's round avatar: its Google profile photo, else its initial in the account's hue.
 struct AccountAvatar: View {
     let account: Account
     var size: CGFloat = 20
 
     var body: some View {
-        let tint = Theme.accountTint(account.colorIndex)
-        Circle()
-            .fill(Color(tint.fill))
-            .overlay(Text(Avatar.initials(name: account.displayName, email: account.email, letters: 1))
-                .font(.ui(size * 0.48, .semibold))
-                .foregroundStyle(Color(tint.text)))
-            .frame(width: size, height: size)
+        if let photo = AccountPhotos.shared.photo(for: account.id) {
+            Image(nsImage: photo)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+                .accessibilityLabel(account.email)
+        } else {
+            let tint = Theme.accountTint(account.colorIndex)
+            Circle()
+                .fill(Color(tint.fill))
+                .overlay(Text(Avatar.initials(name: account.displayName, email: account.email, letters: 1))
+                    .font(.ui(size * 0.48, .semibold))
+                    .foregroundStyle(Color(tint.text)))
+                .frame(width: size, height: size)
+                .accessibilityLabel(account.email)
+        }
     }
 
+    /// The same avatar for menu items.
     @MainActor
     static func image(_ account: Account, size: CGFloat) -> NSImage {
+        let photo = AccountPhotos.shared.photo(for: account.id)
         let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { rect in
-            Avatar.drawLetters(Avatar.initials(name: account.displayName, email: account.email, letters: 1),
-                               tint: Theme.accountTint(account.colorIndex), in: rect)
+            if let photo {
+                Avatar.drawLogo(photo, in: rect)
+            } else {
+                Avatar.drawLetters(Avatar.initials(name: account.displayName, email: account.email, letters: 1),
+                                   tint: Theme.accountTint(account.colorIndex), in: rect)
+            }
             return true
         }
         return image

@@ -14,6 +14,7 @@ struct Snapshotter {
     func run(into directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         Self.installDemoLogos()
+        Self.installDemoAccountPhotos(model.accounts)
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
         // Launch time: first layout and a full render of the window with its rows.

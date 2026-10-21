@@ -70,8 +70,9 @@ AI provider marks (onboarding, Settings → AI) are the one other place colour s
 
 Account hues (`#4F7CAC #8A6FB3 #3E9A86 #8F7F62 #B05C7A #6B7F4A`, named Blue, Violet, Teal, Sand, Rose, Olive)
 mark whose mail a row is: an 8 px dot in the hue on the avatar's lower right, ringed 1.5 px in whatever is behind
-the row, only while several accounts share a list (its tooltip names the account). The title bar's account stack
-tints its letter avatars in them softly (18% light, 32% dark) and is the legend. The reader shows the account as a
+the row, only while several accounts share a list (its tooltip names the account). Account avatars (title bar,
+scope menu, sidebar, From menu) are the account's Google profile photo, kept on disk and refreshed weekly in the
+background; without one, its initial on the hue, softly (18% light, 32% dark). The reader shows the account as a
 tag with the same dot. Each account's name and hue are set in Settings → Accounts.
 
 ### Radius and spacing
@@ -167,8 +168,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   pin or unpin it.
 - Keys: Tab / ⇧Tab cycle the tabs shown; ⌥1 All, ⌥2 Needs reply, ⌥3–⌥7 Primary to Forums (a key the user had
   given another command before Gmail's tabs stays theirs; that tab then starts without one).
-- Right side: the **account stack** (up to three 20 px letter avatars in account hues, overlapping by 6 px with
-  a 2 px `bg` ring) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
+- Right side: the **account stack** (up to three 20 px account avatars, overlapping by 6 px with a 2 px `bg`
+  ring: each account's Google profile photo, else its initial in the account hue) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
   account ⌘1…⌘9, Add account…, Settings…); then **compose**: a 28 px icon button, ink pencil, `hairlineStrong`
   outline (`c`, ⌘N). No notification bell.
 

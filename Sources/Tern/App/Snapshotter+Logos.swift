@@ -1,4 +1,5 @@
 import AppKit
+import TernCore
 
 extension Snapshotter {
     /// Stand-in site icons for the demo mailbox's companies, drawn here (nothing is downloaded), so the
@@ -18,6 +19,23 @@ extension Snapshotter {
         for mark in marks {
             guard let png = drawMark(mark.glyph, background: mark.background, foreground: mark.foreground) else { continue }
             SenderLogos.shared.install(png, forDomain: mark.domain)
+        }
+    }
+
+    /// Stand-in profile photos for the demo accounts but the last, drawn here: a portrait-like gradient with
+    /// a head and shoulders. The last account keeps its initial, as an account without a photo does.
+    @MainActor
+    static func installDemoAccountPhotos(_ accounts: [Account]) {
+        let palettes: [(UInt32, UInt32)] = [(0xF2B38A, 0xB5523B), (0x8FB8E8, 0x34558B)]
+        for (account, colours) in zip(accounts.dropLast(), palettes) {
+            let image = NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+                NSGradient(starting: Theme.rgb(colours.0), ending: Theme.rgb(colours.1))?.draw(in: rect, angle: -70)
+                NSColor(white: 1, alpha: 0.85).setFill()
+                NSBezierPath(ovalIn: CGRect(x: 22, y: 30, width: 20, height: 20)).fill()
+                NSBezierPath(ovalIn: CGRect(x: 10, y: -14, width: 44, height: 40)).fill()
+                return true
+            }
+            AccountPhotos.shared.install(image, for: account.id)
         }
     }
 
