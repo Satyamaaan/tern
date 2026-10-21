@@ -41,6 +41,16 @@ public enum ProjectRules {
         return changes
     }
 
+    /// Whether two rule lists match the same threads: the same fields and values, in any order and with
+    /// repeats ignored, since a thread joins when any rule matches. A save that keeps the rules (a new name,
+    /// icon or colour) needs no `recomputeAll`.
+    public static func sameRules(_ lhs: [ProjectRule], _ rhs: [ProjectRule]) -> Bool {
+        func normalized(_ rules: [ProjectRule]) -> Set<[String]> {
+            Set(rules.map { [$0.field.rawValue, $0.value.trimmingCharacters(in: .whitespacesAndNewlines)] })
+        }
+        return normalized(lhs) == normalized(rhs)
+    }
+
     /// The projects whose rules match one thread.
     public static func matchingProjects(_ db: Database, key: ThreadKey) throws -> Set<String> {
         let rules = try CompiledRules.load(db, projectId: nil, scope: [key])

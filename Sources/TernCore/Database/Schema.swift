@@ -14,6 +14,7 @@ enum Schema {
         migrator.registerMigration("fixapp-1", migrate: SnoozeReplies.migrate)
         migrator.registerMigration("tabs-1", migrate: InboxTabSchema.migrate)
         migrator.registerMigration("archive-1", migrate: ArchiveSchema.migrate)
+        migrator.registerMigration("perf-1", migrate: SearchTriggerSchema.migrate)
     }
 
     private static func v1Core(_ db: Database) throws {

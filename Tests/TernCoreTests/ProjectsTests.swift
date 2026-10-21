@@ -242,3 +242,25 @@ private func links(_ store: MailStore, _ projectId: String) throws -> [String: T
             "the office account and its own label id go; another account's rule, a shared label id and a name stay")
     #expect(try store.projects().map(\.id).sorted() == ["p1", "p2"], "projects stay")
 }
+
+@Test func sameRulesIgnoresOrderRepeatsAndOuterSpaces() {
+    let domain = ProjectRule(id: 4, projectId: "p", field: .fromDomain, value: "acme.com")
+    let label = ProjectRule(id: 5, projectId: "p", field: .label, value: "Clients")
+    let draft = [
+        ProjectRule(projectId: "p", field: .label, value: " Clients "),
+        ProjectRule(projectId: "p", field: .fromDomain, value: "acme.com\n"),
+        ProjectRule(projectId: "p", field: .fromDomain, value: "acme.com"),
+    ]
+    #expect(ProjectRules.sameRules([domain, label], draft))
+    #expect(ProjectRules.sameRules([], []))
+}
+
+@Test func sameRulesSeesEveryRuleChange() {
+    let stored = [ProjectRule(id: 1, projectId: "p", field: .fromDomain, value: "acme.com")]
+    #expect(!ProjectRules.sameRules(stored, []))
+    #expect(!ProjectRules.sameRules([], stored))
+    #expect(!ProjectRules.sameRules(stored, [ProjectRule(projectId: "p", field: .fromDomain, value: "acme.co")]))
+    #expect(!ProjectRules.sameRules(stored, [ProjectRule(projectId: "p", field: .from, value: "acme.com")]))
+    #expect(!ProjectRules.sameRules(stored, [ProjectRule(projectId: "p", field: .fromDomain, value: "Acme.com")]))
+    #expect(!ProjectRules.sameRules(stored, stored + [ProjectRule(projectId: "p", field: .label, value: "Clients")]))
+}
