@@ -162,7 +162,8 @@ struct AIProviderItem: View {
     }
 }
 
-/// The model name is saved on Return and when the field lets go of the keyboard, not on every key.
+/// The model name is saved on Return and when the field lets go of the keyboard, not on every key. Text not yet
+/// saved is with `SettingsState`, which saves it when settings, the window or the app close.
 struct AIModelItem: View {
     @Bindable var state: SettingsState
     @State private var text = ""
@@ -178,6 +179,7 @@ struct AIModelItem: View {
                 .autocorrectionDisabled()
                 .disabled(state.provider == .off)
                 .focused($focused)
+                .onChange(of: text) { state.editAIModel(text) }
                 .onSubmit { state.commitAIModel(text) }
                 .onChange(of: focused) { if !focused { state.commitAIModel(text) } }
                 .onChange(of: state.aiModel, initial: true) { if !focused { text = state.aiModel } }

@@ -124,8 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    /// Lets sync put in-flight work back in its queue before the app goes (at most 2 s).
+    /// Saves a settings edit not yet committed and finishes queued writes (at most 1 s), then lets sync put in-flight
+    /// work back in its queue before the app goes (at most 2 s).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        model?.prepareToQuit()
         guard let integration, integration.sync != nil else { return .terminateNow }
         Task {
             await integration.shutdown()
@@ -175,6 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
         hosting.sizingOptions = []
         let window = MainWindow(contentView: hosting)
         self.window = window
+        // The window stays in memory when closed, so the settings page's fields never go away: save what they hold.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.settings?.commitEdits() }
+        }
         return window
     }
 

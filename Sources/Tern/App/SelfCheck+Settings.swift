@@ -80,7 +80,18 @@ extension SelfCheck {
         let stored = (try? model.store.setting(SettingKey.aiModel)) ?? nil
         print("  ai model: committing a new name wrote \(transactions.value) transaction(s)")
         check("a new AI model is saved in one transaction", transactions.value == 1 && stored == "check-model")
-        settings.commitAIModel(saved)
+
+        settings.editAIModel("check-closed")
+        model.closeSettings()
+        settle()
+        check("closing settings saves a model name not yet committed", ((try? model.store.setting(SettingKey.aiModel)) ?? nil) == "check-closed")
+        model.openSettings(.ai)
+        wait(0.2)
+        model.settings?.editAIModel("check-quit")
+        model.prepareToQuit()
+        check("quitting saves a model name not yet committed before it goes",
+              ((try? model.store.setting(SettingKey.aiModel)) ?? nil) == "check-quit")
+        model.settings?.commitAIModel(saved)
         settle()
         model.closeSettings()
     }

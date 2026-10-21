@@ -96,6 +96,8 @@ final class SettingsState {
     var provider: AIProvider { didSet { if provider != oldValue { saveAI() } } }
     /// The saved model name. The field edits its own copy and hands it to `commitAIModel`.
     private(set) var aiModel: String { didSet { if aiModel != oldValue { saveAI() } } }
+    /// The model field's text while it differs from the saved name, for `commitEdits`.
+    @ObservationIgnored private var aiModelEdit: String?
     var autoProjects: Bool { didSet { if autoProjects != oldValue { saveAI() } } }
     let board = AIStatusBoard()
     var indexStatus: String?
@@ -271,10 +273,23 @@ final class SettingsState {
 
     // MARK: Saving
 
+    /// The model field's text changed. Kept until the field commits it, so closing the page, the window or the app
+    /// saves it too (`commitEdits`).
+    func editAIModel(_ text: String) {
+        aiModelEdit = text == aiModel ? nil : text
+    }
+
     /// The model field was submitted or let go of the keyboard: saves its text if it changed.
     func commitAIModel(_ text: String) {
+        aiModelEdit = nil
         let text = text.trimmingCharacters(in: .whitespaces)
         if text != aiModel { aiModel = text }
+    }
+
+    /// Saves what a field holds and hasn't committed yet. The settings page, the main window and the app call it as
+    /// they close, where a field's own commit (losing the keyboard, going away) can't be relied on.
+    func commitEdits() {
+        if let aiModelEdit { commitAIModel(aiModelEdit) }
     }
 
     /// Writes the AI settings off the main thread, in one transaction, so whatever watches them (the triage queue)

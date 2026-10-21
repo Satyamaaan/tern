@@ -42,7 +42,8 @@ extension AppModel {
     /// reading pane changed meanwhile, a thread open over the list stays open (beside it with the pane), and
     /// the keyboard goes to the list when the thread it was in is no longer on screen.
     func closeSettings() {
-        guard settings != nil else { return }
+        guard let page = settings else { return }
+        page.commitEdits()
         settings = nil
         let saved = settingsReturn
         settingsReturn = SettingsReturn()
@@ -58,6 +59,15 @@ extension AppModel {
             services.reader.focus()
         case .reader, .list: focusList()
         }
+    }
+
+    /// The app is quitting: saves a settings edit not yet committed, then waits for the writes queued so far (at
+    /// most `timeout` seconds) so they reach the database before the process ends.
+    func prepareToQuit(timeout: TimeInterval = 1) {
+        settings?.commitEdits()
+        let done = DispatchSemaphore(value: 0)
+        writes.async { done.signal() }
+        _ = done.wait(timeout: .now() + timeout)
     }
 
     /// Where the keyboard is now: the search pill, a text view in the mail (an inline reply, the find bar), the open
