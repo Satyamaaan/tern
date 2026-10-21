@@ -149,7 +149,8 @@ struct RecipientFieldView: NSViewRepresentable {
         field.tokens = tokens
         let kind = kind
         field.onChange = { [weak model] in model?.setRecipients($0, for: kind) }
-        field.suggest = { [weak model] in model?.suggestions(for: $0) ?? [] }
+        field.suggest = { [weak model] in await model?.suggestions(for: $0) ?? [] }
+        field.suggestNow = { [weak model] in model?.suggestionsNow(for: $0) ?? [] }
         field.onDrop = { [weak model] in model?.drop($0, into: kind) }
         field.onTab = { [weak model] forward in
             guard let model else { return }

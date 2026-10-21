@@ -35,6 +35,18 @@ extension DraftStore {
         }
     }
 
+    /// Whether a suggestion still fits `prefix` by the rules of `suggestRecipients`, so a field can narrow what it
+    /// shows while the suggestions for new text are read.
+    public static func suggestion(_ person: Participant, fits prefix: String) -> Bool {
+        let query = prefix.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return false }
+        let email = person.email.lowercased(), name = person.name.lowercased()
+        let wantsNoReply = query.hasPrefix("no") || query.hasPrefix("do")
+        guard wantsNoReply || !isNoReply(email) else { return false }
+        return email.hasPrefix(query) || email.contains("@" + query) || email.contains("." + query)
+            || name.hasPrefix(query) || name.contains(" " + query)
+    }
+
     /// People you wrote to most recently, newest first.
     public func recentRecipients(limit: Int = 8) throws -> [Participant] {
         try database.reader.read { db in

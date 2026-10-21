@@ -74,6 +74,19 @@ private func contactsStore() throws -> DraftStore {
     #expect(try store.suggestRecipients(prefix: "noreply", now: now).map(\.email) == ["noreply@lumen.io"])
 }
 
+@Test func narrowingKeepsWhatTheQueryWouldFind() throws {
+    let store = try contactsStore()
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let shown = try store.suggestRecipients(prefix: "m", now: now)
+    for prefix in ["ma", "may", "mayer", "max", "Chen", "lumen", "mx", "no"] {
+        let found = try store.suggestRecipients(prefix: prefix, now: now)
+        #expect(shown.filter { DraftStore.suggestion($0, fits: prefix) } == shown.filter(found.contains), "\(prefix)")
+    }
+    #expect(!DraftStore.suggestion(Participant(name: "Lumen", email: "noreply@lumen.io"), fits: "lumen"))
+    #expect(DraftStore.suggestion(Participant(name: "Lumen", email: "noreply@lumen.io"), fits: "noreply"))
+    #expect(!DraftStore.suggestion(Participant(name: "Maya", email: "maya@lumen.io"), fits: " "))
+}
+
 @Test func emptyPrefixSuggestsRecentRecipients() throws {
     let store = try contactsStore()
     let account = "me@example.com"
