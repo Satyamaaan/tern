@@ -54,6 +54,7 @@ extension SelfCheck {
         check("reader commands don't run on the thread a hidden reader still holds",
               reader.key != model.readerKey && readerCommands.allSatisfy { registry[$0].map(registry.canRun) != true }
                 && registry["find"]?.displayTitle == "Search Mail")
+        check("VoiceOver doesn't find the page of a hidden reader", reader.engine.webView.isAccessibilityHidden())
 
         model.searchText = "invoice"
         settle(0.5)
@@ -77,8 +78,8 @@ extension SelfCheck {
         model.open()
         check("opening a thread over the list shows the current one",
               waitUntil { reader.key == model.cursor && ReaderModel.work.rendered > opening.rendered })
-        check("with it on screen they act on it", registry["print"].map(registry.canRun) == true
-                && registry["find"]?.displayTitle == "Find in Conversation…")
+        check("with it on screen they act on it, and VoiceOver finds the page", registry["print"].map(registry.canRun) == true
+                && registry["find"]?.displayTitle == "Find in Conversation…" && !reader.engine.webView.isAccessibilityHidden())
         model.back()
         settle(0.4)
         let reopening = ReaderModel.work

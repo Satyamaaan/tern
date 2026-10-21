@@ -56,7 +56,7 @@ struct ReaderView: View {
                     .padding(.bottom, 8)
             }
             ZStack(alignment: .bottomLeading) {
-                ReaderWebHost(webView: model.engine.webView)
+                ReaderWebHost(webView: model.engine.webView, hiddenFromAccessibility: !active || key == nil)
                     .opacity(key == nil ? 0 : 1)
                 if key == nil {
                     Text("No conversation selected")
@@ -106,18 +106,22 @@ struct ReaderView: View {
     }
 }
 
-/// Hosts the shared web view, moving it here if another reader had it.
+/// Hosts the shared web view, moving it here if another reader had it. While the reader is off screen or shows
+/// nothing, the page stays loaded but VoiceOver doesn't find it (SwiftUI's accessibilityHidden stops at AppKit views).
 struct ReaderWebHost: NSViewRepresentable {
     let webView: ReaderWebView
+    var hiddenFromAccessibility = false
 
     func makeNSView(context: Context) -> ReaderWebContainer {
         let container = ReaderWebContainer()
         container.host(webView)
+        container.hidesFromAccessibility(hiddenFromAccessibility)
         return container
     }
 
     func updateNSView(_ container: ReaderWebContainer, context: Context) {
         container.host(webView)
+        container.hidesFromAccessibility(hiddenFromAccessibility)
     }
 }
 
@@ -137,6 +141,12 @@ final class ReaderWebContainer: NSView {
         webView.frame = bounds
         webView.autoresizingMask = [.width, .height]
         addSubview(webView)
+    }
+
+    /// Leaves the container and the page it hosts out of the accessibility tree, or puts them back.
+    func hidesFromAccessibility(_ hidden: Bool) {
+        setAccessibilityHidden(hidden)
+        for view in subviews { view.setAccessibilityHidden(hidden) }
     }
 }
 
