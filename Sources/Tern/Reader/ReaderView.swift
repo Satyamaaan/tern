@@ -20,11 +20,15 @@ struct ReaderPosition {
 /// One conversation, either full width over the list or in the side pane. Pass the neighbours in
 /// `prefetch` (next and previous rows) so moving to them is instant, and `onBack` when the reader covers
 /// the list. The container sets the surface; the reader itself draws no background.
+///
+/// `active` is false while the reader is kept in the tree but off screen (no reading pane, no thread over
+/// the list): it then follows, renders and prefetches nothing, and catches up with `key` when it is back.
 struct ReaderView: View {
     let key: ThreadKey?
     var prefetch: [ThreadKey]
     var position: ReaderPosition?
     var onBack: (() -> Void)?
+    var active: Bool
 
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
@@ -34,11 +38,13 @@ struct ReaderView: View {
     static let columnWidth: CGFloat = 784
     static let columnPadding: CGFloat = 32
 
-    init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil, onBack: (() -> Void)? = nil) {
+    init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil, onBack: (() -> Void)? = nil,
+         active: Bool = true) {
         self.key = key
         self.prefetch = prefetch
         self.position = position
         self.onBack = onBack
+        self.active = active
     }
 
     var body: some View {
@@ -84,13 +90,19 @@ struct ReaderView: View {
                 }
             }
         }
-        .onChange(of: key, initial: true) {
+        .onChange(of: Showing(key: key, active: active), initial: true) {
             model.attach(services)
-            model.show(key, prefetch: prefetch)
+            if active { model.show(key, prefetch: prefetch) } else { model.suspend() }
         }
-        .onChange(of: prefetch) { model.prefetch(prefetch) }
+        .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
         .animation(.easeOut(duration: 0.12), value: model.toast)
+    }
+
+    /// What the reader should be doing: one change when the key and the visibility change together.
+    private struct Showing: Equatable {
+        var key: ThreadKey?
+        var active: Bool
     }
 }
 

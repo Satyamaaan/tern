@@ -193,7 +193,8 @@ private struct ColumnDivider: View {
     }
 }
 
-/// The reader column: the open thread, or a quiet summary when several threads are selected.
+/// The reader column: the open thread, or a quiet summary when several threads are selected. While it is off
+/// screen the reader stays in the tree but does no work.
 struct ReaderColumn: View {
     @Environment(AppModel.self) private var model
     /// `raised` beside the list, `bg` over it.
@@ -206,7 +207,8 @@ struct ReaderColumn: View {
             if model.checked.count > 1 {
                 MultiSelectionView(count: model.checked.count)
             } else {
-                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack)
+                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack,
+                           active: model.readerVisible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

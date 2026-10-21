@@ -12,6 +12,13 @@ struct ReaderHoverLink: Equatable {
     var warning: String?
 }
 
+/// Counts of the reader's work since launch (`ReaderModel.work`).
+struct ReaderWork: Equatable {
+    var observed = 0
+    var rendered = 0
+    var prefetched = 0
+}
+
 /// Drives one reader pane: follows the open thread in the database, renders it into the shared web
 /// view, and turns page events into actions. AI and downloads run in the background and never hold
 /// up the first paint.
@@ -52,6 +59,8 @@ final class ReaderModel {
     static var renderObserver: ((ThreadKey, Double) -> Void)?
     /// Time the page spent building the last thread's DOM, in milliseconds.
     private(set) static var lastBuildMilliseconds: Double = 0
+    /// Threads followed, pages rendered and prefetches started, for the check that a reader off screen does none.
+    private(set) static var work = ReaderWork()
     #if DEBUG
     /// Stands in for `SenderLogos` in the snapshot harness.
     static var logoOverride: ((String) -> Data?)?
@@ -89,7 +98,7 @@ final class ReaderModel {
         engine.webView.openLinkFromMenu = { [weak self] in self?.openHoveredLink() }
         services?.reader.model = self
         defer { self.prefetch(prefetch) }
-        guard key != self.key else { return }
+        guard key != self.key else { return resume() }
         observer?.cancel()
         observer = nil
         self.key = key
@@ -101,12 +110,31 @@ final class ReaderModel {
         }
         openStarted = CACurrentMediaTime()
         openInterval = Self.signposter.beginInterval("Open thread", id: Self.signposter.makeSignpostID())
-        observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
-            MainActor.assumeIsolated { self?.receive(detail, for: key) }
-        }
+        observe(key, in: services)
         // Older mail is stored without bodies; the observer re-renders when they land.
         if let fetch = services.fetchBodies {
             Task { try? await fetch(key) }
+        }
+    }
+
+    /// The reader went off screen: the page keeps the thread it shows, with its scroll and any reply being
+    /// written, but stops following it until `show` brings the reader back.
+    func suspend() {
+        observer?.cancel()
+        observer = nil
+    }
+
+    /// Back on screen with the same thread: follows it again. The first value arrives at once and only redraws
+    /// what changed while it was off screen, so the page keeps its place.
+    private func resume() {
+        guard observer == nil, let key, let services else { return }
+        observe(key, in: services)
+    }
+
+    private func observe(_ key: ThreadKey, in services: AppServices) {
+        Self.work.observed += 1
+        observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
+            MainActor.assumeIsolated { self?.receive(detail, for: key) }
         }
     }
 
@@ -152,6 +180,7 @@ final class ReaderModel {
         context.logos = logos(for: senders)
         renderedLogos = context.logos
         let (payload, loading, deferred) = ReaderPayload.make(detail, context: context)
+        Self.work.rendered += 1
         engine.render(payload)
         loadBodies([loading, deferred], key: key, context: context)
         if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
@@ -263,6 +292,7 @@ final class ReaderModel {
     /// bodies it hasn't stored yet.
     func prefetch(_ keys: [ThreadKey]) {
         guard let services, !keys.isEmpty else { return }
+        Self.work.prefetched += 1
         services.prefetchBodies?(keys)
         let store = services.store
         let trust = trust

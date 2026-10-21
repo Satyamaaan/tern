@@ -9,6 +9,7 @@ import TernSync
 extension SelfCheck {
     func integration() {
         readerWiring()
+        hiddenReader()
         menuBar()
         inlineReplies()
         sendAndArchive()
@@ -28,6 +29,59 @@ extension SelfCheck {
     }
 
     // MARK: Reader
+
+    /// With no reading pane and no thread over the list, moving through the list or the search results leaves the
+    /// reader alone; opening a thread then shows it, and opening the same one again shows the page as it was.
+    private func hiddenReader() {
+        let pane = model.prefs.readingPane
+        defer { model.prefs.readingPane = pane }
+        model.prefs.readingPane = false
+        model.show(.inbox)
+        model.showInboxTab(.primary)
+        model.focusList()
+        settle(0.3)
+        guard model.snapshot.order.count > 8, let reader = services.reader.model else { return check("hidden reader: rows", false) }
+        let shown = reader.key, before = ReaderModel.work
+        for _ in 0..<6 {
+            model.moveCursor(1)
+            settle(0.05)
+        }
+        settle(0.2)
+        print("  reader off screen, 6 rows down: \(before) → \(ReaderModel.work)")
+        check("j/k with the reader off screen follows, renders and prefetches nothing", ReaderModel.work == before && reader.key == shown)
+
+        model.searchText = "invoice"
+        settle(0.5)
+        if waitUntil(2, { model.snapshot.order.count > 3 }) {
+            let searching = ReaderModel.work
+            model.focusList()
+            for _ in 0..<3 {
+                model.moveCursor(1)
+                settle(0.05)
+            }
+            settle(0.2)
+            print("  reader off screen, 3 results down: \(searching) → \(ReaderModel.work)")
+            check("moving through search results with the reader off screen does no reader work", ReaderModel.work == searching)
+        }
+        model.endSearch(restoreFocus: true)
+        settle(0.3)
+
+        model.moveCursor(1)
+        settle(0.1)
+        let opening = ReaderModel.work
+        model.open()
+        check("opening a thread over the list shows the current one",
+              waitUntil { reader.key == model.cursor && ReaderModel.work.rendered > opening.rendered })
+        model.back()
+        settle(0.4)
+        let reopening = ReaderModel.work
+        model.open()
+        settle(0.4)
+        check("opening it again follows it without painting the page again",
+              reader.key == model.cursor && ReaderModel.work.observed == reopening.observed + 1 && ReaderModel.work.rendered == reopening.rendered)
+        model.back()
+        settle(0.2)
+    }
 
     private func readerWiring() {
         model.show(.inbox)
