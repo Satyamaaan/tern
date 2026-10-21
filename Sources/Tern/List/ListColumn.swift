@@ -6,6 +6,7 @@ import TernCore
 /// while searching, and the floating bottom bar.
 struct ListColumn: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -17,15 +18,18 @@ struct ListColumn: View {
                         .padding(.top, 4)
                         .padding(.bottom, 6)
                         .frame(maxWidth: .infinity)
-                        .transition(.opacity.combined(with: .offset(y: -6)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
                 }
                 ZStack {
                     MessageListView(model: model)
                     if model.listLoaded && model.snapshot.isEmpty {
+                        // Emptied by triage, it fades in over the end of the collapse; any other empty list is just there.
                         EmptyListView()
                             .background(Color(Theme.bg))
+                            .transition(model.emptiedByTriage ? .opacity : .identity)
                     }
                 }
+                .animation(emptyAnimation, value: model.snapshot.isEmpty)
             }
             .overlay(alignment: .top) {
                 if model.showsSuggestions {
@@ -45,7 +49,7 @@ struct ListColumn: View {
             }
         }
         .background(Color(Theme.bg))
-        .animation(.easeOut(duration: 0.12), value: model.searchShown)
+        .animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.overlay), value: model.searchShown)
         .animation(.easeOut(duration: 0.09), value: model.showsSuggestions)
     }
 }
@@ -66,6 +70,13 @@ enum ListLayout {
     static func column(in bounds: CGRect) -> CGRect {
         let column = column(width: bounds.width)
         return CGRect(x: bounds.minX + column.x, y: bounds.minY, width: column.width, height: bounds.height)
+    }
+}
+
+extension ListColumn {
+    private var emptyAnimation: Animation? {
+        guard model.emptiedByTriage, model.snapshot.isEmpty else { return nil }
+        return reduceMotion ? Motion.reduced : InboxZeroView.arrival
     }
 }
 

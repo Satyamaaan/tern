@@ -4,6 +4,7 @@ import TernCore
 /// What the list shows with nothing in it: the tern for inbox zero, one quiet line elsewhere.
 struct EmptyListView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -12,7 +13,7 @@ struct EmptyListView: View {
             } else if model.isSearching {
                 EmptyLine(text: "Nothing matches “\(model.searchText.trimmingCharacters(in: .whitespaces))”.")
             } else if case .inbox = model.kind, model.inboxTab == nil || model.inboxTab == .primary {
-                InboxZeroView(cleared: model.prefs.clearedToday)
+                InboxZeroView(cleared: model.prefs.clearedToday, drawn: model.emptiedByTriage && !reduceMotion)
             } else if case .inbox = model.kind {
                 EmptyLine(text: "Nothing in this tab.")
             } else {
@@ -37,11 +38,24 @@ private struct EmptyLine: View {
     }
 }
 
-/// Inbox zero: the tern drawn as one stroke (900 ms), "Nothing needs you." and today's tally.
+/// Inbox zero: "Nothing needs you." and today's tally under the tern. Right after triage empties the list
+/// (`drawn`) it arrives in sequence: the view fades in over the end of the collapse, the tern draws as one stroke
+/// (900 ms), then the text rises in. Otherwise (opening an empty inbox, Reduce Motion) it is simply there.
 struct InboxZeroView: View {
     let cleared: Int
-    @State private var progress: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let drawn: Bool
+    @State private var progress: CGFloat
+    @State private var textShown: Bool
+
+    /// The view's fade in, overlapping the last of the collapse.
+    static let arrival = Animation.easeOut(duration: 0.2).delay(0.12)
+
+    init(cleared: Int, drawn: Bool = false) {
+        self.cleared = cleared
+        self.drawn = drawn
+        _progress = State(initialValue: drawn ? 0 : 1)
+        _textShown = State(initialValue: !drawn)
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -58,11 +72,14 @@ struct InboxZeroView: View {
                     .font(.ui(12))
                     .foregroundStyle(Color(Theme.text3))
             }
+            .opacity(textShown ? 1 : 0)
+            .offset(y: textShown ? 0 : 4)
         }
         .padding(.bottom, 60)
         .onAppear {
-            if reduceMotion { progress = 1; return }
-            withAnimation(.easeInOut(duration: 0.9)) { progress = 1 }
+            guard drawn else { return }
+            withAnimation(.easeInOut(duration: 0.9).delay(0.12)) { progress = 1 }
+            withAnimation(.easeOut(duration: 0.3).delay(0.5)) { textShown = true }
         }
     }
 }

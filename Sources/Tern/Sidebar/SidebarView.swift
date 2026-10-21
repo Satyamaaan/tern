@@ -143,7 +143,6 @@ struct SidebarRow<Leading: View>: View {
                     Text(count.formatted())
                         .font(.numeric(12, countWeight))
                         .foregroundStyle(Color(countColor))
-                        .transition(.identity)
                 }
             }
             .padding(.horizontal, 8)
@@ -153,13 +152,15 @@ struct SidebarRow<Leading: View>: View {
         // Beside the button rather than in it, so its clicks stay its own. It fades in on hover (90 ms) and
         // goes at once, as the count comes back.
         .overlay(alignment: .trailing) {
-            if let trailing, hovering {
-                trailing
-                    .padding(.trailing, 8)
-                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
+            ZStack {
+                if let trailing, hovering {
+                    trailing
+                        .padding(.trailing, 8)
+                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                }
             }
+            .animation(hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
         }
-        .animation(trailing != nil && hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
         .onHover { hovering = $0 }
     }
 

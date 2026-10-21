@@ -160,7 +160,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   unclassified mail → Primary). Each: 14 px icon (hue per the table), title, count in tabular `text3`: unread on
   Promotions, Social, Updates and Forums, waiting threads on Needs reply, none on All and Primary (their unread
   mail is the list itself; with inbox tabs off All counts its unread). 28 px tall, radius 6; active = `selected`
-  fill and Medium text; hover = `hover`.
+  fill and Medium text; hover = `hover`; pressed = `selected` at once. A tab is as wide as its Medium title, so
+  turning active never shifts its neighbours; the active fill slides to the next tab (130 ms, the cursor's curve).
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
   pinned shows as a temporary tab at the end while it is open.
 - `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
@@ -204,13 +205,17 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
     replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`; on a draft row Discard
     and `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus` while the list has the keyboard in the
-    key window, so focus shows without a ring. Selected neighbours join into one block.
+    key window, so focus shows without a ring. Selected neighbours join into one block. The row's icon buttons: `selected` under the
+    pointer (the row already has `hover`), `selectedFocus` pressed.
 - A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
   selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label (every
   other category comes off, also one Gmail adds before the move lands), so Gmail files it there too, and like
   archive the row leaves a tab it no longer belongs to, with undo: each message goes back to the tab it was in
   when you moved it, also in Gmail.
-- Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
+- Triage: `e` archives, the row collapses (160 ms, quick ease-out) and the next row is selected in the same frame;
+  a row that slides under a still pointer gets its hover buttons at once. Undo (`z`) slides the row back down into
+  place (160 ms); a few new threads at the top of a list scrolled to the top slide in the same way.
+  Anything else (paging, search refreshes, mail arriving out of sight) appears at once.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
 - Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in, and notes you
   sent yourself, that aren't in the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons
@@ -221,8 +226,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   copy is deleted only after the undo window, and an undo too late for that says so. A selection of draft rows and
   conversations is discarded and trashed together ("Trash and Discard Drafts", one toast, one undo). A draft
   being sent is never discarded; the toast counts only the drafts that were.
-- Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
-  other lists one Display 17 line in `text2`.
+- Empty: inbox zero (All, Primary) is the tern, "Nothing needs you." (Display 20) and a `text3` tally; when triage
+  empties the list it arrives in sequence (fades in over the end of the collapse, the tern drawn as one stroke in
+  900 ms, then the text rises 4 pt), otherwise it is simply there. Other lists one Display 17 line in `text2`.
 
 ### Bottom bar
 A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
@@ -266,12 +272,13 @@ Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), 
 drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
 pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
 something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts
-tabular.
+tabular; `selected` the moment a row is pressed, opened on release. The sync line crossfades between states, never
+within one.
 
 ### ⌘K palette
 Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).
 Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
-its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Opens in 120 ms.
+its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Fades in over 120 ms; closes at once.
 
 ### Composer
 Inline in the reader, or a floating window for new mail (`c`), 640×560, `raised`, radius 10. Flat rows with
@@ -330,11 +337,26 @@ in with the sign-in command and a copy button; Not installed with an install lin
 its segmented provider control and the same status line.
 
 ## Motion
-Cursor fill slides from row to row on j/k and ↑↓ (130 ms, quick ease-out `0.2, 0.9, 0.25, 1`; a held key retargets it
-mid-slide), jumps of more than 12 rows, new lists and Reduce Motion move it at once; it is one view under the rows
-(`CursorFillView`), used while only the cursor is selected · Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
-(response 0.32, damping 0.86) · palette 120 ms · search field 120 ms · hover reveal 90 ms · nothing in the
-triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
+Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 0.9, 0.25, 1`.
+
+- Cursor fill slides from row to row on j/k and ↑↓ (130 ms; a held key retargets it mid-slide). A click, jumps of
+  more than 12 rows, new lists and Reduce Motion place it at once. It is one view under the rows (`CursorFillView`),
+  used while only the cursor is selected.
+- Row exit and list collapse 160 ms, house curve. Undo and new mail at the top: rows fade and slide down 160 ms, the
+  cursor fill moving in the same animation.
+- Active tab fill slides between tabs (130 ms); tabs coming and going fade and scale from 0.96.
+- Toasts rise in 160 ms (house curve) and fade out where they are with a scale to 0.97 (120 ms ease-out).
+- Palette fades in over 120 ms and closes at once. The `g` chord hint shows only after a 0.4 s hesitation (fades
+  and rises 4 pt, 120 ms) and goes at once. Search field 120 ms.
+- Hover reveal 90 ms, fade in only, hidden at once: the Projects `+`, a project's `⋯`, the row hover buttons
+  when the pointer comes into the list (from row to row they move at once).
+- Pressed is a fill, instant on mouse-down, action on mouse-up; rows and tabs never scale.
+- Reader over the list, sidebar and pane changes spring (response 0.32, damping 0.86); the sidebar's More opens on
+  the house curve (140 ms), its rows fading down 4 pt.
+- Inbox zero after triage: fade 200 ms from 120 ms, stroke 900 ms, text 300 ms from 500 ms.
+- Nothing in the triage path over 200 ms, and nothing ever delays an action.
+
+Reduce Motion: 80 ms crossfades only (no slides, offsets or scale; the tern is drawn already).
 
 ## Keyboard
 See `research.md` §E. Every shortcut can be changed in Settings → Shortcuts; the keys here are the built-in

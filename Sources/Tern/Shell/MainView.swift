@@ -286,14 +286,22 @@ struct ReaderColumn: View {
 
 private struct MultiSelectionView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let count: Int
 
     var body: some View {
         VStack(spacing: 10) {
-            Text("\(count) conversations selected")
-                .font(.display(20))
-                .tracking(-0.3)
-                .foregroundStyle(Color(Theme.text1))
+            // The number rolls as the selection grows or shrinks (a crossfade with Reduce Motion).
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("\(count)")
+                    .contentTransition(reduceMotion ? .opacity : .numericText(value: Double(count)))
+                Text(" conversations selected")
+            }
+            .font(.display(20))
+            .tracking(-0.3)
+            .foregroundStyle(Color(Theme.text1))
+            .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.enter), value: count)
+            .accessibilityElement(children: .combine)
             HStack(spacing: 14) {
                 hint("e", "archive")
                 hint("h", "snooze")
