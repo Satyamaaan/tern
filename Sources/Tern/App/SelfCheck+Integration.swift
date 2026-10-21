@@ -9,6 +9,8 @@ import TernSync
 extension SelfCheck {
     func integration() {
         readerWiring()
+        hiddenReader()
+        hiddenReaderWaits()
         menuBar()
         inlineReplies()
         sendAndArchive()
@@ -28,6 +30,140 @@ extension SelfCheck {
     }
 
     // MARK: Reader
+
+    /// With no reading pane and no thread over the list, moving through the list or the search results leaves the
+    /// reader alone; opening a thread then shows it, and opening the same one again shows the page as it was.
+    private func hiddenReader() {
+        let pane = model.prefs.readingPane
+        defer { model.prefs.readingPane = pane }
+        model.prefs.readingPane = false
+        model.show(.inbox)
+        model.showInboxTab(.primary)
+        model.focusList()
+        settle(0.3)
+        guard model.snapshot.order.count > 8, let reader = services.reader.model else { return check("hidden reader: rows", false) }
+        let shown = reader.key, before = ReaderModel.work
+        for _ in 0..<6 {
+            model.moveCursor(1)
+            settle(0.05)
+        }
+        settle(0.2)
+        print("  reader off screen, 6 rows down: \(before) → \(ReaderModel.work)")
+        check("j/k with the reader off screen follows, renders and prefetches nothing", ReaderModel.work == before && reader.key == shown)
+        let readerCommands = ["print", "showOriginal", "summarize", "findNext", "findPrevious", "nextMessage"]
+        check("reader commands don't run on the thread a hidden reader still holds",
+              reader.key != model.readerKey && readerCommands.allSatisfy { registry[$0].map(registry.canRun) != true }
+                && registry["find"]?.displayTitle == "Search Mail")
+        check("VoiceOver doesn't find the page of a hidden reader", reader.engine.webView.isAccessibilityHidden())
+
+        model.searchText = "invoice"
+        settle(0.5)
+        if waitUntil(2, { model.snapshot.order.count > 3 }) {
+            let searching = ReaderModel.work
+            model.focusList()
+            for _ in 0..<3 {
+                model.moveCursor(1)
+                settle(0.05)
+            }
+            settle(0.2)
+            print("  reader off screen, 3 results down: \(searching) → \(ReaderModel.work)")
+            check("moving through search results with the reader off screen does no reader work", ReaderModel.work == searching)
+        }
+        model.endSearch(restoreFocus: true)
+        settle(0.3)
+
+        model.moveCursor(1)
+        settle(0.1)
+        let opening = ReaderModel.work
+        model.open()
+        check("opening a thread over the list shows the current one",
+              waitUntil { reader.key == model.cursor && ReaderModel.work.rendered > opening.rendered })
+        check("with it on screen they act on it, and VoiceOver finds the page", registry["print"].map(registry.canRun) == true
+                && registry["find"]?.displayTitle == "Find in Conversation…" && !reader.engine.webView.isAccessibilityHidden())
+        model.back()
+        settle(0.4)
+        let reopening = ReaderModel.work
+        model.open()
+        settle(0.4)
+        check("opening it again follows it without painting the page again",
+              reader.key == model.cursor && ReaderModel.work.observed == reopening.observed + 1 && ReaderModel.work.rendered == reopening.rendered)
+        model.back()
+        settle(0.2)
+    }
+
+    /// A thread that needs a reply, hidden before its quick replies are asked for, never asks the AI while off screen;
+    /// a logo or a new images setting that arrives meanwhile reaches the page only once it is back.
+    private func hiddenReaderWaits() {
+        let pane = model.prefs.readingPane, images = model.prefs.imagesInMail, ai = services.ai
+        defer {
+            model.prefs.readingPane = pane
+            model.prefs.imagesInMail = images
+            services.ai = ai
+            #if DEBUG
+            ReaderModel.logoOverride = nil
+            #endif
+        }
+        model.prefs.readingPane = false
+        services.ai = AIActions(summarize: { _ in [] }, suggestReplies: { _ in [] }, draftReply: { _, _ in "" },
+                                naturalLanguageQuery: { _ in "" })
+        model.show(.inbox)
+        model.showInboxTab(.primary)
+        model.focusList()
+        settle(0.3)
+        let order = model.snapshot.order
+        guard let reader = services.reader.model,
+              let key = order.dropLast().first(where: { model.row($0)?.needsReply == true }) else {
+            return check("hidden reader waits: a thread that needs a reply", false)
+        }
+        model.setCursor(key, open: false)
+        model.open()
+        guard waitUntil(3, { reader.key == key && reader.detail?.ai?.needsReply == true }) else {
+            return check("hidden reader waits: the thread opens", false)
+        }
+        model.back()
+        model.moveCursor(1)
+        let hidden = ReaderModel.work
+        settle(1.6)
+        check("a reader hidden before its quick replies asks no AI", ReaderModel.work.quickReplies == hidden.quickReplies)
+
+        #if DEBUG
+        ReaderModel.logoOverride = { _ in Self.checkLogo }
+        if let png = Self.checkLogo { SenderLogos.shared.install(png, forDomain: "tern-check.invalid") }
+        settle(0.3)
+        check("a logo that arrives doesn't touch a hidden reader", ReaderModel.work == hidden)
+        model.moveCursor(-1)
+        model.open()
+        check("back on screen it sends the logo once, without a paint, and asks for quick replies",
+              waitUntil { ReaderModel.work.logoUpdates == hidden.logoUpdates + 1 && ReaderModel.work.quickReplies == hidden.quickReplies + 1 }
+                && ReaderModel.work.rendered == hidden.rendered)
+        #endif
+
+        model.back()
+        model.moveCursor(1)
+        settle(0.2)
+        let hiddenAgain = ReaderModel.work
+        model.prefs.imagesInMail = images == .automatic ? .ask : .automatic
+        settle(0.4)
+        check("a new images setting doesn't touch a hidden reader", ReaderModel.work == hiddenAgain)
+        model.moveCursor(-1)
+        model.open()
+        settle(0.4)
+        print("  hidden reader catching up with a new images setting: \(hiddenAgain) → \(ReaderModel.work)")
+        check("back on screen it catches up with the images setting in at most one paint",
+              reader.key == key && ReaderModel.work.rendered - hiddenAgain.rendered <= 1)
+        model.back()
+        settle(0.2)
+    }
+
+    #if DEBUG
+    /// A 2 px PNG, for a logo that arrives while the check runs.
+    private static let checkLogo: Data? = {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }()
+    #endif
 
     private func readerWiring() {
         model.show(.inbox)

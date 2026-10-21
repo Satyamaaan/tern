@@ -27,6 +27,10 @@ struct RecipientDrag: Codable {
 /// One recipient row's pills plus a text input after them. Typing a separator, Return or Tab turns text
 /// into pills; Backspace on an empty input takes the last pill back for editing; pasted lists split;
 /// pills drag between fields. Autocomplete shows under the input with ↑↓ / Return / Tab / Esc.
+///
+/// Suggestions are read off the main thread, the latest keystroke's only. Until they arrive the list keeps
+/// what it showed that still fits the text; a key that acts on the list reads them at once first, so it does what
+/// it would have done had they been there.
 final class RecipientTokenField: NSView, NSTextFieldDelegate {
     let kind: RecipientKind
     let composerId: String
@@ -39,8 +43,10 @@ final class RecipientTokenField: NSView, NSTextFieldDelegate {
         }
     }
     var onChange: ([Participant]) -> Void = { _ in }
-    /// Suggestions for a query, leaving out the addresses already present.
-    var suggest: (String) -> [Participant] = { _ in [] }
+    /// Suggestions for a query, leaving out the addresses already present, read off the main thread.
+    var suggest: (String) async -> [Participant] = { _ in [] }
+    /// The same, read at once.
+    var suggestNow: (String) -> [Participant] = { _ in [] }
     var onDrop: (RecipientDrag) -> Void = { _ in }
     var onTab: (_ forward: Bool) -> Void = { _ in }
     var onEscape: () -> Void = {}
@@ -51,12 +57,21 @@ final class RecipientTokenField: NSView, NSTextFieldDelegate {
         didSet { for (index, view) in tokenViews.enumerated() { view.isSelected = index == selectedIndex } }
     }
     private let panel = SuggestionPanel()
+    /// Reading the suggestions for the text as typed; nil once the list answers it.
+    private var suggestionTask: Task<Void, Never>?
     private var lastHeight: CGFloat = 0
 
     static let tokenHeight: CGFloat = 24
     static let spacing: CGFloat = 4
     static let verticalPadding: CGFloat = 8
     static let minInputWidth: CGFloat = 120
+    /// How long typing pauses before the suggestions are read, so a burst of keys reads them once.
+    static let suggestionDelay: Duration = .milliseconds(20)
+    /// The keys that act on the suggestion list.
+    private static let suggestionKeys: Set<Selector> = [
+        #selector(NSResponder.moveDown(_:)), #selector(NSResponder.moveUp(_:)), #selector(NSResponder.insertNewline(_:)),
+        #selector(NSResponder.insertTab(_:)), #selector(NSResponder.cancelOperation(_:)),
+    ]
 
     init(kind: RecipientKind, composerId: String) {
         self.kind = kind
@@ -212,6 +227,7 @@ final class RecipientTokenField: NSView, NSTextFieldDelegate {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if suggestionTask != nil, Self.suggestionKeys.contains(selector) { settleSuggestions() }
         let empty = input.stringValue.isEmpty
         switch selector {
         case #selector(NSResponder.moveDown(_:)) where panel.isVisible:
@@ -243,13 +259,40 @@ final class RecipientTokenField: NSView, NSTextFieldDelegate {
 
     // MARK: Suggestions
 
+    private var query: String { input.stringValue.trimmingCharacters(in: .whitespaces) }
+
+    /// The suggestions shown, for the self-check.
+    var shownSuggestions: [Participant] { panel.isVisible ? panel.list.items : [] }
+
+    /// After a keystroke: narrows the list to what still fits, then reads the suggestions for the new text off the
+    /// main thread, dropping them if the text changed meanwhile.
     private func updateSuggestions() {
-        let query = input.stringValue.trimmingCharacters(in: .whitespaces)
-        let items = query.isEmpty ? [] : suggest(query)
-        guard !items.isEmpty, let window, input.currentEditor() != nil else {
-            hideSuggestions()
-            return
+        let query = query
+        guard !query.isEmpty else { return hideSuggestions() }
+        suggestionTask?.cancel()
+        if panel.isVisible {
+            let fitting = panel.list.items.filter { DraftStore.suggestion($0, fits: query) }
+            if fitting.isEmpty { panel.dismiss() } else { showSuggestions(fitting) }
         }
+        suggestionTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.suggestionDelay)
+            guard !Task.isCancelled, let self else { return }
+            let items = await self.suggest(query)
+            guard !Task.isCancelled, self.query == query else { return }
+            self.suggestionTask = nil
+            self.showSuggestions(items)
+        }
+    }
+
+    /// Reads the suggestions for the text at once, for a key that acts on them before they arrived.
+    private func settleSuggestions() {
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        showSuggestions(suggestNow(query))
+    }
+
+    private func showSuggestions(_ items: [Participant]) {
+        guard !items.isEmpty, let window, input.currentEditor() != nil else { return hideSuggestions() }
         panel.list.items = items
         let anchor = window.convertToScreen(input.convert(input.bounds, to: nil))
         panel.show(below: anchor, parent: window)
@@ -264,6 +307,8 @@ final class RecipientTokenField: NSView, NSTextFieldDelegate {
     }
 
     func hideSuggestions() {
+        suggestionTask?.cancel()
+        suggestionTask = nil
         panel.dismiss()
     }
 

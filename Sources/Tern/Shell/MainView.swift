@@ -86,7 +86,7 @@ struct MainView: View {
                 ColumnDivider(width: listWidth, available: available)
                     .offset(x: listWidth)
             }
-            ReaderColumn(surface: pane ? Theme.raised : Theme.bg, onBack: pane ? nil : { model.back() })
+            ReaderColumn(besideList: pane, onBack: pane ? nil : { model.back() })
                 .frame(width: pane ? max(available - listWidth - 1, 0) : available)
                 .offset(x: pane ? listWidth + 1 : (readerShown || reduceMotion ? 0 : 12))
                 .opacity(readerShown ? 1 : 0)
@@ -193,11 +193,12 @@ private struct ColumnDivider: View {
     }
 }
 
-/// The reader column: the open thread, or a quiet summary when several threads are selected.
+/// The reader column: the open thread, or a quiet summary when several threads are selected. While it is off
+/// screen the reader stays in the tree but does no work.
 struct ReaderColumn: View {
     @Environment(AppModel.self) private var model
-    /// `raised` beside the list, `bg` over it.
-    var surface: NSColor = Theme.raised
+    /// Beside the list the column is `raised`; over it, `bg`.
+    var besideList = true
     /// The ← button, shown while the reader covers the list.
     var onBack: (() -> Void)?
 
@@ -206,12 +207,19 @@ struct ReaderColumn: View {
             if model.checked.count > 1 {
                 MultiSelectionView(count: model.checked.count)
             } else {
-                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack)
+                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack,
+                           active: model.readerVisible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(surface))
+        .background(Color(besideList ? Theme.raised : Theme.bg))
         .simultaneousGesture(TapGesture().onEnded { model.focus = .reader })
+        // The click above has Return or o on the keyboard; VoiceOver gets it as an action of the column.
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Move Keyboard to Conversation") {
+            model.focus = .reader
+            model.services.reader.focus()
+        }
     }
 }
 

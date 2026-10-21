@@ -12,6 +12,17 @@ struct ReaderHoverLink: Equatable {
     var warning: String?
 }
 
+/// Counts of the reader's work since launch (`ReaderModel.work`).
+struct ReaderWork: Equatable {
+    var observed = 0
+    var rendered = 0
+    var prefetched = 0
+    /// Quick replies asked of the AI.
+    var quickReplies = 0
+    /// Sender logos sent to the page after it was painted.
+    var logoUpdates = 0
+}
+
 /// Drives one reader pane: follows the open thread in the database, renders it into the shared web
 /// view, and turns page events into actions. AI and downloads run in the background and never hold
 /// up the first paint.
@@ -40,6 +51,10 @@ final class ReaderModel {
     @ObservationIgnored private var summary: SummaryState = .idle
     @ObservationIgnored private var summaryOpen = false
     @ObservationIgnored private var quickReplyTask: Task<Void, Never>?
+    /// False while the reader is off screen (`suspend`): nothing deferred touches the page or asks the AI.
+    @ObservationIgnored private var isActive = true
+    /// Logos that arrived while the reader was off screen, sent once it is back.
+    @ObservationIgnored private var logosPending = false
     @ObservationIgnored private var hoverText = ""
     @ObservationIgnored private var hoverHref: String?
     @ObservationIgnored private var selectedAttachment: String?
@@ -52,6 +67,8 @@ final class ReaderModel {
     static var renderObserver: ((ThreadKey, Double) -> Void)?
     /// Time the page spent building the last thread's DOM, in milliseconds.
     private(set) static var lastBuildMilliseconds: Double = 0
+    /// Threads followed, pages rendered and prefetches started, for the check that a reader off screen does none.
+    private(set) static var work = ReaderWork()
     #if DEBUG
     /// Stands in for `SenderLogos` in the snapshot harness.
     static var logoOverride: ((String) -> Data?)?
@@ -88,8 +105,10 @@ final class ReaderModel {
         engine.delegate = self
         engine.webView.openLinkFromMenu = { [weak self] in self?.openHoveredLink() }
         services?.reader.model = self
+        isActive = true
         defer { self.prefetch(prefetch) }
-        guard key != self.key else { return }
+        guard key != self.key else { return resume() }
+        logosPending = false
         observer?.cancel()
         observer = nil
         self.key = key
@@ -101,12 +120,39 @@ final class ReaderModel {
         }
         openStarted = CACurrentMediaTime()
         openInterval = Self.signposter.beginInterval("Open thread", id: Self.signposter.makeSignpostID())
-        observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
-            MainActor.assumeIsolated { self?.receive(detail, for: key) }
-        }
+        observe(key, in: services)
         // Older mail is stored without bodies; the observer re-renders when they land.
         if let fetch = services.fetchBodies {
             Task { try? await fetch(key) }
+        }
+    }
+
+    /// The reader went off screen: the page keeps the thread it shows, with its scroll and any reply being
+    /// written, but stops following it until `show` brings the reader back. Quick replies still waiting are
+    /// dropped (asked again on the way back); logo and image-setting changes wait for it.
+    func suspend() {
+        isActive = false
+        observer?.cancel()
+        observer = nil
+        quickReplyTask?.cancel()
+        quickReplyTask = nil
+    }
+
+    /// Back on screen with the same thread: follows it again. The first value arrives at once and only redraws
+    /// what changed while it was off screen (the images setting included), so the page keeps its place.
+    private func resume() {
+        guard observer == nil, let key, let services else { return }
+        observe(key, in: services)
+        if logosPending {
+            logosPending = false
+            refreshLogos()
+        }
+    }
+
+    private func observe(_ key: ThreadKey, in services: AppServices) {
+        Self.work.observed += 1
+        observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
+            MainActor.assumeIsolated { self?.receive(detail, for: key) }
         }
     }
 
@@ -142,6 +188,7 @@ final class ReaderModel {
         self.detail = detail
         var context = context(for: detail)
         let signature = ReaderPayload.signature(detail, context: context)
+        defer { if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) } }
         guard signature != renderedSignature else {
             engine.run("Tern.updateHeader(h)", ["h": ReaderPayload.header(detail, context: context)])
             return
@@ -152,9 +199,9 @@ final class ReaderModel {
         context.logos = logos(for: senders)
         renderedLogos = context.logos
         let (payload, loading, deferred) = ReaderPayload.make(detail, context: context)
+        Self.work.rendered += 1
         engine.render(payload)
         loadBodies([loading, deferred], key: key, context: context)
-        if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) }
     }
 
     private func context(for detail: ThreadDetail) -> ReaderContext {
@@ -185,14 +232,15 @@ final class ReaderModel {
     }
 
     /// Follows the images setting for as long as this model lives: the open thread renders again with the
-    /// new trust (its signature changes, and bodies are cached per trust).
+    /// new trust (its signature changes, and bodies are cached per trust). Off screen it waits: coming back
+    /// reads the thread again with the trust of the moment.
     private func observeImagesSetting() {
         withObservationTracking {
             _ = Preferences.shared.imagesInMail
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                if let detail = self.detail, let key = self.key { self.receive(detail, for: key) }
+                if self.isActive, let detail = self.detail, let key = self.key { self.receive(detail, for: key) }
                 self.observeImagesSetting()
             }
         }
@@ -217,7 +265,7 @@ final class ReaderModel {
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.refreshLogos()
+                if self.isActive { self.refreshLogos() } else { self.logosPending = true }
                 self.observeLogos()
             }
         }
@@ -231,6 +279,7 @@ final class ReaderModel {
         let arrived = logos(for: missing)
         guard !arrived.isEmpty else { return }
         renderedLogos.merge(arrived) { $1 }
+        Self.work.logoUpdates += 1
         engine.run("Tern.setLogos(k, l)", ["k": key.description, "l": arrived])
     }
 
@@ -263,6 +312,7 @@ final class ReaderModel {
     /// bodies it hasn't stored yet.
     func prefetch(_ keys: [ThreadKey]) {
         guard let services, !keys.isEmpty else { return }
+        Self.work.prefetched += 1
         services.prefetchBodies?(keys)
         let store = services.store
         let trust = trust
@@ -584,10 +634,11 @@ final class ReaderModel {
 
     /// Fetches up to three quick replies, once per thread. Never blocks the reader.
     func requestQuickReplies(after delay: Double = 0) {
-        guard quickReplyTask == nil, quickReplies.isEmpty, let key, let ai = services?.ai else { return }
+        guard isActive, quickReplyTask == nil, quickReplies.isEmpty, let key, let ai = services?.ai else { return }
         quickReplyTask = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-            guard !Task.isCancelled, self?.key == key else { return }
+            guard !Task.isCancelled, self?.key == key, self?.isActive == true else { return }
+            Self.work.quickReplies += 1
             let replies = (try? await ai.suggestReplies(key)) ?? []
             guard let self, !Task.isCancelled, self.key == key else { return }
             self.quickReplies = Array(replies.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(3))
