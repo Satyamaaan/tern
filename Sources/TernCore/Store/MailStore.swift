@@ -172,12 +172,28 @@ public struct MailStore: Sendable {
 
         switch mailbox.kind {
         case .project(let projectId):
-            sql = """
-                SELECT \(rowColumns) FROM thread_project p
-                JOIN thread t ON t.accountId = p.accountId AND t.id = p.threadId
-                \(rowJoins)
-                WHERE p.projectId = ? AND \(notTrashOrSpam)
-                """
+            // Small projects are cheaper to sort than to find in the whole mailbox. Bound the membership
+            // probe, and only walk dates when the project has more rows than both the page and 1,000.
+            let walkDates = try limit > 0 && Bool.fetchOne(db, sql: """
+                SELECT EXISTS(SELECT 1 FROM thread_project WHERE projectId = ? LIMIT 1 OFFSET ?)
+                """, arguments: [projectId, max(1_000, limit)]) == true
+            if walkDates {
+                // LIMIT keeps EXISTS correlated so membership is checked before the other row joins.
+                sql = """
+                    SELECT \(rowColumns) FROM thread t INDEXED BY thread_by_date
+                    \(rowJoins)
+                    WHERE EXISTS (SELECT 1 FROM thread_project p
+                      WHERE p.accountId = t.accountId AND p.threadId = t.id AND p.projectId = ? LIMIT 1)
+                      AND \(notTrashOrSpam)
+                    """
+            } else {
+                sql = """
+                    SELECT \(rowColumns) FROM thread_project p
+                    JOIN thread t ON t.accountId = p.accountId AND t.id = p.threadId
+                    \(rowJoins)
+                    WHERE p.projectId = ? AND \(notTrashOrSpam)
+                    """
+            }
             _ = arguments.append(contentsOf: [projectId])
             if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
             sql += " ORDER BY t.lastDate DESC LIMIT ?"
