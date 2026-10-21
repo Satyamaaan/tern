@@ -83,10 +83,14 @@ extension SearchExecutor {
         default: "min(" + positions.joined(separator: ", ") + ")"
         }
         let list = seqs.map(String.init).joined(separator: ",")
+        // Keep only positions in the temporary table: compute each once without copying full bodies.
         let rows = try Row.fetchAll(db, sql: """
-            SELECT seq, id, date, snippet, pos, CASE WHEN pos < \(Self.noMatch)
-              THEN substr(bodyText, max(1, pos - \(Self.excerptLead)), \(Self.excerptLength)) END
-            FROM (SELECT seq, id, date, snippet, bodyText, \(position) AS pos FROM message WHERE seq IN (\(list)))
+            WITH positions AS MATERIALIZED (
+              SELECT seq, \(position) AS pos FROM message WHERE seq IN (\(list))
+            )
+            SELECT m.seq, m.id, m.date, m.snippet, p.pos, CASE WHEN p.pos < \(Self.noMatch)
+              THEN substr(m.bodyText, max(1, p.pos - \(Self.excerptLead)), \(Self.excerptLength)) END
+            FROM positions p JOIN message m ON m.seq = p.seq
             """, arguments: StatementArguments(terms))
 
         var result: [Int64: Excerpt] = [:]

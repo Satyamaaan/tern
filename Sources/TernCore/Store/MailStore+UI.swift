@@ -139,9 +139,11 @@ extension MailStore {
         for tab in InboxTab.allCases where try Bool.fetchOne(categorised, arguments: scopeArguments + [tab]) == true {
             tabs.insert(tab)
         }
+        // NULL must seek the tab index too; the label/date index can scan the entire inbox.
+        let fallbackIndex = accountId == nil ? "thread_label_inbox_tab" : "thread_label_inbox_tab_account"
         for category in try String?.fetchAll(db, sql: """
             SELECT DISTINCT ai.category FROM (
-              SELECT accountId, threadId FROM thread_label
+              SELECT accountId, threadId FROM thread_label INDEXED BY \(fallbackIndex)
               WHERE labelId = 'INBOX'\(scoped) AND gmailTab IS NULL ORDER BY lastDate DESC LIMIT ?
             ) t
             LEFT JOIN thread_ai ai ON ai.accountId = t.accountId AND ai.threadId = t.threadId

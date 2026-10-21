@@ -384,7 +384,7 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
         "palette", "compose", "settings", "find", "findNext", "findPrevious", "print", "newProject", "addAccount",
         "scope.all", "scope.1", "scope.2", "scope.3", "scope.4", "scope.5", "scope.6", "scope.7", "scope.8", "scope.9",
         "toggleSidebar", "readingPane", "appearance.toggle", "appearance.system", "appearance.light", "appearance.dark",
-        "density.auto", "density.compact", "density.comfortable", "dimRead", "senderLogos", "shortcuts",
+        "density.compact", "density.comfortable", "dimRead", "senderLogos", "shortcuts",
         "about", "checkForUpdates", "mainWindow",
     ]
     #expect(safe == expected)
