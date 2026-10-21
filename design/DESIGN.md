@@ -134,7 +134,8 @@ While held, text buttons also shrink to 97 % and icon buttons to 95 % (100 ms, h
 instant; no shrink with Reduce Motion).
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
 a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
-`hairlineStrong` border, radius 4 inside 6. Switches are tinted `ink`.
+`hairlineStrong` border, radius 4 inside 6; the segment slides to a new choice (180 ms, house curve; an 80 ms
+crossfade with Reduce Motion). Switches are tinted `ink`.
 
 ## Window
 
@@ -304,6 +305,9 @@ with a soft bottom edge past 168 pt). At most two buttons on the right, secondar
 Errors are one quiet `text2` line with OK. States: checking, available (auto-update off), downloading, preparing,
 ready ("Tern 0.2.1 is ready" · Later · Restart to update), installing, up to date (manual checks only), error. The
 move-to-Applications prompt is the same card: "Move Tern to Applications?" · Not now · Move to Applications.
+The card fades in and settles 6 pt into place (180 ms, house curve) and leaves with a fade and a 4 pt lift (120 ms);
+shown again while leaving, it turns back. The progress line fills linearly (250 ms per report); its waiting
+segment travels back and forth, or with Reduce Motion stays in the middle and breathes. Reduce Motion: 80 ms fades.
 
 ### Settings
 A page of the main window, not a window or a sheet: ⌘,, the bottom bar's gear, the scope menu and ⌘K open it
@@ -327,10 +331,14 @@ and the keyboard goes to the list when the thread it was in no longer shows. The
   5 px `text3` dot and a reset button on hover. While recording, the row sits on a `hover` fill, the keycap reads
   "Type a shortcut" inside a 1.5 px `ink` 55 % border, and one line under it says esc cancels and ⌫ removes the key,
   or why the key can't be used: reserved for macOS, a fixed menu item or text editing (⌃A ⌃E ⌃H ⌃K… with or
-  without ⇧ ⌥), or used by another command, with Replace. Only bare keys can be shared, by a list command and a
+  without ⇧ ⌥), or used by another command, with Replace. The row grows for that line (160 ms) and the reset and +
+  tools fade in on hover (90 ms). A key that can't be used shakes the keycap (240 ms); with Reduce Motion its
+  border flashes to full `ink` instead. Only bare keys can be shared, by a list command and a
   reader command (`p`); a ⌘ or ⌃ key is one menu item. The g chords and ⌘1–⌘9 show as read-only keycaps.
 - While the page is open, mail commands don't run (their menu items are disabled), bare keys never reach the
   mail, and ⌘K lists no threads, projects, labels or accounts; appearance, layout, ⌘K and new mail still work.
+- Accounts: a new or removed account's row fades with a 6 pt drop while the rows below slide (180 ms). AI
+  status lines (Checking… → Ready) crossfade, and a copy button turns into a check with a small scale and blur.
 - Accounts: each row starts with the account's dot (a 28 px icon button that lists the six hues) and its name,
   edited in place (a hairline on hover and focus; empty goes back to the address), then the address and sync
   state, Sign in again when needed, and Remove.
@@ -343,7 +351,10 @@ the speed you think."), one `text2` line under it, the stepper top right and Bac
 step shows Claude Code and Codex as two cards (mark, name, what pays for it, live status: Ready; Not signed
 in with the sign-in command and a copy button; Not installed with an install link); the chosen card gets a
 1.5 px `ink` border and a filled radio mark. "Skip, no AI" sits under them. Settings → AI uses the same marks in
-its segmented provider control and the same status line.
+its segmented provider control and the same status line. Steps change in one piece: the new one comes in 16 pt
+from the side it lies on (forward from the right, Back from the left) with a fade, on the pane spring; the
+stepper's dots and labels crossfade, errors fade in, account rows arrive as in Settings. Reduce Motion: 80 ms
+crossfades.
 
 ## Motion
 Cursor fill slides from row to row on j/k and ↑↓ (130 ms, quick ease-out `0.2, 0.9, 0.25, 1`; a held key retargets it
@@ -351,6 +362,10 @@ mid-slide), jumps of more than 12 rows, new lists and Reduce Motion move it at o
 (`CursorFillView`), used while only the cursor is selected · Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
 (response 0.32, damping 0.86) · palette 120 ms · search field 120 ms · hover reveal 90 ms · nothing in the
 triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
+Press: text buttons 97 %, icon buttons 95 %, page controls 97 %, 100 ms · click reveals on the reader page 140 ms
+(`tern-reveal`: opacity + 3–4 px), never in `render()` or on keys · inline reply card 150 ms · formatting bar
+120 ms · segmented thumb 180 ms · onboarding steps on the pane spring · cards in 180 ms, out 120 ms · AI waiting
+shimmer 1.4 s (still with Reduce Motion) · shared values in `Shared/Motion.swift`, `--ease` in reader.css.
 
 ## Keyboard
 See `research.md` §E. Every shortcut can be changed in Settings → Shortcuts; the keys here are the built-in

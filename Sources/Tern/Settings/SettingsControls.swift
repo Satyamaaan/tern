@@ -54,21 +54,35 @@ struct SegmentedPicker<Value: Hashable>: View {
     let title: (Value) -> String
 
     var body: some View {
+        SegmentedTrack(options: options, selection: $selection) { option, chosen in
+            Text(title(option))
+                .font(.ui(12, .medium))
+                .foregroundStyle(Color(chosen ? Theme.text1 : Theme.text2))
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+}
+
+/// The track behind every segmented control (`SegmentedPicker`, `AIProviderSegments`): a 28 pt `selected`
+/// track whose raised segment slides to the chosen option (180 ms, house curve) while the labels' colours
+/// crossfade. With Reduce Motion the segment crossfades in place over 80 ms.
+struct SegmentedTrack<Value: Hashable, Label: View>: View {
+    let options: [Value]
+    @Binding var selection: Value
+    @ViewBuilder let label: (Value, Bool) -> Label
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var thumb
+
+    var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
                 let chosen = selection == option
-                Text(title(option))
-                    .font(.ui(12, .medium))
-                    .foregroundStyle(Color(chosen ? Theme.text1 : Theme.text2))
-                    .lineLimit(1)
-                    .fixedSize()
+                label(option, chosen)
                     .padding(.horizontal, 10)
                     .frame(height: Theme.Control.small)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
-                            .fill(Color(Theme.raised).opacity(chosen ? 1 : 0))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
-                                .strokeBorder(Color(Theme.hairlineStrong).opacity(chosen ? 1 : 0), lineWidth: 1)))
+                    .background { segment(chosen) }
                     .contentShape(Rectangle())
                     .onTapGesture { selection = option }
                     .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
@@ -76,6 +90,18 @@ struct SegmentedPicker<Value: Hashable>: View {
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected)))
+        .animation(Motion.or(reduced: reduceMotion, Motion.ease(Motion.slide)), value: selection)
+    }
+
+    @ViewBuilder private func segment(_ chosen: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
+        let raised = shape.fill(Color(Theme.raised))
+            .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
+        if reduceMotion {
+            raised.opacity(chosen ? 1 : 0)
+        } else if chosen {
+            raised.matchedGeometryEffect(id: "thumb", in: thumb)
+        }
     }
 }
 
