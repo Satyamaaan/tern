@@ -46,21 +46,19 @@ struct RowHoverBar: View {
     private func hint(_ title: String, _ id: String) -> String { model.registry?.hint(title, id) ?? title }
 }
 
+/// A row's icon button. The row under it already has the `hover` fill, so the button's hover is `selected`
+/// and its press a step stronger.
 private struct HoverButton: View {
     let icon: Icon
     let help: String
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             IconView(icon: icon, size: 15)
                 .frame(width: 26, height: 24)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected).opacity(hovering ? 1 : 0)))
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(PressFillStyle(hover: Theme.selected, pressed: Theme.selectedFocus))
         .help(help)
     }
 }

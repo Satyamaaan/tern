@@ -129,10 +129,13 @@ struct SearchSuggestions: View {
         let items = model.suggestionItems
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                SuggestionRow(item: item, highlighted: model.suggestionIndex == index, asking: model.askingAI)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.choose(item) }
-                    .onHover { inside in if inside { model.suggestionIndex = index } }
+                // The highlight follows the pointer and ↑↓; pressing shows at once, choosing waits for mouse-up.
+                Button { model.choose(item) } label: {
+                    SuggestionRow(item: item, asking: model.askingAI)
+                }
+                .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: model.suggestionIndex == index ? Theme.selected : nil,
+                                            hover: nil, pressed: Theme.selectedFocus))
+                .onHover { inside in if inside { model.suggestionIndex = index } }
             }
         }
         .padding(6)
@@ -145,7 +148,6 @@ struct SearchSuggestions: View {
 
 private struct SuggestionRow: View {
     let item: AppModel.SuggestionItem
-    let highlighted: Bool
     let asking: Bool
 
     var body: some View {
@@ -181,7 +183,6 @@ private struct SuggestionRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(highlighted ? Color(Theme.selected) : .clear))
     }
 
     private static func icon(_ kind: SearchSuggestion.Kind) -> Icon {
