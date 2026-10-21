@@ -162,7 +162,13 @@ final class ReaderModel {
         var emails = Set((services?.accounts ?? []).map { $0.email.lowercased() })
         emails.insert(accountId.lowercased())
         let names = Dictionary(labels(for: accountId).map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-        return ReaderContext(accountEmails: emails, labelNames: names, trust: trust, summary: summaryPayload())
+        var context = ReaderContext(accountEmails: emails, labelNames: names, trust: trust, summary: summaryPayload())
+        let accounts = services?.accounts ?? []
+        if accounts.count > 1, let account = accounts.first(where: { $0.id == accountId }) {
+            let name = account.displayName.isEmpty ? account.email : account.displayName
+            context.account = (name, ReaderResources.hex(Theme.accountColor(account.colorIndex)))
+        }
+        return context
     }
 
     private var trust: ReaderTrust {

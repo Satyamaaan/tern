@@ -15,6 +15,10 @@ enum Theme {
     static let selectedFocus = dynamic(light: 0xE4E4E0, dark: 0x2F2F2F)
     static let hairline = dynamic(light: 0xE6E6E2, dark: 0x2A2A2A)
     static let hairlineStrong = dynamic(light: 0xD6D6D1, dark: 0x3A3A3A)
+    /// Row tags: a soft wash of the text colour, so a tag reads on the list, a hovered row and a selected one.
+    static let chipFill = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.07) : NSColor(white: 0, alpha: 0.05)
+    }
     static let text1 = dynamic(light: 0x161616, dark: 0xECECEA)
     static let text2 = dynamic(light: 0x5F5F5A, dark: 0xA3A39E)
     static let text3 = dynamic(light: 0x74746E, dark: 0x85857F)
@@ -218,6 +222,8 @@ extension Theme {
 
     /// Names for `projectHues`, in order, for colour menus.
     static let projectColorNames = ["Graphite", "Blue", "Green", "Violet", "Sand", "Rose", "Teal", "Slate"]
+    /// Names for `accountHues`, in order.
+    static let accountColorNames = ["Blue", "Violet", "Teal", "Sand", "Rose", "Olive"]
 
     /// A small filled circle for menu items (account and project colours).
     static func swatch(_ color: NSColor, size: CGFloat = 10) -> NSImage {

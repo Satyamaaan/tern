@@ -44,6 +44,8 @@ struct ReaderContext {
     var labelNames: [String: String]
     var trust: ReaderTrust
     var summary: [String: Any]
+    /// The thread's account name and colour (hex), while several accounts are signed in.
+    var account: (name: String, color: String)?
     /// Sender pictures by lowercased address, as `data:` URLs (see `ReaderPayload.logos`).
     var logos: [String: String] = [:]
     var now = Date()
@@ -225,8 +227,14 @@ enum ReaderPayload {
         if let until = detail.snoozedUntil {
             chips.append(chip("Snoozed · \(SnoozeOption.detailText(until, now: context.now))", "snoozed", .snoozed, "var(--text2)"))
         }
+        if let account = context.account {
+            chips.append(["text": account.name, "kind": "account", "icon": accountDot, "color": account.color])
+        }
         return chips
     }
+
+    /// The account's dot, filled in the chip's colour.
+    private static let accountDot = #"<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" fill="currentColor"/></svg>"#
 
     static func categoryName(_ category: MailCategory) -> String {
         switch category {

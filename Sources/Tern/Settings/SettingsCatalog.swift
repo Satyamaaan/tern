@@ -41,7 +41,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     /// What search matches: the row's title and the words someone might type for it.
     var searchText: String {
         let words: String = switch self {
-        case .accounts: "accounts gmail add remove sign in workspace"
+        case .accounts: "accounts gmail add remove sign in workspace name rename colour color personal work"
         case .googleClient: "google client oauth id secret cloud"
         case .markRead: "mark as read unread open delay"
         case .afterTriage: "after archive delete trash snooze next previous auto advance"

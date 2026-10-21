@@ -1,16 +1,25 @@
 import AppKit
 import TernCore
 
-/// Row layouts: one line at 32 pt when the list is wide, two lines at 56 pt in a narrow list (the
-/// reading pane).
+/// Row layouts: one line at 40 pt when the list is wide (32 pt when compact), two lines at 56 pt in a
+/// narrow list (the reading pane).
 enum RowStyle: Equatable {
-    case oneLine, twoLines
+    case compact, oneLine, twoLines
 
-    var height: CGFloat { self == .oneLine ? 32 : 56 }
+    var height: CGFloat {
+        switch self {
+        case .compact: 32
+        case .oneLine: 40
+        case .twoLines: 56
+        }
+    }
+
+    /// Compact and one-line rows share a layout; only their height differs.
+    var isSingleLine: Bool { self != .twoLines }
 
     static func resolve(_ density: Density, width: CGFloat) -> RowStyle {
         switch density {
-        case .compact: .oneLine
+        case .compact: .compact
         case .comfortable: .twoLines
         case .auto: width >= 600 ? .oneLine : .twoLines
         }
@@ -20,19 +29,27 @@ enum RowStyle: Equatable {
 /// The picture at the start of a row: the sender's domain logo, or initials.
 enum RowAvatar: Equatable {
     case logo(NSImage)
-    /// Initials on the neutral disc, or on the account's hue (its colour index) in the unified view.
-    case letters(String, account: Int?)
+    /// Initials on the neutral disc.
+    case letters(String)
 
     static func == (a: RowAvatar, b: RowAvatar) -> Bool {
         switch (a, b) {
         case (.logo(let x), .logo(let y)): x === y
-        case (.letters(let x, let i), .letters(let y, let j)): x == y && i == j
+        case (.letters(let x), .letters(let y)): x == y
         default: false
         }
     }
 }
 
-/// A tag on a row: an outline chip with a small coloured icon and the label in `text2`.
+/// The account a row's mail is for, shown as a dot in its hue on the avatar while several accounts
+/// share the list.
+struct RowAccount: Equatable {
+    var colorIndex: Int
+    /// "Personal · maya@gmail.com", the dot's tooltip.
+    var help: String
+}
+
+/// A tag on a row: a softly filled chip with a small coloured icon and the label in `text2`.
 struct RowChip: Equatable {
     enum Tint: Equatable {
         case ink
@@ -67,7 +84,8 @@ struct RowModel: Equatable {
     var joinsBelow = false
     /// This row or the one below it is filled, so the line between them goes.
     var hidesHairline = false
-    var avatar = RowAvatar.letters("?", account: nil)
+    var avatar = RowAvatar.letters("?")
+    var account: RowAccount?
     var chips: [RowChip] = []
     /// Replaces the compact time (snoozed list shows when it wakes).
     var timeOverride: String?
@@ -79,7 +97,13 @@ struct RowModel: Equatable {
 /// A message-list row, drawn in one pass (no subviews) so scrolling 50k threads stays smooth.
 final class ThreadRowView: NSTableRowView {
     /// Redraws only when something visible changed, so j/k repaints two rows, not the screen.
-    var model: RowModel? { didSet { if model != oldValue { needsDisplay = true } } }
+    var model: RowModel? {
+        didSet {
+            guard model != oldValue else { return }
+            needsDisplay = true
+            if model?.account != oldValue?.account || model?.style != oldValue?.style { updateToolTip() }
+        }
+    }
 
     /// Space inside the column before the avatar and after the time.
     static let padding: CGFloat = 10
@@ -99,7 +123,17 @@ final class ThreadRowView: NSTableRowView {
     override func setFrameSize(_ newSize: NSSize) {
         let changed = newSize != frame.size
         super.setFrameSize(newSize)
-        if changed { needsDisplay = true }
+        if changed {
+            needsDisplay = true
+            updateToolTip()
+        }
+    }
+
+    /// The avatar names the account its dot stands for.
+    private func updateToolTip() {
+        removeAllToolTips()
+        guard let model, model.account != nil else { return }
+        addToolTip(RowPainter(model: model, column: ListLayout.column(in: bounds)).avatarRect, owner: self, userData: nil)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -121,6 +155,12 @@ final class ThreadRowView: NSTableRowView {
     }
 }
 
+extension ThreadRowView: NSViewToolTipOwner {
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        model?.account?.help ?? ""
+    }
+}
+
 /// Lays out and draws the content of one row.
 private struct RowPainter {
     let model: RowModel
@@ -129,25 +169,37 @@ private struct RowPainter {
     var thread: MailThread { model.row.thread }
     var unread: Bool { thread.unreadCount > 0 }
     var quiet: NSColor { model.isSelected ? Theme.text2 : Theme.text3 }
+    /// Read rows step back a level, so unread mail is what the eye lands on.
+    var primary: NSColor { unread ? Theme.text1 : Theme.text2 }
+
+    /// What shows behind the avatar: the row's fill, else the list.
+    var backdrop: NSColor {
+        if model.isSelected { return model.hasFocus ? Theme.selectedFocus : Theme.selected }
+        return model.isHovered ? Theme.hover : Theme.bg
+    }
+
+    var left: CGFloat { column.minX + ThreadRowView.padding }
+
+    var avatarRect: CGRect {
+        let size = ThreadRowView.avatarSize
+        let centerY = model.style.isSingleLine ? column.midY : column.minY + 18
+        return CGRect(x: left, y: centerY - size / 2, width: size, height: size)
+    }
 
     func draw() {
-        switch model.style {
-        case .oneLine: drawOneLine()
-        case .twoLines: drawTwoLines()
-        }
+        if model.style.isSingleLine { drawOneLine() } else { drawTwoLines() }
     }
 
     // MARK: Layouts
 
     /// avatar · sender (count) · dot · subject — preview · paperclip · tags · time
     private func drawOneLine() {
-        let left = column.minX + ThreadRowView.padding
         let right = column.maxX - ThreadRowView.padding
         let line = CGRect(x: left, y: column.midY - 9, width: right - left, height: 18)
-        drawAvatar(at: CGPoint(x: left, y: column.midY - ThreadRowView.avatarSize / 2))
+        drawAvatar()
 
-        let senderX = left + ThreadRowView.avatarSize + 10
-        let senderWidth = min(max(column.width * 0.2, 150), 210)
+        let senderX = left + ThreadRowView.avatarSize + 12
+        let senderWidth = min(max(column.width * 0.2, 160), 220)
         drawSender(in: CGRect(x: senderX, y: line.minY, width: senderWidth, height: line.height))
         let dotX = senderX + senderWidth + 2
         if unread { drawDot(centerX: dotX + 3, centerY: line.midY) }
@@ -159,11 +211,10 @@ private struct RowPainter {
 
     /// avatar · sender (count) · dot … tag · paperclip · time, then subject — preview below.
     private func drawTwoLines() {
-        let left = column.minX + ThreadRowView.padding
         let right = column.maxX - ThreadRowView.padding
         let line1 = CGRect(x: left, y: column.minY + 9, width: right - left, height: 18)
-        drawAvatar(at: CGPoint(x: left, y: line1.midY - ThreadRowView.avatarSize / 2))
-        let textX = left + ThreadRowView.avatarSize + 10
+        drawAvatar()
+        let textX = left + ThreadRowView.avatarSize + 12
         let line2 = CGRect(x: textX, y: column.minY + 30, width: right - textX, height: 18)
 
         let trailing = drawTrailing(in: line1, chips: min(model.chips.count, 1), minimumX: textX + 120)
@@ -174,14 +225,22 @@ private struct RowPainter {
 
     // MARK: Pieces
 
-    private func drawAvatar(at origin: CGPoint) {
-        let rect = CGRect(origin: origin, size: CGSize(width: ThreadRowView.avatarSize, height: ThreadRowView.avatarSize))
+    /// The avatar, and the account's dot on its lower right while several accounts share the list.
+    private func drawAvatar() {
+        let rect = avatarRect
         switch model.avatar {
         case .logo(let image):
             Avatar.drawLogo(image, in: rect)
-        case .letters(let text, let account):
-            Avatar.drawLetters(text, tint: account.map(Theme.accountTint), in: rect)
+        case .letters(let text):
+            Avatar.drawLetters(text, tint: nil, in: rect)
         }
+        guard let account = model.account else { return }
+        let size: CGFloat = 8
+        let dot = CGRect(x: rect.maxX - size + 1.5, y: rect.maxY - size + 1.5, width: size, height: size)
+        backdrop.setFill()
+        NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+        Theme.accountColor(account.colorIndex).setFill()
+        NSBezierPath(ovalIn: dot).fill()
     }
 
     private func drawDot(centerX: CGFloat, centerY: CGFloat) {
@@ -194,7 +253,7 @@ private struct RowPainter {
     private func drawSender(in rect: CGRect) -> CGFloat {
         let senders = RowFormat.senders(thread)
         let draft = RowFormat.draftLine(thread)
-        var attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .semibold : .regular), .foregroundColor: Theme.text1]
+        var attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .semibold : .regular), .foregroundColor: primary]
         var name = senders.text
         if let draft {
             name = draft
@@ -250,10 +309,8 @@ private struct RowPainter {
 
     private func drawChip(_ chip: RowChip, x: CGFloat, centerY: CGFloat) {
         let rect = CGRect(x: x, y: centerY - 10, width: Self.chipWidth(chip), height: 20)
-        let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip)
-        shape.lineWidth = 1
-        Theme.hairlineStrong.setStroke()
-        shape.stroke()
+        Theme.chipFill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip).fill()
         chip.icon.draw(in: CGRect(x: x + 6, y: centerY - 6, width: 12, height: 12), color: chip.color, weight: 1.1)
         var attrs = Self.chipAttributes
         attrs[.foregroundColor] = model.isSelected ? Theme.text1 : Theme.text2
@@ -263,7 +320,7 @@ private struct RowPainter {
     private func drawSubjectAndPreview(in rect: CGRect) {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
-        let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: Theme.text1]
+        let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
         let subjectWidth = min(Self.width(subject, subjectAttrs), rect.width * 0.7)
         let subjectRect = CGRect(x: rect.minX, y: rect.minY, width: subjectWidth, height: rect.height)
         if let highlight = model.highlight, !highlight.subject.isEmpty, !thread.subject.isEmpty {
@@ -274,7 +331,7 @@ private struct RowPainter {
 
         var x = rect.minX + subjectWidth + 6
         guard rect.maxX - x > 24 else { return }
-        let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: Theme.text2]
+        let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
         if let highlight = model.highlight {
             // While searching, the excerpt around the match replaces the preview and the summary.
             let prefix = "— "
@@ -357,8 +414,8 @@ private struct RowPainter {
     }
 }
 
-/// A sticky date header, centred in small caps: TODAY, YESTERDAY, THIS WEEK, month names. Gets the list
-/// background while it floats over rows.
+/// A sticky date header, left in line with the avatars: Today, Yesterday, This week, month names. Gets
+/// the list background while it floats over rows.
 final class HeaderRowView: NSTableRowView {
     var title = "" { didSet { if title != oldValue { needsDisplay = true } } }
     /// The row under the header is filled: no line between them.
@@ -375,9 +432,7 @@ final class HeaderRowView: NSTableRowView {
         if changed { needsDisplay = true }
     }
 
-    static let attributes: [NSAttributedString.Key: Any] = [
-        .font: Theme.ui(10.5, .medium), .foregroundColor: Theme.text3, .kern: 0.9,
-    ]
+    static let attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(12, .medium), .foregroundColor: Theme.text3]
 
     override func draw(_ dirtyRect: NSRect) {
         let column = ListLayout.column(in: bounds)
@@ -391,7 +446,7 @@ final class HeaderRowView: NSTableRowView {
         }
         let text = title as NSString
         let size = text.size(withAttributes: Self.attributes)
-        text.draw(at: CGPoint(x: column.midX - size.width / 2, y: bounds.maxY - 9 - size.height), withAttributes: Self.attributes)
+        text.draw(at: CGPoint(x: column.minX + ThreadRowView.padding, y: bounds.maxY - 8 - size.height), withAttributes: Self.attributes)
     }
 }
 

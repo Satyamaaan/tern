@@ -3,7 +3,7 @@ import TernCore
 
 /// One line in the message list.
 enum ListItem: Hashable {
-    /// A sticky caps header, e.g. "TODAY".
+    /// A sticky date header, e.g. "Today".
     case header(String)
     case thread(ThreadKey)
     /// The quiet last row of search results that asks Gmail for older mail, with its current text.
@@ -23,6 +23,9 @@ struct ListSnapshot {
     private(set) var order: [ThreadKey] = []
     private(set) var position: [ThreadKey: Int] = [:]
     private(set) var itemIndex: [ThreadKey: Int] = [:]
+    /// The category most of the list shares (more than half, of eight or more threads). Its tag would
+    /// repeat on nearly every row and say nothing, so rows leave it off.
+    private(set) var commonCategory: MailCategory?
 
     static let empty = ListSnapshot()
 
@@ -46,6 +49,14 @@ struct ListSnapshot {
             for row in rest { append(row) }
         }
         if let footer { items.append(footer) }
+        commonCategory = Self.common(rows.values.compactMap(\.category), of: order.count)
+    }
+
+    private static func common(_ categories: [MailCategory], of total: Int) -> MailCategory? {
+        guard total >= 8 else { return nil }
+        let counts = Dictionary(categories.map { ($0, 1) }, uniquingKeysWith: +)
+        guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > total else { return nil }
+        return top.key
     }
 
     private mutating func append(_ row: ThreadRow) {
@@ -78,7 +89,7 @@ struct ListSnapshot {
     }
 }
 
-/// Caps titles for date groups: TODAY, YESTERDAY, THIS WEEK, EARLIER THIS MONTH, month names, years.
+/// Titles for date groups: Today, Yesterday, This week, Earlier this month, month names, years.
 struct DateBuckets {
     let today: Date
     let yesterday: Date
@@ -95,14 +106,14 @@ struct DateBuckets {
         week = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? yesterday
         month = calendar.dateInterval(of: .month, for: now)?.start ?? week
         year = calendar.dateInterval(of: .year, for: now)?.start ?? month
-        monthNames = calendar.standaloneMonthSymbols.map { $0.uppercased() }
+        monthNames = calendar.standaloneMonthSymbols.map(\.localizedCapitalized)
     }
 
     func title(for date: Date) -> String {
-        if date >= today { return "TODAY" }
-        if date >= yesterday { return "YESTERDAY" }
-        if date >= week { return "THIS WEEK" }
-        if date >= month { return "EARLIER THIS MONTH" }
+        if date >= today { return "Today" }
+        if date >= yesterday { return "Yesterday" }
+        if date >= week { return "This week" }
+        if date >= month { return "Earlier this month" }
         if date >= year { return monthNames[calendar.component(.month, from: date) - 1] }
         return String(calendar.component(.year, from: date))
     }

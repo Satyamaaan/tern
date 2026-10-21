@@ -67,8 +67,11 @@ Notification bell, Forums a quote mark in Receipt's teal; Social is a heart in i
 AI provider marks (onboarding, Settings → AI) are the one other place colour shows: Claude's mark in its own
 `#D97757`, OpenAI's (for Codex) in `text1`. Only ever next to the provider's name (`scripts/brandlogos.py`).
 
-Account hues (`#4F7CAC #8A6FB3 #3E9A86 #8F7F62 #B05C7A #6B7F4A`) tint letter avatars, softly (18% light,
-32% dark, initials in the hue darkened or lightened), and only when several accounts share a list.
+Account hues (`#4F7CAC #8A6FB3 #3E9A86 #8F7F62 #B05C7A #6B7F4A`, named Blue, Violet, Teal, Sand, Rose, Olive)
+mark whose mail a row is: an 8 px dot in the hue on the avatar's lower right, ringed 1.5 px in whatever is behind
+the row, only while several accounts share a list (its tooltip names the account). The title bar's account stack
+tints its letter avatars in them softly (18% light, 32% dark) and is the legend. The reader shows the account as a
+tag with the same dot. Each account's name and hue are set in Settings → Accounts.
 
 ### Radius and spacing
 
@@ -88,10 +91,10 @@ headlines. No serif, no monospace in the interface (mail's own `<pre>` keeps a s
 | Use | Font |
 | --- | --- |
 | UI default, row text | Inter 13/18 |
-| Row sender | Inter 13, 600 unread, 400 read |
-| Row subject | Inter 13, 500 unread, 400 read; preview 400 `text2` |
+| Row sender | Inter 13, 600 `text1` unread, 400 `text2` read |
+| Row subject | Inter 13, 500 `text1` unread, 400 `text2` read; preview 400 `text3` |
 | Small, meta, tags | Inter 11.5–12, tags 500 |
-| Date headers | Inter 10.5 500, +0.9 tracking, caps, `text3`, centred |
+| Date headers | Inter 12 500, sentence case, `text3`, left in line with the avatars |
 | Section caps (sidebar) | Inter 11 500, +0.6 tracking, `text3` |
 | Times, counts, keycaps | Inter 12 tabular (`numeric`) |
 | Tabs | Inter 13, 500 active / 400 others; count 12 tabular `text3` |
@@ -135,8 +138,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 
 ```
 ┌─ ● ● ●  All  Needs reply 24  [Primary]  Promotions 12  Social 3  …  +  ⋯ ──── (P)(N)(K) 3 accounts  [✎] ┐  52
-│                                       TODAY                                                            │
-│   (F) Figma (4)            • Priya mentioned you in Mobile app — We're leaning…  [🔔 Notification]  4h │  32
+│   Today                                                                                                │
+│   (F) Figma (4)            • Priya mentioned you in Mobile app — We're leaning…  [🔔 Notification]  4h │  40
 │   (G) Google Drive         • Sofia shared "Lumen — SOW" with you — We hit the…   [◎ Lumen]          4h │
 │   …                                                                                                    │
 │                                        [ ⌕  ▯  ⚙ ]                                                     │
@@ -170,22 +173,26 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 
 ### List
 - A centred column: full width minus 8 px margins when narrow, 28 px margins from 760 px, at most **1040 px**.
-- **Date headers**, 34 px, sticky: `TODAY · YESTERDAY · THIS WEEK · EARLIER THIS MONTH ·` month names · years,
-  centred caps `text3`, hairline below. Every list is in date order; nothing floats to the top.
-- **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **32 pt** when the list is ≥ 600 px
-  wide, two lines at 56 pt otherwise (the reading pane). Density Auto / Compact / Comfortable.
-  - One line: 20 px avatar · sender column (20 % of the column, 150–210 px: name, then `(13)` message count in
+- **Date headers**, 34 px, sticky: `Today · Yesterday · This week · Earlier this month ·` month names · years,
+  left-aligned with the avatars in `text3`, hairline below. Every list is in date order; nothing floats to the top.
+- **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **40 pt** when the list is ≥ 600 px
+  wide, two lines at 56 pt otherwise (the reading pane). Density Auto / Compact (one line at 32 pt) / Comfortable
+  (two lines). Read rows step back to `text2` so unread mail is what the eye lands on.
+  - One line: 20 px avatar · sender column (20 % of the column, 160–220 px: name, then `(13)` message count in
     tabular `text3`; "Draft to Maya" in italic `text2` with a pencil) · 6 px `ink` unread dot · subject (500 when
     unread) — preview in `text2` (or ✦ sparkle + AI summary) · paperclip · tags · time (tabular `text3`,
     right-aligned: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25").
   - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
   - **Avatar**: the sender's domain logo (`SenderLogos`, full bleed on a white disc with a faint ring), else
-    one initial on `avatarFill` (or the account hue when several accounts share the list). Logos are asked for
+    one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
     as rows come into view; rows on screen refresh when one arrives. Spam and Trash show initials only (no
     fetch, no cached logo), in the list and the reader.
-  - **Tags**: outline chips, 20 px tall, radius 4, 1 px `hairlineStrong`, 12 px coloured icon, label Inter 11.5
-    500 `text2`. Needs reply (ink reply icon) first, then the project or the category (not People/Other). Two
-    at most on one line, one on two lines; dropped before they squeeze the subject.
+  - **Sender names** drop a bot's `[bot]`: `vercel[bot]` reads "Vercel".
+  - **Tags**: soft filled chips, no border: 20 px tall, radius 4, `text1` at 5 % (light) / 7 % (dark), 12 px
+    coloured icon, label Inter 11.5 500 `text2`. Needs reply (ink reply icon) first, then the project or the
+    category (not People/Other). A category tag that only repeats the list stays off: the Gmail tab it files
+    under (Notification in Updates, Promotion in Promotions), or the category more than half of the list shares
+    (eight threads or more). Two at most on one line, one on two lines; dropped before they squeeze the subject.
   - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
     radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
@@ -233,7 +240,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
   Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox
   tabs on).
-- A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's outline style), then the
+- A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's filled style; the account last while several are signed in), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
   disclosure, date in tabular `text3`. Your draft in the conversation shows Edit · Discard on its line (`text2`
@@ -302,6 +309,9 @@ and the keyboard goes to the list when the thread it was in no longer shows. The
   reader command (`p`); a ⌘ or ⌃ key is one menu item. The g chords and ⌘1–⌘9 show as read-only keycaps.
 - While the page is open, mail commands don't run (their menu items are disabled), bare keys never reach the
   mail, and ⌘K lists no threads, projects, labels or accounts; appearance, layout, ⌘K and new mail still work.
+- Accounts: each row starts with the account's dot (a 28 px icon button that lists the six hues) and its name,
+  edited in place (a hairline on hover and focus; empty goes back to the address), then the address and sync
+  state, Sign in again when needed, and Remove.
 - Remote images: taking a sender off the list that can't be saved puts it back, and the row's detail says so.
 
 ### Onboarding

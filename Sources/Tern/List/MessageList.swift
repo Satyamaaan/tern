@@ -270,12 +270,13 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         result.joinsBelow = result.isSelected && isSelectedRow(index + 1)
         result.hidesHairline = result.isSelected || result.isHovered || isFilled(index + 1)
         result.avatar = avatar(for: row)
+        result.account = account(for: row)
         if row.needsReply, model.kind != .needsReply {
             result.chips.append(RowChip(text: "Needs reply", icon: .needsReply, tint: .ink))
         }
         if let project = row.projectIds.lazy.compactMap({ self.model.project($0) }).first {
             result.chips.append(RowChip(text: project.name, icon: Icon.project(project.icon), tint: .project(project.colorIndex)))
-        } else if let category = row.category, category.showsChip {
+        } else if let category = row.category, category.showsChip, !isQuiet(category) {
             result.chips.append(RowChip(text: category.title, icon: Icon.category(category), tint: .category(category)))
         }
         if case .snoozed = model.kind, !model.isSearching, let until = row.snoozedUntil {
@@ -308,9 +309,22 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
             logos.want(email)
             if let image = logos.logo(forEmail: email) { return .logo(image) }
         }
-        let tinted = model.scope == .all && model.accounts.count > 1 ? model.account(thread.accountId)?.colorIndex : nil
         let name = sender?.name ?? model.account(thread.accountId)?.displayName ?? ""
-        return .letters(Avatar.initials(name: name, email: email), account: tinted)
+        return .letters(Avatar.initials(name: name, email: email))
+    }
+
+    /// Whose mail the row is, while several accounts share the list.
+    private func account(for row: ThreadRow) -> RowAccount? {
+        guard model.scope == .all, model.accounts.count > 1, let account = model.account(row.thread.accountId) else { return nil }
+        let name = model.accountTitle(account)
+        return RowAccount(colorIndex: account.colorIndex, help: name == account.email ? name : "\(name) · \(account.email)")
+    }
+
+    /// A category tag that would only repeat what the list already says: the Gmail tab it belongs to
+    /// (Notification in Updates), or the category most of the list shares.
+    private func isQuiet(_ category: MailCategory) -> Bool {
+        if let tab = model.inboxTab, tab != .primary, InboxTab(fallback: category) == tab { return true }
+        return category == snapshot.commonCategory
     }
 
     private static func isQuarantined(_ thread: MailThread, in kind: Mailbox.Kind) -> Bool {
@@ -425,7 +439,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let rect = table.rect(ofRow: row)
         let column = ListLayout.column(in: rect)
         let size = CGSize(width: ThreadRowView.hoverWidth, height: 24)
-        let centerY = style == .oneLine ? rect.midY : rect.minY + 18
+        let centerY = style.isSingleLine ? rect.midY : rect.minY + 18
         hoverBar.rootView = RowHoverBar(model: model, keys: targets(for: key))
         hoverBar.frame = CGRect(x: column.maxX - 4 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
         // Row views are added after the bar; keep the bar on top of them.

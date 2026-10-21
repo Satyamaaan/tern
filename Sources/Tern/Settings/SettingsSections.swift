@@ -25,14 +25,8 @@ struct AccountsItem: View {
                 Hairline()
             }
             ForEach(model.accounts) { account in
-                SettingsRow(title: model.accountTitle(account), detail: "\(account.email) · \(syncText(account))") {
-                    HStack(spacing: 8) {
-                        if account.syncState == .needsAuth || account.syncState == .error {
-                            Button("Sign in again") { reauth(account) }.buttonStyle(TernButtonStyle(.secondary))
-                        }
-                        Button("Remove") { state.remove(account) }.buttonStyle(TernButtonStyle(.secondary))
-                    }
-                }
+                AccountRow(account: account, detail: "\(account.email) · \(syncText(account))",
+                           reauth: { reauth(account) }, remove: { state.remove(account) })
             }
             HStack(spacing: 12) {
                 if clients.count > 1 {

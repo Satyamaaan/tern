@@ -26,11 +26,19 @@ enum RowFormat {
         let people = thread.participants
         let count = thread.messageCount > 1 ? thread.messageCount : nil
         let others = people.filter { $0.email.lowercased() != me }
-        if others.count == 1, people.count == 1 { return (others[0].displayName, count) }
+        if others.count == 1, people.count == 1 { return (name(others[0].displayName), count) }
         if others.isEmpty { return ("me", count) }
-        var names = others.prefix(3).map(\.firstName)
+        var names = others.prefix(3).map { name($0.firstName) }
         if people.count > others.count, names.count < 3 { names.append("me") }
         return (names.joined(separator: ", "), count)
+    }
+
+    /// A sender's name without a bot's "[bot]" tag: "vercel[bot]" → "Vercel".
+    static func name(_ name: String) -> String {
+        guard name.lowercased().hasSuffix("[bot]") else { return name }
+        let bare = name.dropLast(5).trimmingCharacters(in: .whitespaces)
+        guard let first = bare.first else { return name }
+        return first.uppercased() + bare.dropFirst()
     }
 
     /// Whose picture the row shows: the first sender who isn't you; nil when only you wrote.
