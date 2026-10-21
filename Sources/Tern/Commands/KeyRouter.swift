@@ -22,6 +22,8 @@ final class KeyRouter {
     private var pageKeys: [KeyShortcut] = []
     private var chords: [String: Command] = [:]
     private var chordTimer: Timer?
+    /// Shows the chord's hint after a hesitation.
+    private var hudTimer: Timer?
     weak var mainWindow: NSWindow?
     /// Palette key handling, installed by the palette view while it is open.
     var paletteKeys: ((PaletteKey) -> Bool)?
@@ -165,10 +167,18 @@ final class KeyRouter {
 
     // MARK: Chords
 
+    /// Starts a `g` chord. Its hint shows only if the second key doesn't follow within `Motion.hesitation`,
+    /// so fluent typing never flashes it.
     private func startChord() {
-        model.chordHUD = "g"
+        model.chordPending = "g"
         chordTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.cancelChord() }
+        }
+        hudTimer = Timer.scheduledTimer(withTimeInterval: Motion.hesitation, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let model = self?.model, let chord = model.chordPending else { return }
+                model.chordHUD = chord
+            }
         }
     }
 
@@ -182,6 +192,9 @@ final class KeyRouter {
     private func cancelChord() {
         chordTimer?.invalidate()
         chordTimer = nil
+        hudTimer?.invalidate()
+        hudTimer = nil
+        model.chordPending = nil
         model.chordHUD = nil
     }
 

@@ -198,18 +198,28 @@ private struct SuggestionRow: View {
 
 // MARK: - Toasts
 
+/// New toasts rise from the bottom; old ones fade where they are (the oldest is on top, so sliding it down
+/// would cross the newer ones). Reduce Motion: a short crossfade both ways.
 struct ToastStack: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(model.toasts) { toast in
                 ToastPill(toast: toast)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(transition)
             }
         }
         .padding(.bottom, 24)
-        .animation(.easeOut(duration: 0.16), value: model.toasts)
+        .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.enter), value: model.toasts)
+    }
+
+    private var transition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity.combined(with: .scale(scale: 0.97)).animation(.easeOut(duration: Motion.exit)))
     }
 }
 

@@ -39,7 +39,7 @@ extension SelfCheck {
 
         send("g")
         send("e")
-        check("g e opens Archive", model.kind == .archive && model.chordHUD == nil && model.inArchive)
+        check("g e opens Archive", model.kind == .archive && model.chordPending == nil && model.inArchive)
         wait(0.2)
         let rows = model.snapshot.order.compactMap(model.row)
         let unwanted: Set<String> = [SystemLabel.inbox, SystemLabel.spam, SystemLabel.trash]
