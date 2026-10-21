@@ -53,7 +53,10 @@ final class AppServices {
     var connectAccount: () async throws -> Account? = { throw ShellError.notAvailable }
     /// Signs an existing account in again after its token stopped working.
     var reauthAccount: (Account) async throws -> Void = { _ in throw ShellError.notAvailable }
-    /// Stores the user's own Google OAuth client (onboarding step 1) in the Keychain.
+    /// Runs Google sign-in for a new account through one of the stored clients (nil: the default one).
+    var connectAccountWith: (_ clientId: String?) async throws -> Account? = { _ in throw ShellError.notAvailable }
+    /// Stores one of the user's own Google OAuth clients (onboarding step 1, Settings) in the Keychain. A
+    /// client already stored under the same ID gets the new secret.
     var saveGoogleClient: (_ clientId: String, _ clientSecret: String) async throws -> Void = { _, _ in
         throw ShellError.notAvailable
     }
@@ -63,6 +66,15 @@ final class AppServices {
     var googleClientId: () -> String? = { nil }
     /// Stores the client from the JSON file Google offers when it is created (`client_secret_….json`).
     var importGoogleClient: (Data) async throws -> Void = { _ in throw ShellError.notAvailable }
+    /// Every stored client, the default first, with the accounts that sign in through each.
+    var googleClients: () -> [GoogleClientInfo] = { [] }
+    /// The client saved last in this session, so onboarding signs in through the one just entered even when
+    /// an earlier one is the default.
+    var lastSavedGoogleClientId: String?
+    /// Goes up each time a client is added, updated or removed, so views showing `googleClients` reload.
+    var googleClientsChanged = 0
+    /// Removes a stored client. Accounts that signed in through it have to sign in again.
+    var removeGoogleClient: (_ clientId: String) async throws -> Void = { _ in throw ShellError.notAvailable }
     /// Live sync progress, set by the sync engine. Nil shows the state stored on the accounts.
     var syncProgress: SyncProgress?
     /// What the sidebar's sync line says, from the sync engine's live status. Nil falls back to
@@ -110,6 +122,12 @@ final class AppServices {
     }
 
     func account(_ id: String) -> Account? { accounts.first { $0.id == id } }
+}
+
+/// A stored Google OAuth client and the accounts (lowercased emails) that sign in through it.
+struct GoogleClientInfo: Hashable, Identifiable {
+    let id: String
+    var emails: [String]
 }
 
 /// What the composer should open.

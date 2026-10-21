@@ -92,9 +92,12 @@ struct InkToggle: View {
     }
 }
 
-/// A secondary button that opens an `NSMenu` under itself (the account to send from, the tab to pin).
+/// A button, small and secondary unless told otherwise, that opens an `NSMenu` under itself (the account
+/// to send from, the tab to pin, the client to sign in with).
 struct MenuPickerButton: View {
     let title: String
+    var kind: TernButtonStyle.Kind = .secondary
+    var size: TernButtonStyle.Size = .small
     let menu: () -> NSMenu
 
     var body: some View {
@@ -108,7 +111,7 @@ struct MenuPickerButton: View {
                 IconView(icon: .chevronDown, size: 12, color: Color(Theme.text3))
             }
         }
-        .buttonStyle(TernButtonStyle(.secondary, size: .small))
+        .buttonStyle(TernButtonStyle(kind, size: size))
     }
 }
 
