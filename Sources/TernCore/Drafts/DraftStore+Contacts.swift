@@ -36,15 +36,24 @@ extension DraftStore {
     }
 
     /// Whether a suggestion still fits `prefix` by the rules of `suggestRecipients`, so a field can narrow what it
-    /// shows while the suggestions for new text are read.
+    /// shows while the suggestions for new text are read. Text compares as SQLite's LIKE compares it: only A–Z
+    /// ignore case, and characters match exactly, so "É" doesn't find "émile" here or in the query.
     public static func suggestion(_ person: Participant, fits prefix: String) -> Bool {
         let query = prefix.trimmingCharacters(in: .whitespaces).lowercased()
         guard !query.isEmpty else { return false }
-        let email = person.email.lowercased(), name = person.name.lowercased()
         let wantsNoReply = query.hasPrefix("no") || query.hasPrefix("do")
-        guard wantsNoReply || !isNoReply(email) else { return false }
-        return email.hasPrefix(query) || email.contains("@" + query) || email.contains("." + query)
-            || name.hasPrefix(query) || name.contains(" " + query)
+        guard wantsNoReply || !isNoReply(person.email) else { return false }
+        let email = likeFolded(person.email), name = likeFolded(person.name)
+        func starts(_ text: String) -> Bool { text.range(of: query, options: [.literal, .anchored]) != nil }
+        func has(_ text: String, after mark: String) -> Bool { text.range(of: mark + query, options: .literal) != nil }
+        return starts(email) || has(email, after: "@") || has(email, after: ".") || starts(name) || has(name, after: " ")
+    }
+
+    /// `text` with A–Z lowercased and everything else as it is, the case folding of SQLite's LIKE.
+    static func likeFolded(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
+            ("A"..."Z").contains(scalar) ? Unicode.Scalar(scalar.value + 32) ?? scalar : scalar
+        }))
     }
 
     /// People you wrote to most recently, newest first.

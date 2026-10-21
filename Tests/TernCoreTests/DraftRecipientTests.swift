@@ -87,6 +87,24 @@ private func contactsStore() throws -> DraftStore {
     #expect(!DraftStore.suggestion(Participant(name: "Maya", email: "maya@lumen.io"), fits: " "))
 }
 
+@Test func narrowingFoldsCaseAsTheQueryDoes() throws {
+    let database = try AppDatabase.inMemory()
+    let people = [
+        Contact(id: "emile@zola.fr", name: "Émile Zola", sentCount: 3, receivedCount: 0, lastContacted: nil),
+        Contact(id: "zoe@kth.se", name: "Zoë Ångström", sentCount: 2, receivedCount: 0, lastContacted: nil),
+        Contact(id: "élodie@café.fr", name: "élodie", sentCount: 1, receivedCount: 0, lastContacted: nil),
+    ]
+    try database.writer.write { db in for person in people { try person.insert(db) } }
+    let store = DraftStore(database, filesDirectory: FileManager.default.temporaryDirectory)
+    let everyone = people.map { Participant(name: $0.name, email: $0.id) }
+    for prefix in ["é", "É", "ém", "Émile", "élo", "ÉLO", "e", "z", "ZO", "zoë", "ZOË", "zoe\u{308}", "å", "Å", "ång", "café", "CAFÉ"] {
+        let found = Set(try store.suggestRecipients(prefix: prefix).map(\.email))
+        #expect(Set(everyone.filter { DraftStore.suggestion($0, fits: prefix) }.map(\.email)) == found, "\(prefix)")
+    }
+    #expect(DraftStore.suggestion(everyone[1], fits: "ZOË"))
+    #expect(!DraftStore.suggestion(everyone[0], fits: "é"))
+}
+
 @Test func emptyPrefixSuggestsRecentRecipients() throws {
     let store = try contactsStore()
     let account = "me@example.com"
