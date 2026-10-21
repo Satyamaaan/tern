@@ -73,6 +73,8 @@ struct RowModel: Equatable {
     var row: ThreadRow
     var style: RowStyle
     var isSelected = false
+    /// The list draws this row's selected fill below it (the sliding cursor fill), so the row draws none.
+    var fillBelow = false
     /// The cursor row while the list has the keyboard: its fill is a step stronger.
     var hasFocus = false
     var isHovered = false
@@ -140,7 +142,7 @@ final class ThreadRowView: NSTableRowView {
             Theme.hairline.setFill()
             CGRect(x: column.minX, y: bounds.maxY - 1, width: column.width, height: 1).fill()
         }
-        if model.isSelected || model.isHovered {
+        if model.isSelected ? !model.fillBelow : model.isHovered {
             (model.isSelected ? (model.hasFocus ? Theme.selectedFocus : Theme.selected) : Theme.hover).setFill()
             Self.fill(column: column, in: bounds, joinsAbove: model.joinsAbove, joinsBelow: model.joinsBelow)
         }
@@ -519,5 +521,31 @@ final class ListScrollView: NSScrollView {
 
     private static func isEdgePocket(_ view: NSView) -> Bool {
         NSStringFromClass(type(of: view)).contains("ScrollPocket")
+    }
+}
+
+/// The cursor row's fill as a view of its own under the rows, so j/k, ↑ and ↓ slide it from row to row.
+/// Drawn (not a layer colour) so offscreen renders show it too.
+final class CursorFillView: NSView {
+    /// Quick and soft at the end: it keeps up with a held key.
+    static let slideDuration: TimeInterval = 0.13
+    static let slideTiming = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+
+    var color: NSColor = Theme.selected { didSet { if color != oldValue { needsDisplay = true } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row).fill()
     }
 }

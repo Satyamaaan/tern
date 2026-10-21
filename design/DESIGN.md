@@ -330,7 +330,9 @@ in with the sign-in command and a copy button; Not installed with an install lin
 its segmented provider control and the same status line.
 
 ## Motion
-Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
+Cursor fill slides from row to row on j/k and ↑↓ (130 ms, quick ease-out `0.2, 0.9, 0.25, 1`; a held key retargets it
+mid-slide), jumps of more than 12 rows, new lists and Reduce Motion move it at once; it is one view under the rows
+(`CursorFillView`), used while only the cursor is selected · Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
 (response 0.32, damping 0.86) · palette 120 ms · search field 120 ms · hover reveal 90 ms · nothing in the
 triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
 

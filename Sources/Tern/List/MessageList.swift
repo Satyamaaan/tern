@@ -24,6 +24,12 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var hoveredRow: Int?
     private var footerHovered: Int?
     private let hoverBar: NSHostingView<RowHoverBar>
+    /// The cursor row's fill, below the rows, so moving the cursor slides it instead of repainting.
+    private let cursorFill = CursorFillView()
+    /// The thread `cursorFill` sits on; its row then draws no fill of its own.
+    private var cursorFillKey: ThreadKey?
+    /// The next placement of `cursorFill` comes from a cursor move, so it may slide.
+    private var cursorMoved = false
     /// The rows the hover bar acts on while it shows (the self-check reads it).
     var hoveredKeys: [ThreadKey] { hoverBar.isHidden ? [] : hoverBar.rootView.keys }
     private var lastWidth: CGFloat = 0
@@ -75,6 +81,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         hoverBar.isHidden = true
         hoverBar.sizingOptions = []
         table.addSubview(hoverBar)
+        cursorFill.isHidden = true
+        table.addSubview(cursorFill, positioned: .below, relativeTo: nil)
 
         model.listView = self
         observePreferences()
@@ -145,7 +153,9 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     var window: NSWindow? { table.window }
 
     func selectionDidChange(scrollTo key: ThreadKey?) {
+        cursorMoved = true
         refreshVisibleRows()
+        cursorMoved = false
         if let key, let index = snapshot.itemIndex[key] { reveal(index) }
         reportRowsInView()
     }
@@ -180,6 +190,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     /// Re-applies models to every row view on screen (selection, hover, content).
     func refreshVisibleRows() {
+        placeCursorFill()
         let underHeader = rowUnderFloatingHeader()
         table.enumerateAvailableRowViews { rowView, row in
             if let view = rowView as? ThreadRowView { view.model = rowModel(row) }
@@ -264,6 +275,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let key = row.id
         var result = RowModel(row: row, style: style)
         result.isSelected = model.isSelected(key)
+        result.fillBelow = key == cursorFillKey
         result.hasFocus = key == model.cursor && listHasKeyboard
         result.isHovered = index == hoveredRow
         result.joinsAbove = result.isSelected && isSelectedRow(index - 1)
@@ -338,6 +350,46 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard width != lastWidth else { return }
         lastWidth = width
         updateStyle()
+        placeCursorFill()
+    }
+
+    // MARK: Cursor fill
+
+    /// Puts `cursorFill` on the cursor row: sliding there when the cursor moved a few rows, at once when it
+    /// jumped, the list changed or Reduce Motion is on. Hidden while several threads are selected; their
+    /// rows draw one joined block themselves.
+    private func placeCursorFill() {
+        guard model.checked.isEmpty, let key = model.cursor, let index = snapshot.itemIndex[key], items.indices.contains(index) else {
+            cursorFillKey = nil
+            cursorFill.isHidden = true
+            return
+        }
+        let row = table.rect(ofRow: index)
+        let column = ListLayout.column(in: row)
+        let inset = ThreadRowView.fillInset
+        let frame = CGRect(x: column.minX, y: row.minY + inset, width: column.width, height: row.height - 2 * inset)
+        cursorFill.color = listHasKeyboard ? Theme.selectedFocus : Theme.selected
+        // Row views come and go above it; keep it under them.
+        if table.subviews.first !== cursorFill { table.addSubview(cursorFill, positioned: .below, relativeTo: nil) }
+
+        let from = cursorFillKey.flatMap { snapshot.itemIndex[$0] }
+        let slides = cursorMoved && !cursorFill.isHidden && key != cursorFillKey && from.map { abs($0 - index) <= 12 } == true
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        cursorFillKey = key
+        cursorFill.isHidden = false
+        guard cursorFill.frame != frame else { return }
+        if slides {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = CursorFillView.slideDuration
+                context.timingFunction = CursorFillView.slideTiming
+                context.allowsImplicitAnimation = true
+                cursorFill.animator().frame = frame
+            }
+        } else {
+            // A slide still running would finish where it was headed.
+            cursorFill.layer?.removeAllAnimations()
+            cursorFill.frame = frame
+        }
     }
 
     /// Switches between one and two lines when the width or density preference crosses over.
