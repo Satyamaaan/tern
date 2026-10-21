@@ -21,9 +21,15 @@ enum Motion {
     static let hover: Double = 0.09
     /// Content revealed by a click (a message, quoted text, a hint line).
     static let reveal: Double = 0.14
+    /// A small overlay opened from the keyboard: the palette, the chord hint.
+    static let overlay: Double = 0.12
     /// A toast or card coming in, and going out.
     static let enter: Double = 0.16
     static let exit: Double = 0.12
+    /// Rows leaving after triage, coming back on undo or arriving at the top, and the list closing up around them.
+    static let list: Double = 0.16
+    /// How long a pending key chord waits before its hint shows, so fluent typing never flashes it.
+    static let hesitation: Double = 0.4
 
     /// `animation`, or the Reduce Motion crossfade.
     static func or(reduced reduceMotion: Bool, _ animation: Animation) -> Animation {
