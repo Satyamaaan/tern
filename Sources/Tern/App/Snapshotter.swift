@@ -44,7 +44,7 @@ struct Snapshotter {
         exit(0)
     }
 
-    /// More states for visual review: hover + toast, the waterline, wide one-line rows, search, one
+    /// More states for visual review: hover + toast, the waterline, wide one-line rows, the slide-over, search, one
     /// account with labels, collapsed sidebar, the Archive mailbox, inbox zero, settings, onboarding, the
     /// project editor, and the update card, move prompt and update settings.
     private func extras(_ window: MainWindow, _ directory: URL) {
@@ -67,6 +67,19 @@ struct Snapshotter {
         shot("reading-pane-light")
         shot("reading-pane-dark", dark: true)
         model.toggleReadingPane()
+
+        // The slide-over: the open conversation from the right with the list beside it, then expanded over all of it.
+        let overlay = model.prefs.readerOverlay
+        model.prefs.readerOverlay = .panel
+        model.open()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        shot("slide-over-light")
+        shot("slide-over-dark", dark: true)
+        model.toggleReaderWide()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        shot("slide-over-wide-light")
+        model.back()
+        model.prefs.readerOverlay = overlay
 
         model.searchText = "invoice"
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))

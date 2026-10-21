@@ -28,6 +28,7 @@ struct ReaderView: View {
     var prefetch: [ThreadKey]
     var position: ReaderPosition?
     var onBack: (() -> Void)?
+    var panel: ReaderPanelControls?
     var active: Bool
 
     @Environment(AppServices.self) private var services
@@ -39,17 +40,18 @@ struct ReaderView: View {
     static let columnPadding: CGFloat = 32
 
     init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil, onBack: (() -> Void)? = nil,
-         active: Bool = true) {
+         panel: ReaderPanelControls? = nil, active: Bool = true) {
         self.key = key
         self.prefetch = prefetch
         self.position = position
         self.onBack = onBack
+        self.panel = panel
         self.active = active
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            ReaderTopBar(model: model, position: position, onBack: onBack)
+            ReaderTopBar(model: model, position: position, onBack: onBack, panel: panel)
             if model.findVisible, key != nil {
                 ReaderFindBar(model: model)
                     .readerColumn()
@@ -152,10 +154,20 @@ final class ReaderWebContainer: NSView {
 
 // MARK: - Top bar
 
+/// The slide-over panel's expand button: the open conversation over the whole list, or back in the panel.
+struct ReaderPanelControls {
+    /// The conversation covers the whole list for now.
+    let wide: Bool
+    /// The button's tooltip with its shortcut.
+    var help: String?
+    let toggle: () -> Void
+}
+
 struct ReaderTopBar: View {
     @Bindable var model: ReaderModel
     let position: ReaderPosition?
     var onBack: (() -> Void)?
+    var panel: ReaderPanelControls?
     /// Shows the "12 of 48" controls without hovering (snapshot harness).
     static var alwaysShowPosition = false
 
@@ -167,7 +179,13 @@ struct ReaderTopBar: View {
     var body: some View {
         HStack(spacing: 2) {
             if let onBack {
-                ReaderIconButton(icon: .back, help: hint("Back to list", "back"), action: onBack)
+                ReaderIconButton(icon: panel == nil ? .back : .panelClose, help: hint(panel == nil ? "Back to list" : "Close", "back"),
+                                 action: onBack)
+                    .padding(.trailing, panel == nil ? 4 : 0)
+            }
+            if let panel {
+                ReaderIconButton(icon: panel.wide ? .collapse : .expand,
+                                 help: panel.help ?? (panel.wide ? "Show in Panel" : "Expand"), action: panel.toggle)
                     .padding(.trailing, 4)
             }
             if let position, hovering || Self.alwaysShowPosition, model.key != nil {

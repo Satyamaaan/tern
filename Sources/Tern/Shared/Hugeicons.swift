@@ -63,6 +63,9 @@ enum Icon: String, CaseIterable, Sendable {
     case chevronLeft
     case chevronRight
     case back
+    case panelClose
+    case expand
+    case collapse
     case sidebar
     case readingPane
     case settings
@@ -398,6 +401,21 @@ enum Icon: String, CaseIterable, Sendable {
             [
                 IconPart("M 5.5 12.002 L 19 12.002", stroke: 1.5),
                 IconPart("M 11 18.002 C 11 18.002 5 13.583 5 12.002 C 5 10.421 11 6.002 11 6.002", stroke: 1.5),
+            ]
+        case .panelClose: // ArrowRightDoubleIcon
+            [
+                IconPart("M 12.5 18 C 12.5 18 18.5 13.581 18.5 12 C 18.5 10.419 12.5 6 12.5 6", stroke: 1.5),
+                IconPart("M 5.5 18 C 5.5 18 11.5 13.581 11.5 12 C 11.5 10.419 5.5 6 5.5 6", stroke: 1.5),
+            ]
+        case .expand: // ArrowExpand01Icon
+            [
+                IconPart("M 14 4 L 20 4 L 20 10 M 20 4 L 13.5 10.5", stroke: 1.5),
+                IconPart("M 10 20 L 4 20 L 4 14 M 4 20 L 10.5 13.5", stroke: 1.5),
+            ]
+        case .collapse: // ArrowShrink01Icon
+            [
+                IconPart("M 14 4 L 14 10 L 20 10 M 14 10 L 20.5 3.5", stroke: 1.5),
+                IconPart("M 10 20 L 10 14 L 4 14 M 10 14 L 3.5 20.5", stroke: 1.5),
             ]
         case .sidebar: // SidebarLeft01Icon
             [

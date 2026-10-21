@@ -383,7 +383,7 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
     let expected: Set<String> = [
         "palette", "compose", "settings", "find", "findNext", "findPrevious", "print", "newProject", "addAccount",
         "scope.all", "scope.1", "scope.2", "scope.3", "scope.4", "scope.5", "scope.6", "scope.7", "scope.8", "scope.9",
-        "toggleSidebar", "readingPane", "appearance.toggle", "appearance.system", "appearance.light", "appearance.dark",
+        "toggleSidebar", "readingPane", "readerOverlay", "appearance.toggle", "appearance.system", "appearance.light", "appearance.dark",
         "density.compact", "density.comfortable", "dimRead", "senderLogos", "shortcuts",
         "about", "checkForUpdates", "mainWindow",
     ]
@@ -713,4 +713,32 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
     let mail = SettingsItem.items(in: .mail, model: model)
     #expect(mail.firstIndex(of: .imagesInMail).map { $0 + 1 } == mail.firstIndex(of: .remoteImages), "the list sits under the choice")
     #expect(SettingsCatalog.results(for: "images", model: model) == [.imagesInMail, .remoteImages])
+}
+
+@MainActor
+@Test func theSlideOverOpensBesideTheListAndExpandsUntilItCloses() throws {
+    let registry = try makeRegistry(threads: 2)
+    let model = registry.model
+    let pane = model.prefs.readingPane, overlay = model.prefs.readerOverlay
+    defer { model.prefs.readingPane = pane; model.prefs.readerOverlay = overlay }
+    model.prefs.readingPane = false
+    model.prefs.readerOverlay = .panel
+    model.reloadList()
+    try #require(model.cursor != nil)
+    #expect(registry["readerWide"]?.isEnabled() == false)
+    model.open()
+    #expect(model.readerExpanded && model.readerInPanel)
+    #expect(registry["readerWide"]?.isEnabled() == true)
+    registry["readerWide"]?.run()
+    #expect(model.readerWide && !model.readerInPanel && model.readerVisible)
+    model.back()
+    #expect(!model.readerExpanded && !model.readerWide)
+    // Full width and the reading pane never show the panel.
+    model.prefs.readerOverlay = .full
+    model.open()
+    #expect(model.readerExpanded && !model.readerInPanel)
+    model.back()
+    model.prefs.readingPane = true
+    model.prefs.readerOverlay = .panel
+    #expect(!model.readerInPanel)
 }

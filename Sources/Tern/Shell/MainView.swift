@@ -3,7 +3,8 @@ import SwiftUI
 import TernCore
 
 /// The main window, list first: the title bar's tabs over the list, the sidebar behind a toggle, and the
-/// open thread over the list (or beside it with the reading pane, ⌘\). Settings (⌘,) covers all of it.
+/// open thread over the list, in a slide-over panel from the right, or beside it with the reading pane (⌘\).
+/// Settings (⌘,) covers all of it.
 /// Palette and sheets on top.
 ///
 /// The open sidebar runs the full height of the window, traffic lights at its top, and the title bar
@@ -16,6 +17,8 @@ struct MainView: View {
     static let sidebarWidth: CGFloat = 232
     static let listMinWidth: CGFloat = 340
     static let readerMinWidth: CGFloat = 420
+    /// The share of the window's list area the slide-over panel takes.
+    static let panelFraction: CGFloat = 0.55
 
     var body: some View {
         ZStack {
@@ -37,6 +40,7 @@ struct MainView: View {
         .animation(paneAnimation, value: model.prefs.sidebarOpen)
         .animation(paneAnimation, value: model.prefs.readingPane)
         .animation(paneAnimation, value: model.readerExpanded)
+        .animation(paneAnimation, value: model.readerInPanel)
         .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.14), value: model.settings != nil)
         .sheet(item: projectEditorBinding) { draft in
             ProjectEditor(draft: draft).environment(model)
@@ -72,23 +76,32 @@ struct MainView: View {
 
     /// The list and the reader. Both keep one place in the view tree in every layout, so the table (and
     /// its scroll position) and the reader's page survive ⌘\ and opening a thread: without the pane the
-    /// reader lies over the list, transparent until a thread opens.
+    /// reader lies over the list, transparent until a thread opens. In the slide-over panel it covers only
+    /// the right of the list, which stays live beside it.
     private func content(available: CGFloat) -> some View {
         let pane = model.prefs.readingPane
+        let panel = model.readerInPanel
         let listWidth = pane ? clampedListWidth(available: available) : available
         let readerShown = model.readerVisible
+        let readerWidth = pane ? max(available - listWidth - 1, 0) : panel ? panelWidth(available: available) : available
         return ZStack(alignment: .topLeading) {
             ListColumn()
                 .frame(width: listWidth)
-                .allowsHitTesting(pane || !model.readerExpanded)
-                .accessibilityHidden(!pane && model.readerExpanded)
+                .allowsHitTesting(pane || panel || !model.readerExpanded)
+                .accessibilityHidden(!pane && !panel && model.readerExpanded)
             if pane {
                 ColumnDivider(width: listWidth, available: available)
                     .offset(x: listWidth)
             }
-            ReaderColumn(besideList: pane, onBack: pane ? nil : { model.back() })
-                .frame(width: pane ? max(available - listWidth - 1, 0) : available)
-                .offset(x: pane ? listWidth + 1 : (readerShown || reduceMotion ? 0 : 12))
+            ReaderColumn(besideList: pane || panel, onBack: pane ? nil : { model.back() },
+                         panel: pane ? nil : panelControls)
+                .frame(width: readerWidth)
+                .overlay(alignment: .leading) {
+                    if panel { Hairline(vertical: true) }
+                }
+                .modifier(PanelShadow(on: panel && readerShown))
+                .offset(x: readerOffset(pane: pane, panel: panel, shown: readerShown, listWidth: listWidth,
+                                        readerWidth: readerWidth, available: available))
                 .opacity(readerShown ? 1 : 0)
                 .allowsHitTesting(readerShown)
                 .accessibilityHidden(!readerShown)
@@ -101,6 +114,28 @@ struct MainView: View {
                 .frame(width: pane ? listWidth : available)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// The panel's expand button, while conversations open in the slide-over.
+    private var panelControls: ReaderPanelControls? {
+        guard model.prefs.readerOverlay == .panel else { return nil }
+        return ReaderPanelControls(wide: model.readerWide, help: model.registry?.hint(model.readerWide ? "Show in Panel" : "Expand", "readerWide")) {
+            model.toggleReaderWide()
+        }
+    }
+
+    /// The slide-over's width: most of a narrow window, about half of a wide one.
+    private func panelWidth(available: CGFloat) -> CGFloat {
+        min(max(available * Self.panelFraction, Self.readerMinWidth), available)
+    }
+
+    /// Beside the list with the pane; at the right edge in the panel, off it while closed; else over the
+    /// list, a little to the right while closed so it slides in.
+    private func readerOffset(pane: Bool, panel: Bool, shown: Bool, listWidth: CGFloat, readerWidth: CGFloat,
+                              available: CGFloat) -> CGFloat {
+        if pane { return listWidth + 1 }
+        if panel { return shown || reduceMotion ? available - readerWidth : available }
+        return shown || reduceMotion ? 0 : 12
     }
 
     /// Pane changes spring; with Reduce Motion they crossfade.
@@ -163,6 +198,16 @@ struct MainView: View {
     }
 }
 
+/// The slide-over panel's lift off the list behind it.
+private struct PanelShadow: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        content.shadow(color: .black.opacity(on ? (scheme == .dark ? 0.45 : 0.10) : 0), radius: 24, x: 0, y: 8)
+    }
+}
+
 /// The hairline between list and reader, with a wider invisible handle for dragging.
 private struct ColumnDivider: View {
     @Environment(AppModel.self) private var model
@@ -201,6 +246,8 @@ struct ReaderColumn: View {
     var besideList = true
     /// The ← button, shown while the reader covers the list.
     var onBack: (() -> Void)?
+    /// The slide-over's expand button; the ← becomes » there.
+    var panel: ReaderPanelControls?
 
     var body: some View {
         Group {
@@ -208,7 +255,7 @@ struct ReaderColumn: View {
                 MultiSelectionView(count: model.checked.count)
             } else {
                 ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack,
-                           active: model.readerVisible)
+                           panel: panel, active: model.readerVisible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -249,6 +249,15 @@ final class CommandRegistry {
             Command(id: "readingPane", title: "Show Reading Pane", group: .settings, keys: [.command("\\")], menu: .view, section: 1,
                     aliases: ["split view", "side by side", "reader", "list only"], isTextSafe: true,
                     currentTitle: { m.prefs.readingPane ? "Hide Reading Pane" : "Show Reading Pane" }) { m.toggleReadingPane() },
+            Command(id: "readerOverlay", title: "Open Conversations in Slide-over", group: .settings, menu: .view, section: 1,
+                    aliases: ["panel", "slide over", "drawer", "full width"], isTextSafe: true,
+                    currentTitle: { m.prefs.readerOverlay == .panel ? "Open Conversations Full Width" : "Open Conversations in Slide-over" }) {
+                m.prefs.readerOverlay = m.prefs.readerOverlay == .panel ? .full : .panel
+            },
+            Command(id: "readerWide", title: "Expand Conversation", group: .goTo, keys: [.key("w")], menu: .view, section: 1,
+                    aliases: ["panel", "slide over", "full width", "widen"],
+                    isEnabled: { m.listOnly && m.prefs.readerOverlay == .panel && m.readerExpanded },
+                    currentTitle: { m.readerWide ? "Show Conversation in Panel" : "Expand Conversation" }) { m.toggleReaderWide() },
         ]
         for density in Density.allCases {
             list.append(Command(id: "density.\(density.rawValue)", title: "Density: \(density.title)", group: .settings,

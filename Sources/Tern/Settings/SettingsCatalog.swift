@@ -6,7 +6,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     case accounts, googleClient
     case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
     case theme, density, dimRead, senderLogos
-    case readingPane, sidebar, splitInbox, pinnedTabs
+    case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
     case aiAbout, aiProvider, aiSorting, aiModel, aiProjects
     case shortcuts
@@ -19,7 +19,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .accounts, .googleClient: .accounts
         case .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
         case .theme, .density, .dimRead, .senderLogos: .appearance
-        case .readingPane, .sidebar, .splitInbox, .pinnedTabs: .layout
+        case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
         case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects: .ai
         case .shortcuts: .shortcuts
@@ -32,7 +32,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         switch self {
         case .markRead, .afterTriage, .imagesInMail, .remoteImages: "Reading"
         case .undoSend, .signatures, .sendFrom: "Writing"
-        case .readingPane, .sidebar: "Window"
+        case .readingPane, .readerOverlay, .sidebar: "Window"
         case .splitInbox, .pinnedTabs: "Tabs"
         default: nil
         }
@@ -55,6 +55,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .dimRead: "dim old read mail fade"
         case .senderLogos: "sender logos avatars icons favicons"
         case .readingPane: "reading pane split view side by side"
+        case .readerOverlay: "open conversations slide over panel drawer full width reader right"
         case .sidebar: "sidebar mailboxes projects"
         case .splitInbox: "inbox tabs split inbox categories gmail primary promotions social updates forums"
         case .pinnedTabs: "pinned tabs pin unpin reorder"
@@ -142,6 +143,7 @@ struct SettingsItemView: View {
         case .dimRead: DimReadItem()
         case .senderLogos: SenderLogoSettingsRow()
         case .readingPane: ReadingPaneItem()
+        case .readerOverlay: ReaderOverlayItem()
         case .sidebar: SidebarItem()
         case .splitInbox: SplitInboxItem()
         case .pinnedTabs: PinnedTabsItem()

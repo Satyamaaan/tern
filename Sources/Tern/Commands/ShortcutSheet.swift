@@ -121,6 +121,8 @@ enum ShortcutTable {
         "splitInbox": "Inbox Tabs",
         "toggleSidebar": "Show or Hide Sidebar",
         "readingPane": "Show or Hide Reading Pane",
+        "readerOverlay": "Slide-over or Full Width",
+        "readerWide": "Expand or Shrink Conversation",
         "appearance.toggle": "Switch Light and Dark",
         "dimRead": "Dim Old Read Mail",
         "senderLogos": "Show or Hide Sender Logos",
