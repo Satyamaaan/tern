@@ -104,7 +104,7 @@ extension MailStore {
             var newLabels: [String: [String]] = [:]
 
             for (threadId, threadMessages) in Dictionary(grouping: messages, by: \.threadId) {
-                let messagesById = Dictionary(uniqueKeysWithValues: threadMessages.map { ($0.id, $0) })
+                let messagesById = Dictionary(threadMessages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 var threadChanges: [LabelChange] = []
                 var intentOnly: [LabelChange] = []
                 for change in labelChanges(for: action, messages: threadMessages) {
