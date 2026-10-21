@@ -423,11 +423,6 @@ final class HeaderRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override var isFloating: Bool { didSet { needsDisplay = true } }
 
-    // The title is drawn, so VoiceOver reads it from here.
-    override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
-    override func accessibilityLabel() -> String? { title }
-
     override func setFrameSize(_ newSize: NSSize) {
         let changed = newSize != frame.size
         super.setFrameSize(newSize)
