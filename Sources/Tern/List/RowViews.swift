@@ -88,6 +88,7 @@ struct RowModel: Equatable {
     var chips: [RowChip] = []
     /// Replaces the compact time (snoozed list shows when it wakes).
     var timeOverride: String?
+    var summaryHeadline = true
     var dimmed = false
     /// While searching: the matched words, and the excerpt shown in place of the preview.
     var highlight: RowHighlight?
@@ -100,6 +101,7 @@ final class ThreadRowView: NSTableRowView {
         didSet {
             guard model != oldValue else { return }
             needsDisplay = true
+            setAccessibilityLabel(model.map { "\($0.row.thread.subject), \($0.row.summary ?? $0.row.thread.snippet)" })
             if model?.account != oldValue?.account || model?.style != oldValue?.style { updateToolTip() }
         }
     }
@@ -128,11 +130,11 @@ final class ThreadRowView: NSTableRowView {
         }
     }
 
-    /// The avatar names the account its dot stands for.
+    /// Hover exposes the original subject; the avatar names its account.
     private func updateToolTip() {
         removeAllToolTips()
-        guard let model, model.account != nil else { return }
-        addToolTip(RowPainter(model: model, column: ListLayout.column(in: bounds)).avatarRect, owner: self, userData: nil)
+        guard model != nil else { return }
+        addToolTip(bounds, owner: self, userData: nil)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -156,7 +158,11 @@ final class ThreadRowView: NSTableRowView {
 
 extension ThreadRowView: NSViewToolTipOwner {
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
-        model?.account?.help ?? ""
+        if let model, let account = model.account,
+           RowPainter(model: model, column: ListLayout.column(in: bounds)).avatarRect.contains(point) {
+            return account.help
+        }
+        return model?.row.thread.subject ?? ""
     }
 }
 
@@ -320,6 +326,16 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
+        if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
+            Icon.sparkles.draw(in: CGRect(x: rect.minX, y: rect.midY - 6, width: 12, height: 12), color: quiet)
+            let x = rect.minX + 17
+            let width = min(Self.width(summary, subjectAttrs), max(0, (rect.width - 17) * 0.7))
+            Self.drawText(summary, subjectAttrs, in: CGRect(x: x, y: rect.minY, width: width, height: rect.height))
+            let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
+            let secondaryX = x + width + 6
+            Self.drawText("— " + subject, secondary, in: CGRect(x: secondaryX, y: rect.minY, width: max(0, rect.maxX - secondaryX), height: rect.height))
+            return
+        }
         let subjectWidth = min(Self.width(subject, subjectAttrs), rect.width * 0.7)
         let subjectRect = CGRect(x: rect.minX, y: rect.minY, width: subjectWidth, height: rect.height)
         if let highlight = model.highlight, !highlight.subject.isEmpty, !thread.subject.isEmpty {
@@ -328,7 +344,7 @@ private struct RowPainter {
             Self.drawText(subject, subjectAttrs, in: subjectRect)
         }
 
-        var x = rect.minX + subjectWidth + 6
+        let x = rect.minX + subjectWidth + 6
         guard rect.maxX - x > 24 else { return }
         let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
         if let highlight = model.highlight {
@@ -343,17 +359,8 @@ private struct RowPainter {
             Self.drawMarked(text, ranges: ranges, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
             return
         }
-        if let summary = model.row.summary, !summary.isEmpty {
-            // The AI summary replaces the preview, after a small sparkle.
-            Self.drawText("—", preview, in: CGRect(x: x, y: rect.minY, width: 14, height: rect.height))
-            x += 17
-            Icon.sparkles.draw(in: CGRect(x: x, y: rect.midY - 6, width: 12, height: 12), color: quiet)
-            x += 17
-            Self.drawText(summary, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
-        } else {
-            let snippet = ThreadRowView.preview(thread.snippet, subject: thread.subject)
-            Self.drawText("— " + snippet, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
-        }
+        let snippet = ThreadRowView.preview(thread.snippet, subject: thread.subject)
+        Self.drawText("— " + snippet, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
     }
 
     // MARK: Text

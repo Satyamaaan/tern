@@ -5,10 +5,10 @@ import SwiftUI
 enum SettingsItem: String, CaseIterable, Identifiable {
     case accounts, googleClient
     case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
-    case theme, density, dimRead, senderLogos
+    case theme, density, dimRead, senderLogos, listHeadline
     case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
-    case aiAbout, aiProvider, aiSorting, aiModel, aiProjects
+    case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects
     case shortcuts
     case updates, database, searchIndex, demoMail
 
@@ -18,10 +18,10 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         switch self {
         case .accounts, .googleClient: .accounts
         case .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
-        case .theme, .density, .dimRead, .senderLogos: .appearance
+        case .theme, .density, .dimRead, .senderLogos, .listHeadline: .appearance
         case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
-        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects: .ai
+        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey: .ai
         case .shortcuts: .shortcuts
         case .updates, .database, .searchIndex, .demoMail: .advanced
         }
@@ -62,7 +62,9 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .notifications: "notifications new mail banners alerts"
         case .notifyImportant: "only important notifications"
         case .aiAbout: "ai privacy provider"
-        case .aiProvider: "ai provider claude code codex"
+        case .aiProvider: "ai provider groq claude code codex"
+        case .groqKey: "groq api key secure credential remove replace"
+        case .listHeadline: "list headline ai summary subject"
         case .aiSorting: "ai sorting classify triage progress status paused"
         case .aiModel: "ai model"
         case .aiProjects: "suggest projects ai"
@@ -138,6 +140,8 @@ struct SettingsItemView: View {
         case .undoSend: UndoSendItem(state: state)
         case .signatures: SignaturesItem(state: state)
         case .sendFrom: SendFromItem(state: state)
+        case .groqKey: GroqKeyItem(state: state)
+        case .listHeadline: ListHeadlineItem()
         case .theme: ThemeItem()
         case .density: DensityItem()
         case .dimRead: DimReadItem()

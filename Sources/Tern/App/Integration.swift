@@ -11,6 +11,7 @@ import TernSync
 final class Integration {
     let services: AppServices
     let model: AppModel
+    let providers: AIProviders
     let assistant: MailAssistant
     let triage: TriageQueue
     private var google: GoogleAccounts? { didSet { googleBox.set(google) } }
@@ -28,8 +29,10 @@ final class Integration {
         self.services = services
         self.model = model
         let database = services.store.database
-        assistant = MailAssistant(database: database)
-        triage = TriageQueue(database: database)
+        let providers = AIProviders([GroqProvider(key: { GroqCredential.read() }), CodexCLIProvider(), ClaudeCLIProvider()])
+        self.providers = providers
+        assistant = MailAssistant(database: database, providers: providers)
+        triage = TriageQueue(database: database, providers: providers)
     }
 
     enum Failure: LocalizedError {
@@ -274,20 +277,25 @@ final class Integration {
             draftReply: { key, instruction in try await assistant.draftReply(thread: key, instruction: instruction) },
             naturalLanguageQuery: { text in try await assistant.naturalLanguageToQuery(text) })
 
+        let providers = self.providers
         services.aiAvailability = { choice, refresh in
-            guard let id = choice.executable, let provider = AIProviders.shared.provider(id: id) else { return .notInstalled }
+            guard let id = choice.providerID, let provider = providers.provider(id: id) else { return .notInstalled }
             return AIStatus(await provider.availability(refresh: refresh))
         }
 
         // AI helpers exist only while AI is switched on in Settings.
-        let observation = ValueObservation.tracking { db in try AISettings.read(db).enabled }.removeDuplicates()
+        let observation = ValueObservation.tracking { db in
+            _ = try Setting.fetchOne(db, key: "ai.groqCredentialRevision")
+            return try AISettings.read(db)
+        }
         settingsObservation = observation.startRestarting(
             in: services.store.database.reader, scheduling: .async(onQueue: .main),
             onError: { error in NSLog("Tern: AI settings observation failed, restarting it: \(error)") },
-            onChange: { [weak self] enabled in
-                MainActor.assumeIsolated {
+            onChange: { [weak self] settings in
+                Task { @MainActor [weak self] in
+                    let enabled = await providers.isEnabled(settings)
                     self?.services.ai = enabled ? actions : nil
-                    if let triage = self?.triage { Task { await triage.poke() } }
+                    if let triage = self?.triage { await triage.poke() }
                 }
             })
 

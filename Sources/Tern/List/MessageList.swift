@@ -274,6 +274,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard let row = snapshot.row(at: index) else { return nil }
         let key = row.id
         var result = RowModel(row: row, style: style)
+        result.summaryHeadline = model.prefs.summaryHeadline
         result.isSelected = model.isSelected(key)
         result.fillBelow = key == cursorFillKey
         result.hasFocus = key == model.cursor && listHasKeyboard
@@ -410,6 +411,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     private func observePreferences() {
         withObservationTracking {
+            _ = model.prefs.summaryHeadline
             _ = model.prefs.density
             _ = model.prefs.dimReadByAge
             _ = model.projects

@@ -22,13 +22,13 @@ typealias AIAvailabilityCheck = @Sendable (AIProvider, _ refresh: Bool) async ->
 
 extension AIProvider {
     /// The providers backed by a CLI, in the order the choices show them.
-    static let tools: [AIProvider] = [.claude, .codex]
+    static let tools: [AIProvider] = [.groq, .claude, .codex]
 
     var logo: BrandLogo? {
         switch self {
         case .claude: .claude
         case .codex: .openAI
-        case .off: nil
+        case .automatic, .groq, .off: nil
         }
     }
 
@@ -37,6 +37,8 @@ extension AIProvider {
         switch self {
         case .claude: "Uses your Claude subscription"
         case .codex: "Uses your ChatGPT plan"
+        case .automatic: "Groq with a key, then a ready CLI"
+        case .groq: "Uses your Groq API key"
         case .off: "No AI features"
         }
     }
@@ -46,7 +48,7 @@ extension AIProvider {
         switch self {
         case .claude: "claude auth login"
         case .codex: "codex login"
-        case .off: nil
+        case .automatic, .groq, .off: nil
         }
     }
 
@@ -55,7 +57,7 @@ extension AIProvider {
         switch self {
         case .claude: URL(string: "https://code.claude.com/docs/en/setup")
         case .codex: URL(string: "https://developers.openai.com/codex/cli")
-        case .off: nil
+        case .automatic, .groq, .off: nil
         }
     }
 }

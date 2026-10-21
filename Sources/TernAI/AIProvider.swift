@@ -1,13 +1,12 @@
 import Foundation
 import os
 
-/// A local AI backend driven through a CLI the user already signs in to (Codex or Claude Code).
-/// No API keys: the CLI's own login pays for the calls.
+/// Model access through a signed-in local CLI or an HTTP provider with an app-supplied API key.
 public protocol AIProvider: Sendable {
-    /// Stored in `ThreadAI.source` and the `ai.provider` setting: "codex" or "claude".
+    /// Stored in `ThreadAI.source` and the `ai.provider` setting: "groq", "codex" or "claude".
     var id: String { get }
     var displayName: String { get }
-    /// Installed and signed in? Cheap and cached; `refresh` forces a new check.
+    /// Ready to make calls? CLI checks are cached; HTTP providers check for a credential.
     func availability(refresh: Bool) async -> AIAvailability
     /// Models the user can pick in settings. The first is the fast default.
     func models() async -> [String]
@@ -16,7 +15,7 @@ public protocol AIProvider: Sendable {
 }
 
 extension AIProvider {
-    /// True when the CLI is installed and signed in.
+    /// True when this backend is ready to make calls.
     public func isAvailable() async -> Bool {
         await availability(refresh: false) == .ready
     }
@@ -34,7 +33,7 @@ public enum AIAvailability: Hashable, Sendable {
 }
 
 /// One model call. `instructions` may travel on the command line, so it must never contain mail;
-/// `input` holds the data and is always sent on stdin.
+/// `input` holds mail data, sent on stdin for CLIs or in the HTTPS body for HTTP providers.
 public struct AIRequest: Hashable, Sendable {
     public enum Effort: String, Hashable, Sendable {
         /// Classification and short answers.
@@ -50,7 +49,7 @@ public struct AIRequest: Hashable, Sendable {
     /// Model id or alias; nil uses the provider's fast default.
     public var model: String?
     public var effort: Effort
-    /// Seconds before the CLI is killed.
+    /// Seconds before a request times out.
     public var timeout: TimeInterval
     /// Work nobody is waiting on (triage): it queues behind on-demand calls for a CLI slot and the CLI
     /// runs at a lower scheduling priority.
@@ -78,7 +77,7 @@ public enum AIError: Error, Hashable, Sendable, LocalizedError {
     /// Usage or rate limit reached; try again later.
     case rateLimited(String)
     case timedOut
-    /// The CLI failed. The message never contains mail content.
+    /// The provider failed. The message never contains mail content.
     case failed(String)
     /// The answer wasn't usable even after one retry.
     case invalidOutput(String)

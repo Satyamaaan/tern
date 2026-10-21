@@ -2,6 +2,7 @@ import AppKit
 import GRDB
 import Observation
 import TernCore
+import TernAI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case accounts, mail, appearance, layout, notifications, ai, shortcuts, advanced
@@ -37,24 +38,27 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 /// AI choices. Stored in the database `setting` table so the AI lane reads the same values.
 enum AIProvider: String, CaseIterable, Identifiable {
-    case claude, codex, off
+    case automatic, groq, claude, codex, off
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .automatic: "Automatic"
+        case .groq: "Groq"
         case .claude: "Claude Code"
         case .codex: "Codex"
         case .off: "Off"
         }
     }
 
-    /// The command-line tool behind the provider.
-    var executable: String? {
+    /// The backend id for availability checks; automatic and off have no single backend.
+    var providerID: String? {
         switch self {
+        case .groq: "groq"
         case .claude: "claude"
         case .codex: "codex"
-        case .off: nil
+        case .automatic, .off: nil
         }
     }
 }
@@ -127,7 +131,8 @@ final class SettingsState {
         let store = model.store
         func read(_ key: String) -> String? { (try? store.setting(key)) ?? nil }
         let provider = read(SettingKey.aiProvider).flatMap(AIProvider.init(rawValue:))
-        self.provider = read(SettingKey.aiEnabled) == "false" ? .off : (provider ?? .off)
+        let settings = try? store.database.reader.read { try AISettings.read($0) }
+        self.provider = settings?.explicitEnabled == false ? .off : (provider ?? .automatic)
         aiModel = read(SettingKey.aiModel) ?? ""
         autoProjects = read(SettingKey.aiAutoProjects) == "true"
         undoSeconds = read(DraftStore.SettingKey.undoSeconds).flatMap(Int.init) ?? DraftStore.defaultUndoSeconds
@@ -301,7 +306,7 @@ final class SettingsState {
             (SettingKey.aiModel, aiModel.isEmpty ? nil : aiModel),
             (SettingKey.aiAutoProjects, autoProjects ? "true" : "false"),
         ]
-        if provider != .off { values.append((SettingKey.aiProvider, provider.rawValue)) }
+        if provider != .off { values.append((SettingKey.aiProvider, provider == .automatic ? nil : provider.rawValue)) }
         model.writes.async {
             try? database.writer.write { db in
                 for (key, value) in values {

@@ -61,7 +61,7 @@ public actor TriageQueue {
     /// call, so bigger batches pay off; Claude's time grows with each thread's answer, so smaller
     /// batches cost it little and come back sooner.
     public static func batchSize(for provider: String) -> Int {
-        provider == "codex" ? 30 : 15
+        provider == "groq" ? 20 : (provider == "codex" ? 30 : 15)
     }
 
     /// Threads on screen are split across the free calls so they come back sooner, but no call gets
@@ -76,6 +76,10 @@ public actor TriageQueue {
     /// Candidates read per pick: enough to count what is left for the progress line.
     static let scanLimit = 2_000
     /// The latest messages of a thread a prompt shows, and how much of each.
+    static func context(for provider: String) -> (messages: Int, characters: Int) {
+        provider == "groq" ? (3, 1_500) : (messagesPerThread, charactersPerMessage)
+    }
+
     static let messagesPerThread = 2
     static let charactersPerMessage = 600
 
@@ -389,7 +393,6 @@ public actor TriageQueue {
         if observe(settings), interrupt != nil { throw SettingsChanged() }
         // A later change makes this job stale before it starts.
         let generation = generation
-        guard settings.enabled else { throw AIError.disabled }
         let provider = try await providers.resolve(settings)
         let size = batchSize ?? Self.batchSize(for: provider.id)
         let since = now().addingTimeInterval(-window)
@@ -424,7 +427,7 @@ public actor TriageQueue {
                     kind = .retry
                 }
                 let threads = try PromptData.threads(
-                    db, keys: picked.map(\.key), messages: Self.messagesPerThread, characters: Self.charactersPerMessage)
+                    db, keys: picked.map(\.key), messages: Self.context(for: provider.id).messages, characters: Self.context(for: provider.id).characters)
                 let owner = try String.fetchAll(db, sql: "SELECT email FROM account ORDER BY sortOrder, email")
                 let projects = settings.autoProjects ? try Project.order(Column("sortOrder"), Column("name")).fetchAll(db) : nil
                 return Pick(

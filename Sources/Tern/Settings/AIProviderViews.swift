@@ -201,6 +201,8 @@ struct AIProviderRow: View {
                     Text("Provider").font(.ui(13)).foregroundStyle(Color(Theme.text1))
                     if selection == .off {
                         Text("AI features are off.").font(.ui(12)).foregroundStyle(Color(Theme.text3))
+                    } else if selection == .automatic {
+                        Text(selection.tagline).font(.ui(12)).foregroundStyle(Color(Theme.text3))
                     } else {
                         AIStatusLine(provider: selection, status: board.statuses[selection], isChecking: board.isChecking, recheck: recheck)
                     }

@@ -142,7 +142,7 @@ struct NotifyImportantItem: View {
 struct AIAboutItem: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Tern runs AI through a command-line tool you already use, signed in with your own account. The text it needs goes to that provider; Tern has no servers of its own.")
+            Text("Tern uses your Groq API key or a signed-in Codex or Claude Code CLI. Mail context goes directly to the chosen provider. Tern has no servers of its own.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
                 .fixedSize(horizontal: false, vertical: true)
@@ -170,7 +170,7 @@ struct AIModelItem: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
+        SettingsRow(title: "Model", detail: "Leave empty for the provider's default.") {
             TextField("Default", text: $text)
                 .textFieldStyle(.plain)
                 .font(.numeric(12))

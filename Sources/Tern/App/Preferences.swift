@@ -121,6 +121,8 @@ final class Preferences {
     @ObservationIgnored private let defaults: UserDefaults
 
     var appearance: AppearanceMode { didSet { save("appearance", appearance.rawValue); NSApp.appearance = appearance.appearance } }
+    /// Use the AI one-line summary as the list headline when available.
+    var summaryHeadline: Bool { didSet { save("summaryHeadline", summaryHeadline) } }
     var density: Density { didSet { save("density", density.rawValue) } }
     /// Fades read mail older than a month.
     var dimReadByAge: Bool { didSet { save("dimReadByAge", dimReadByAge) } }
@@ -157,6 +159,7 @@ final class Preferences {
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         // "auto" was the old one-line-when-wide setting, now Comfortable.
         density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .comfortable
+        summaryHeadline = defaults.object(forKey: "summaryHeadline") as? Bool ?? true
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
         showSenderLogos = defaults.object(forKey: "showSenderLogos") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true

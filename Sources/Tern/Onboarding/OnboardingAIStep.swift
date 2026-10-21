@@ -66,7 +66,7 @@ struct OnboardingAIStep: View {
     }
 
     private func move(_ step: Int) {
-        let options = AIProvider.allCases
+        let options = AIProvider.tools + [.off]
         let index = choice.flatMap { options.firstIndex(of: $0) } ?? (step > 0 ? -1 : options.count)
         choose(options[min(max(index + step, 0), options.count - 1)])
     }
