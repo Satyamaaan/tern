@@ -13,7 +13,8 @@ things. Calm like Linear and ChatGPT, never the stock macOS look. Research behin
 Hard rules
 - Never a coloured bar down one side of a row, card or callout. Status is a dot or a tag.
 - Buttons, text and dots are neutral ink. Hue lives only on tab and tag icons; "needs reply" stays ink.
-- Nothing is a pill. Only avatars, status dots and the account stack are round.
+- Nothing is a pill. Only status dots and the account stack are round; sender avatars are rounded squares
+  (a quarter of their side), like app icons.
 - At most three visible actions in any area. Everything else lives in one `…` menu or ⌘K; secondary controls
   appear on hover.
 - Every action has a shortcut; ⌘K lists each command with its key.
@@ -178,13 +179,13 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 - **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **40 pt** when the list is ≥ 600 px
   wide, two lines at 56 pt otherwise (the reading pane). Density Auto / Compact (one line at 32 pt) / Comfortable
   (two lines). Read rows step back to `text2` so unread mail is what the eye lands on.
-  - One line: 20 px avatar · sender column (20 % of the column, 160–220 px: name, then `(13)` message count in
+  - One line: 22 px avatar · sender column (20 % of the column, 160–220 px: name, then `(13)` message count in
     tabular `text3`; "Draft to Maya" in italic `text2` with a pencil) · 6 px `ink` unread dot · subject (500 when
     unread) — preview in `text2` (or ✦ sparkle + AI summary) · paperclip · tags · time (tabular `text3`,
     right-aligned: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25").
   - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
-  - **Avatar**: the sender's domain logo (`SenderLogos`, full bleed on a white disc with a faint ring), else
-    one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
+  - **Avatar**: a rounded square (radius a quarter of its side): the sender's domain logo (`SenderLogos`, full
+    bleed on white with a faint ring), else one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
     as rows come into view; rows on screen refresh when one arrives. Spam and Trash show initials only (no
     fetch, no cached logo), in the list and the reader.
   - **Sender names** drop a bot's `[bot]`: `vercel[bot]` reads "Vercel".
@@ -242,7 +243,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   tabs on).
 - A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's filled style; the account last while several are signed in), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
-  unread (or last) message is open: 28 px avatar (logo or initials), sender 600 + address `text3`, "to me"
+  unread (or last) message is open: 28 px rounded-square avatar (logo or initials), sender 600 + address `text3`, "to me"
   disclosure, date in tabular `text3`. Your draft in the conversation shows Edit · Discard on its line (`text2`
   links); Discard takes the draft alone. The focused message (n/p) and a selected attachment get the `selected`
   fill, no ring. Bodies in the WKWebView (transparent before first paint, sanitized,

@@ -110,7 +110,7 @@ final class ThreadRowView: NSTableRowView {
     /// The selection and hover fill sits this far inside the row's top and bottom, clear of the hairlines
     /// and the date header.
     static let fillInset: CGFloat = 2
-    static let avatarSize: CGFloat = 20
+    static let avatarSize: CGFloat = 22
     /// Width of the hover buttons that replace the tags and time.
     static let hoverWidth: CGFloat = 84
 
@@ -198,7 +198,7 @@ private struct RowPainter {
         let line = CGRect(x: left, y: column.midY - 9, width: right - left, height: 18)
         drawAvatar()
 
-        let senderX = left + ThreadRowView.avatarSize + 12
+        let senderX = left + ThreadRowView.avatarSize + 10
         let senderWidth = min(max(column.width * 0.2, 160), 220)
         drawSender(in: CGRect(x: senderX, y: line.minY, width: senderWidth, height: line.height))
         let dotX = senderX + senderWidth + 2
@@ -214,7 +214,7 @@ private struct RowPainter {
         let right = column.maxX - ThreadRowView.padding
         let line1 = CGRect(x: left, y: column.minY + 9, width: right - left, height: 18)
         drawAvatar()
-        let textX = left + ThreadRowView.avatarSize + 12
+        let textX = left + ThreadRowView.avatarSize + 10
         let line2 = CGRect(x: textX, y: column.minY + 30, width: right - textX, height: 18)
 
         let trailing = drawTrailing(in: line1, chips: min(model.chips.count, 1), minimumX: textX + 120)
@@ -230,13 +230,13 @@ private struct RowPainter {
         let rect = avatarRect
         switch model.avatar {
         case .logo(let image):
-            Avatar.drawLogo(image, in: rect)
+            Avatar.drawLogo(image, in: rect, shape: .square)
         case .letters(let text):
-            Avatar.drawLetters(text, tint: nil, in: rect)
+            Avatar.drawLetters(text, tint: nil, in: rect, shape: .square)
         }
         guard let account = model.account else { return }
         let size: CGFloat = 8
-        let dot = CGRect(x: rect.maxX - size + 1.5, y: rect.maxY - size + 1.5, width: size, height: size)
+        let dot = CGRect(x: rect.maxX - size + 2, y: rect.maxY - size + 2, width: size, height: size)
         backdrop.setFill()
         NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
         Theme.accountColor(account.colorIndex).setFill()
