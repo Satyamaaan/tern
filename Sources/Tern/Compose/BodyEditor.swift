@@ -23,6 +23,8 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     private let layoutDelegate = EditorLayoutDelegate()
     private let imageParagraphs = InlineImageParagraphs()
     private var formattingBar: NSHostingView<FormattingBar>?
+    /// The bar's edge toward the selection (it sits above it, or below near the top).
+    private var barAnchor: UnitPoint = .bottom
     private var formattingTimer: Timer?
     private var linkPopover: NSPopover?
 
@@ -83,7 +85,16 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     var plainText: String { textView.string }
 
     /// Replaces the whole body as one undoable edit (AI drafts).
-    func replaceBody(with text: RichText) {
+    /// Replaces the body with `text`. `crossfade` blends the old text into the new over 180 ms (80 ms with Reduce
+    /// Motion), for an AI draft landing; edits and undo stay instant.
+    func replaceBody(with text: RichText, crossfade: Bool = false) {
+        if crossfade, let layer = scrollView.layer {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.08 : 0.18
+            fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(fade, forKey: kCATransition)
+        }
         let range = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
         let replacement = RichTextBridge.attributedString(text, images: imageSource)
         guard textView.shouldChangeText(in: range, replacementString: replacement.string) else { return }
@@ -325,7 +336,7 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
     }
 
     private func makeBar() -> FormattingBar {
-        FormattingBar(state: formattingState) { [weak self] action in
+        FormattingBar(state: formattingState, anchor: barAnchor) { [weak self] action in
             guard let self else { return }
             switch action {
             case .bold: toggle(.bold)
@@ -341,8 +352,9 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
 
     func showFormattingBar() {
         guard textView.selectedRange().length > 0, let window = textView.window else { return }
-        let bar = formattingBar ?? NSHostingView(rootView: makeBar())
-        bar.rootView = makeBar()
+        // A bar coming back is a new view, so it fades in again; one already showing just moves, at once.
+        let showing = formattingBar.flatMap { $0.superview == nil ? nil : $0 }
+        let bar = showing ?? NSHostingView(rootView: makeBar())
         formattingBar = bar
         if bar.superview == nil { document.addSubview(bar) }
         let size = bar.fittingSize
@@ -352,7 +364,10 @@ final class BodyEditorController: NSObject, NSTextViewDelegate {
         let room = FormattingBar.shadowRoom
         let x = min(max(8 - room, rect.minX - room), document.bounds.width - size.width + room - 8)
         let above = rect.minY - (size.height - room * 2) - 6
-        let y = above < scrollView.documentVisibleRect.minY ? rect.maxY + 6 - room : above - room
+        let below = above < scrollView.documentVisibleRect.minY
+        let y = below ? rect.maxY + 6 - room : above - room
+        barAnchor = below ? .top : .bottom
+        bar.rootView = makeBar()
         bar.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
@@ -697,7 +712,12 @@ struct FormattingBar: View {
     static let shadowRoom: CGFloat = 14
 
     let state: State
+    /// The edge toward the selection, where the bar grows from.
+    var anchor: UnitPoint = .bottom
     let perform: (Action) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SwiftUI.State private var shown = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -714,8 +734,13 @@ struct FormattingBar: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
         .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        // First show: fades in and grows from 97 % toward the selection over 120 ms (a fade with Reduce Motion).
+        // Moving to a new selection and hiding are instant.
+        .opacity(shown ? 1 : 0)
+        .scaleEffect(shown || reduceMotion ? 1 : 0.97, anchor: anchor)
         .padding(Self.shadowRoom)
         .fixedSize()
+        .onAppear { withAnimation(Motion.or(reduced: reduceMotion, Motion.ease(Motion.popover))) { shown = true } }
     }
 
     private func button(_ icon: Icon, _ action: Action, on: Bool, help: String) -> some View {

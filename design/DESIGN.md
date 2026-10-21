@@ -258,6 +258,14 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always
   sees a light colour scheme: its `prefers-color-scheme: dark` styles and `color-scheme` never apply. Attachments
   as chips. Quoted text behind a `•••` toggle.
+- Motion on the page is for clicks only; `render()` (every j/k), n/p, Enter and Expand All never animate. A
+  message, quoted text or the "N more" rows opened by a click fade in with a 4 px (quotes 3 px) drop, 140 ms on the
+  house curve (the rows 20 ms apart, at most 100 ms); collapsing is instant. Attachments, `+`, `···` and the
+  "N more" count shrink to 97 % while pressed (the `•••` toggle to 94 %). "Summarizing…" carries a slow shimmer;
+  the summary's lines then rise in 40 ms apart (four at most), only when it arrives. Remote images that haven't
+  painted after the first frames fade in as they land (160 ms; cached ones never fade), and a sender logo that
+  arrives late fades in over the initials (120 ms). Reduce Motion: 80 ms fades, all at once, no shimmer and no
+  press shrink.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
   (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
@@ -282,6 +290,10 @@ Inline in the reader, or a floating window for new mail (`c`), 640×560, `raised
 hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Inter 15/600). Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
+The formatting bar fades in and grows from 97 % toward the selection on first show (120 ms); moving to a new
+selection and hiding are instant. "Writing…" shimmers while the AI works, and its draft crossfades in over the old
+text (180 ms). The × on the signature and attachment chips fades in on hover (90 ms) and hides at once. Under
+Reduce Motion: fades only, 80 ms, and no shimmer. Cc/Bcc, the AI bar, tokens and typing never animate.
 
 ### Update card and prompts
 Tern's own small floating card, never Sparkle's or a stock alert: 380 pt wide, `raised`, radius 10, 1 px

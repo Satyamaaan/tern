@@ -3,7 +3,7 @@
 @font-face { font-family: Inter; src: url("tern-app://fonts/Inter-SemiBold.ttf"); font-weight: 600; }
 @font-face { font-family: "Inter Display"; src: url("tern-app://fonts/InterDisplay-SemiBold.ttf"); font-weight: 600; }
 
-:root { color-scheme: light; --ui: Inter, -apple-system, "Helvetica Neue", sans-serif; --display: "Inter Display", Inter, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+:root { --ease: cubic-bezier(0.2, 0.9, 0.25, 1); color-scheme: light; --ui: Inter, -apple-system, "Helvetica Neue", sans-serif; --display: "Inter Display", Inter, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html { background: transparent; -webkit-text-size-adjust: none; }
@@ -48,6 +48,17 @@ svg path { vector-effect: non-scaling-stroke; }
 .summary.clickable .text:hover, .summary.action:hover { color: var(--text1); }
 .summary.action:hover .spark { color: var(--text2); }
 .summary.loading .text { color: var(--text3); }
+/* While the AI works, a soft light passes over "Summarizing…" (still under Reduce Motion). */
+.summary.loading .text p {
+  background: linear-gradient(90deg, var(--text3) 35%, var(--text1) 50%, var(--text3) 65%) 0 0 / 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: tern-shimmer 1.4s linear infinite;
+}
+/* The summary arriving: its lines rise in 40 ms apart (four at most), only on loading → loaded. */
+.summary.landed .text > p, .summary.landed li { animation: tern-reveal 160ms var(--ease) both; }
+.summary.landed li:nth-child(2) { animation-delay: 40ms; }
+.summary.landed li:nth-child(3) { animation-delay: 80ms; }
+.summary.landed li:nth-child(n+4) { animation-delay: 120ms; }
 .summary .fold { color: var(--text3); margin-left: 6px; }
 
 /* Messages. Avatars sit on one axis: 24 px on collapsed lines, 28 px on open headers, both centred in a
@@ -76,6 +87,10 @@ svg path { vector-effect: non-scaling-stroke; }
 .msg.open > .line { display: none; }
 .msg:not(.open) > :not(.line) { display: none; }
 .msg.hidden-run { display: none; }
+/* A message opened by a click fades its header and body in; collapsing, j/k and Enter stay instant. */
+.msg.revealing > :not(.line) { animation: tern-reveal 140ms var(--ease) both; }
+/* The rows "N more" brings back (the delay is set on each row, up to 100 ms). */
+.msg.arriving { animation: tern-reveal 140ms var(--ease) both; }
 .more {
   height: 32px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--hairline);
   color: var(--text3); font-size: 12px;
@@ -86,6 +101,7 @@ svg path { vector-effect: non-scaling-stroke; }
 }
 .more:hover { color: var(--text2); }
 .more:hover .count { background: var(--hover); }
+.more:active .count { transform: scale(0.97); }
 
 /* Sender pictures: rounded squares, a logo with a faint inner ring, else initials on a neutral fill. */
 .av {
@@ -94,6 +110,8 @@ svg path { vector-effect: non-scaling-stroke; }
 }
 .av.logo { background: #FFFFFF; }
 .av img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A logo that arrives after the paint fades in over the initials. */
+.av img.arriving { position: absolute; inset: 0; background: #FFFFFF; animation: tern-fade 120ms ease-out both; }
 .av.logo::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
@@ -115,7 +133,7 @@ svg path { vector-effect: non-scaling-stroke; }
 .mhead .date { line-height: 18px; }
 .mhead .to { color: var(--text3); font-size: 12px; line-height: 16px; display: inline-flex; align-items: center; gap: 3px; }
 .mhead .to:hover { color: var(--text2); }
-.mhead .to svg { width: 11px; height: 11px; transition: transform 90ms; }
+.mhead .to svg { width: 11px; height: 11px; transition: transform 90ms var(--ease); }
 .mhead .to svg path { stroke-width: 1.3px; }
 .msg.details-open .mhead .to svg { transform: rotate(180deg); }
 .details {
@@ -150,12 +168,16 @@ svg path { vector-effect: non-scaling-stroke; }
   display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 10px; border-radius: 6px;
   border: 1px solid var(--hairline); max-width: 100%; outline: none;
 }
+/* Press feedback on the page's small controls (not on full-width rows, which keep their fill). */
+.att, .chip-add, .mmenu, .more .count { transition: transform 100ms var(--ease); }
+:is(.att, .chip-add, .mmenu):active { transform: scale(0.97); }
 .att:hover { background: var(--hover); }
 .att:focus-visible, .att.selected { background: var(--selected); border-color: transparent; }
 .att svg { width: 16px; height: 16px; color: var(--text2); flex: none; }
 .att svg path { stroke-width: 1.3px; }
 .att .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .att .size { color: var(--text3); flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.att .size { transition: opacity 120ms ease-out; }
 .att.busy .size { opacity: 0.5; }
 
 .msg.open { padding-bottom: 18px; }
@@ -226,4 +248,18 @@ svg path { vector-effect: non-scaling-stroke; }
   .msg:not(.open) > :not(.line) { display: block; }
   .msg { break-inside: avoid-page; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+@keyframes tern-reveal { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes tern-fade { from { opacity: 0; } }
+@keyframes tern-shimmer { to { background-position: -150% 0; } }
+
+/* Reduce Motion: nothing moves; changes crossfade in 80 ms, together, and the shimmer holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .mhead .to svg, .att, .chip-add, .mmenu, .more .count { transition: none; }
+  .att .size { transition-duration: 80ms; }
+  .msg.revealing > :not(.line), .msg.arriving, .summary.landed .text > p, .summary.landed li, .av img.arriving {
+    animation: tern-fade 80ms ease-out both !important;
+  }
+  .summary.loading .text p { animation: none; background: none; color: var(--text3); }
+  :is(.att, .chip-add, .mmenu):active, .more:active .count { transform: none; }
+}

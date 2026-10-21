@@ -23,6 +23,8 @@ enum Motion {
     static let hover: Double = 0.09
     /// Content revealed by a click (a message, quoted text, a hint line).
     static let reveal: Double = 0.14
+    /// A small bar or popover appearing beside what it acts on (the formatting bar).
+    static let popover: Double = 0.12
     /// The inline reply card rising out of the reply field.
     static let cardRise: Double = 0.15
     /// A toast or card coming in, and going out.

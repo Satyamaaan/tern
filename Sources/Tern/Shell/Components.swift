@@ -147,6 +147,11 @@ extension View {
         modifier(PressScale(pressed: pressed, scale: scale))
     }
 
+    /// A secondary control shown on hover: fades in over 90 ms (80 ms with Reduce Motion), hides at once.
+    func hoverReveal(_ visible: Bool) -> some View {
+        modifier(HoverReveal(visible: visible))
+    }
+
     /// The keyboard focus ring: 1.5 px `ink` at 50 %, 2 px outside the control.
     func focusRing<S: InsettableShape>(_ visible: Bool, shape: S) -> some View {
         overlay(shape.inset(by: -2.5).strokeBorder(Color(Theme.ink).opacity(visible ? 0.5 : 0), lineWidth: 1.5))
@@ -162,6 +167,46 @@ private struct PressScale: ViewModifier {
         content.animation(Motion.ease(Motion.press)) {
             $0.scaleEffect(pressed && !reduceMotion ? scale : 1)
         }
+    }
+}
+
+private struct HoverReveal: ViewModifier {
+    let visible: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(visible ? Motion.or(reduced: reduceMotion, .easeOut(duration: Motion.hover)) : nil) {
+            $0.opacity(visible ? 1 : 0)
+        }
+    }
+}
+
+/// A `text3` label for work in progress ("Writing…"): a soft light passes over it every 1.4 s while it shows.
+/// Still under Reduce Motion.
+struct WaitingText: View {
+    let text: String
+    var size: CGFloat = 12
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        let label = Text(text).font(.ui(size))
+        label
+            .foregroundStyle(Color(Theme.text3))
+            .overlay {
+                if !reduceMotion {
+                    LinearGradient(
+                        stops: [.init(color: .clear, location: 0.35), .init(color: Color(Theme.text1), location: 0.5),
+                                .init(color: .clear, location: 0.65)],
+                        startPoint: UnitPoint(x: -1.5 + phase * 2.5, y: 0.5),
+                        endPoint: UnitPoint(x: 1 + phase * 2.5, y: 0.5))
+                        .mask(label)
+                        .onAppear {
+                            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
+                        }
+                }
+            }
+            .accessibilityLabel(text)
     }
 }
 
