@@ -25,9 +25,10 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     @MainActor static var flipped: AppearanceMode { showsDark ? .light : .dark }
 }
 
-/// List row layout. Auto picks one line when the list is at least 560 px wide.
+/// How tall list rows are. Both are one line per thread when the list is wide and two in a narrow list
+/// (the reading pane).
 enum Density: String, CaseIterable, Identifiable {
-    case auto, compact, comfortable
+    case compact, comfortable
 
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
@@ -135,7 +136,8 @@ final class Preferences {
         self.defaults = defaults
         Self.migrateInboxTabs(defaults)
         appearance = AppearanceMode(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
-        density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .auto
+        // "auto" was the old one-line-when-wide setting, now Comfortable.
+        density = Density(rawValue: defaults.string(forKey: "density") ?? "") ?? .comfortable
         dimReadByAge = defaults.bool(forKey: "dimReadByAge")
         showSenderLogos = defaults.object(forKey: "showSenderLogos") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true

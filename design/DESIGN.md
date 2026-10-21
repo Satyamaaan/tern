@@ -178,8 +178,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 - **Date headers**, 34 px, sticky: `Today · Yesterday · This week · Earlier this month ·` month names · years,
   left-aligned with the avatars in `text3`, hairline below. Every list is in date order; nothing floats to the top.
 - **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **40 pt** when the list is ≥ 600 px
-  wide, two lines at 56 pt otherwise (the reading pane). Density Auto / Compact (one line at 32 pt) / Comfortable
-  (two lines). Read rows step back to `text2` so unread mail is what the eye lands on.
+  wide, two lines at 56 pt otherwise (the reading pane). Density Comfortable (40 pt) / Compact (32 pt); both are
+  one line when wide. Read rows step back to `text2` so unread mail is what the eye lands on.
   - One line: 22 px avatar · sender column (20 % of the column, 160–220 px: name, then `(13)` message count in
     tabular `text3`; "Draft to Maya" in italic `text2` with a pencil) · 6 px `ink` unread dot · subject (500 when
     unread) — preview in `text2` (or ✦ sparkle + AI summary) · paperclip · tags · time (tabular `text3`,
@@ -193,8 +193,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   - **Tags**: soft filled chips, no border: 20 px tall, radius 4, `text1` at 5 % (light) / 7 % (dark), 12 px
     coloured icon, label Inter 11.5 500 `text2`. Needs reply (ink reply icon) first, then the project or the
     category (not People/Other). A category tag that only repeats the list stays off: the Gmail tab it files
-    under (Notification in Updates, Promotion in Promotions), or the category more than half of the list shares
-    (eight threads or more). Two at most on one line, one on two lines; dropped before they squeeze the subject.
+    under (Notification in Updates, Promotion in Promotions), or the category more than half of the first 40
+    threads share (eight at least). Two at most on one line, one on two lines; dropped before they squeeze the subject.
   - Hairline separators across the column. Hover and selection are fills, never a ring: the column's width,
     radius 6, 2 px in from the row's top and bottom. The hairline under a filled row and the one above it (a
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons

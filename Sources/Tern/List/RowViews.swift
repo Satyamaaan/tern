@@ -1,7 +1,7 @@
 import AppKit
 import TernCore
 
-/// Row layouts: one line at 40 pt when the list is wide (32 pt when compact), two lines at 56 pt in a
+/// Row layouts: one line when the list is wide, at 40 pt (32 pt when compact); two lines at 56 pt in a
 /// narrow list (the reading pane).
 enum RowStyle: Equatable {
     case compact, oneLine, twoLines
@@ -18,11 +18,8 @@ enum RowStyle: Equatable {
     var isSingleLine: Bool { self != .twoLines }
 
     static func resolve(_ density: Density, width: CGFloat) -> RowStyle {
-        switch density {
-        case .compact: .compact
-        case .comfortable: .twoLines
-        case .auto: width >= 600 ? .oneLine : .twoLines
-        }
+        guard width >= 600 else { return .twoLines }
+        return density == .compact ? .compact : .oneLine
     }
 }
 

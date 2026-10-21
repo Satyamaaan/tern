@@ -23,8 +23,8 @@ struct ListSnapshot {
     private(set) var order: [ThreadKey] = []
     private(set) var position: [ThreadKey: Int] = [:]
     private(set) var itemIndex: [ThreadKey: Int] = [:]
-    /// The category most of the list shares (more than half, of eight or more threads). Its tag would
-    /// repeat on nearly every row and say nothing, so rows leave it off.
+    /// The category most of the top of the list shares (more than half of its first 40 threads, eight at
+    /// least). Its tag would repeat on nearly every row in view and say nothing, so rows leave it off.
     private(set) var commonCategory: MailCategory?
 
     static let empty = ListSnapshot()
@@ -49,7 +49,8 @@ struct ListSnapshot {
             for row in rest { append(row) }
         }
         if let footer { items.append(footer) }
-        commonCategory = Self.common(rows.values.compactMap(\.category), of: order.count)
+        let top = order.prefix(40)
+        commonCategory = Self.common(top.compactMap { rows[$0]?.category }, of: top.count)
     }
 
     private static func common(_ categories: [MailCategory], of total: Int) -> MailCategory? {

@@ -96,7 +96,7 @@ struct DensityItem: View {
 
     var body: some View {
         @Bindable var prefs = model.prefs
-        SettingsRow(title: "Density", detail: "Auto shows one line per thread when the list is wide, two when it's narrow.") {
+        SettingsRow(title: "Density", detail: "One line per thread when the list is wide, two when it's narrow.") {
             SegmentedPicker(options: Density.allCases, selection: $prefs.density) { $0.title }
         }
     }
