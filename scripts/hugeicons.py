@@ -62,6 +62,7 @@ ICONS = [
     ("search", "Search01Icon"),
     ("done", "Tick02Icon"),
     ("archive", "Archive02Icon"),
+    ("archiveBox", "Archive03Icon"),
     ("ellipsis", "MoreHorizontalIcon"),
     ("plus", "Add01Icon"),
     ("close", "Cancel01Icon"),
@@ -86,6 +87,9 @@ ICONS = [
     ("chevronLeft", "ArrowLeft01Icon"),
     ("chevronRight", "ArrowRight01Icon"),
     ("back", "ArrowLeft02Icon"),
+    ("panelClose", "ArrowRightDoubleIcon"),
+    ("expand", "ArrowExpand02Icon"),
+    ("collapse", "ArrowShrink01Icon"),
     # Window
     ("sidebar", "SidebarLeft01Icon"),
     ("readingPane", "SidebarRight01Icon"),
@@ -96,6 +100,7 @@ ICONS = [
     ("keyboard", "KeyboardIcon"),
     # Files and formatting
     ("paperclip", "Attachment01Icon"),
+    ("clip", "AttachmentIcon"),
     ("file", "File02Icon"),
     ("image", "Image01Icon"),
     ("video", "Video01Icon"),
@@ -118,8 +123,10 @@ ICONS = [
     ("info", "InformationCircleIcon"),
 ]
 
-# Icons the reader page draws itself (attachment chips, the details disclosure, the AI line).
-WEB_ICONS = [("file", "ICON_FILE"), ("image", "ICON_IMAGE"), ("chevronDown", "ICON_CHEVRON"), ("sparkles", "ICON_SPARK")]
+# Icons the reader page draws itself (attachment chips, the details disclosure, the AI line, the slide-over's
+# message menus and add-a-tag button).
+WEB_ICONS = [("file", "ICON_FILE"), ("image", "ICON_IMAGE"), ("chevronDown", "ICON_CHEVRON"), ("sparkles", "ICON_SPARK"),
+             ("ellipsis", "ICON_MORE"), ("plus", "ICON_PLUS")]
 
 ROOT = Path(__file__).resolve().parent.parent
 

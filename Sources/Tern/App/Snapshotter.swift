@@ -69,8 +69,14 @@ struct Snapshotter {
         model.toggleReadingPane()
 
         // The slide-over: the open conversation from the right with the list beside it, then expanded over all of it.
-        let overlay = model.prefs.readerOverlay
+        let overlay = model.prefs.readerOverlay, cursor = model.cursor
         model.prefs.readerOverlay = .panel
+        // A conversation with several people and files, so the top bar shows its pictures and paperclip.
+        let busy = model.snapshot.order.prefix(300).first { key in
+            guard let detail = try? model.store.threadDetail(key) else { return false }
+            return Set(detail.messages.map(\.fromEmail)).count > 1 && !detail.attachments.values.joined().isEmpty
+        }
+        if let busy { model.setCursor(busy, open: false) }
         model.open()
         RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         shot("slide-over-light")
@@ -80,6 +86,7 @@ struct Snapshotter {
         shot("slide-over-wide-light")
         model.back()
         model.prefs.readerOverlay = overlay
+        if let cursor { model.setCursor(cursor, open: false) }
 
         model.searchText = "invoice"
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))

@@ -11,6 +11,8 @@
   const ICON_IMAGE = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 7.5 A 1.5 1.5 0 1 0 9 7.5 A 1.5 1.5 0 1 0 6 7.5 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 2.5 12 C 2.5 7.522 2.5 5.282 3.891 3.891 C 5.282 2.5 7.522 2.5 12 2.5 C 16.478 2.5 18.718 2.5 20.109 3.891 C 21.5 5.282 21.5 7.522 21.5 12 C 21.5 16.478 21.5 18.718 20.109 20.109 C 18.718 21.5 16.478 21.5 12 21.5 C 7.522 21.5 5.282 21.5 3.891 20.109 C 2.5 18.718 2.5 16.478 2.5 12 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 5 21 C 9.372 15.775 14.274 8.884 21.497 13.542" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
   const ICON_CHEVRON = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M 18 9 C 18 9 13.581 15 12 15 C 10.419 15 6 9 6 9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
   const ICON_SPARK = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M 15 2 L 15.539 4.392 C 15.996 6.42 17.58 8.004 19.608 8.461 L 22 9 L 19.608 9.539 C 17.58 9.996 15.996 11.58 15.539 13.608 L 15 16 L 14.461 13.608 C 14.004 11.58 12.42 9.996 10.392 9.539 L 8 9 L 10.392 8.461 C 12.42 8.004 14.004 6.42 14.461 4.392 L 15 2 Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 7 12 L 7.385 13.708 C 7.711 15.157 8.843 16.289 10.292 16.615 L 12 17 L 10.292 17.385 C 8.843 17.711 7.711 18.843 7.385 20.292 L 7 22 L 6.615 20.292 C 6.289 18.843 5.157 17.711 3.708 17.385 L 2 17 L 3.708 16.615 C 5.157 16.289 6.289 15.157 6.615 13.708 L 7 12 Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+  const ICON_MORE = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M 6.004 12.5 L 6.004 12 M 18.005 12.5 L 18.005 12 M 12.005 12.5 L 12.005 12 M 7.004 12.5 C 7.004 11.948 6.557 11.5 6.004 11.5 C 5.452 11.5 5.004 11.948 5.004 12.5 C 5.004 13.052 5.452 13.5 6.004 13.5 C 6.557 13.5 7.004 13.052 7.004 12.5 Z M 19.005 12.5 C 19.005 11.948 18.557 11.5 18.005 11.5 C 17.452 11.5 17.005 11.948 17.005 12.5 C 17.005 13.052 17.452 13.5 18.005 13.5 C 18.557 13.5 19.005 13.052 19.005 12.5 Z M 13.005 12.5 C 13.005 11.948 12.557 11.5 12.005 11.5 C 11.452 11.5 11.005 11.948 11.005 12.5 C 11.005 13.052 11.452 13.5 12.005 13.5 C 12.557 13.5 13.005 13.052 13.005 12.5 Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+  const ICON_PLUS = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M 12.001 5 L 12.001 19.002" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M 19.002 12.002 L 5 12.002" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
   // ICONS:END
   const MIN_SCALE = 0.45;
 
@@ -47,6 +49,7 @@
       const style = chip.color ? ` style="--chip:${esc(chip.color)}"` : '';
       html += `<span class="chip ${esc(chip.kind || '')}"${style}>${chip.icon || ''}<span>${esc(chip.text)}</span></span>`;
     }
+    html += `<span class="chip-add" data-act="tags" role="button" title="Label or Project" aria-label="Label or Project">${ICON_PLUS}</span>`;
     return html + `</div>${summaryHTML(p.summary)}</header>`;
   }
 
@@ -80,7 +83,12 @@
     const draft = m.draft ? '<span class="draft">Draft</span>' : '';
     return `<div class="line" data-act="toggle">${avatarHTML(m)}` +
       `<span class="from">${esc(m.from)}</span>${draft}<span class="snip">${esc(m.snippet)}</span>` +
-      `${m.draft ? draftActionsHTML('dacts') : ''}<time class="date">${esc(m.date)}</time></div>`;
+      `${m.draft ? draftActionsHTML('dacts') : ''}${messageMenuHTML()}<time class="date">${esc(m.date)}</time></div>`;
+  }
+
+  /// The slide-over's ··· beside each message's date: Reply, Forward and the rest for that conversation.
+  function messageMenuHTML() {
+    return `<span class="mmenu" data-act="message-menu" role="button" title="More" aria-label="More">${ICON_MORE}</span>`;
   }
 
   /// Your draft in the conversation: Edit opens it, Discard deletes it and nothing else.
@@ -96,8 +104,9 @@
     for (const [label, value] of m.details || []) details += `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`;
     return `<div class="mhead" data-act="collapse">${avatarHTML(m)}` +
       `<div class="who"><div class="row1"><span class="name">${esc(m.from)}</span>${address}</div>` +
-      `<span class="to" data-act="details">${esc(m.toLine)}${ICON_CHEVRON}</span></div>` +
-      `<time class="date" title="${esc(m.dateFull)}">${esc(m.dateLong || m.date)}</time></div>` +
+      `<span class="to" data-act="details">${esc(m.toLine)}${ICON_CHEVRON}</span>` +
+      `<span class="to-addr" data-act="details">To: <span class="rcpt">${esc(m.toAddresses || '')}</span></span></div>` +
+      `${messageMenuHTML()}<time class="date" title="${esc(m.dateFull)}">${esc(m.dateLong || m.date)}</time></div>` +
       `<dl class="details" hidden>${details}</dl>`;
   }
 
@@ -427,6 +436,13 @@
       case 'edit-draft':
         post({ type: 'editDraft', id });
         break;
+      case 'tags':
+      case 'message-menu': {
+        // The app pops its menu up under the button, in page coordinates.
+        const box = action.getBoundingClientRect();
+        post({ type: action.dataset.act === 'tags' ? 'tagMenu' : 'messageMenu', id, x: box.left, y: box.bottom + 4 });
+        break;
+      }
       case 'discard-draft':
         post({ type: 'discardDraft', id });
         break;
@@ -544,6 +560,8 @@
       }
     },
     setTheme(theme) { document.documentElement.dataset.theme = theme; },
+    /// "panel" in the slide-over, "column" elsewhere.
+    setLayout(layout) { document.documentElement.dataset.layout = layout; queueFit(); },
     setKeys(map) { keys = map || {}; },
     next() { move(1); },
     previous() { move(-1); },

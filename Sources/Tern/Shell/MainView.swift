@@ -18,7 +18,7 @@ struct MainView: View {
     static let listMinWidth: CGFloat = 340
     static let readerMinWidth: CGFloat = 420
     /// The share of the window's list area the slide-over panel takes.
-    static let panelFraction: CGFloat = 0.55
+    static let panelFraction: CGFloat = 0.5
 
     var body: some View {
         ZStack {
@@ -65,66 +65,75 @@ struct MainView: View {
                 }
                 .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
             }
-            VStack(spacing: 0) {
-                TitleBar()
-                GeometryReader { geometry in
-                    content(available: geometry.size.width)
-                }
+            GeometryReader { geometry in
+                content(available: geometry.size.width, height: geometry.size.height)
             }
         }
     }
 
-    /// The list and the reader. Both keep one place in the view tree in every layout, so the table (and
-    /// its scroll position) and the reader's page survive ⌘\ and opening a thread: without the pane the
-    /// reader lies over the list, transparent until a thread opens. In the slide-over panel it covers only
-    /// the right of the list, which stays live beside it.
-    private func content(available: CGFloat) -> some View {
+    /// The title bar, the list and the reader. List and reader keep one place in the view tree in every layout,
+    /// so the table (and its scroll position) and the reader's page survive ⌘\ and opening a thread: without the
+    /// pane the reader lies over the list, transparent until a thread opens. The slide-over runs the full height
+    /// of the window over the right of the title bar and the list, which stays live beside it.
+    private func content(available: CGFloat, height: CGFloat) -> some View {
         let pane = model.prefs.readingPane
         let panel = model.readerInPanel
+        // The slide-over's look, also while it is expanded over the whole list.
+        let panelLayout = !pane && model.prefs.readerOverlay == .panel
         let listWidth = pane ? clampedListWidth(available: available) : available
         let readerShown = model.readerVisible
         let readerWidth = pane ? max(available - listWidth - 1, 0) : panel ? panelWidth(available: available) : available
+        let header = MainWindow.headerHeight
         return ZStack(alignment: .topLeading) {
-            ListColumn()
-                .frame(width: listWidth)
-                .allowsHitTesting(pane || panel || !model.readerExpanded)
-                .accessibilityHidden(!pane && !panel && model.readerExpanded)
-            if pane {
-                ColumnDivider(width: listWidth, available: available)
-                    .offset(x: listWidth)
+            VStack(spacing: 0) {
+                TitleBar()
+                ZStack(alignment: .topLeading) {
+                    ListColumn()
+                        .frame(width: listWidth)
+                        .allowsHitTesting(pane || panel || !model.readerExpanded)
+                        .accessibilityHidden(!pane && !panel && model.readerExpanded)
+                    if pane {
+                        ColumnDivider(width: listWidth, available: available)
+                            .offset(x: listWidth)
+                    }
+                }
+                .frame(width: available, alignment: .topLeading)
+                .overlay(alignment: .bottom) {
+                    ToastStack()
+                        .padding(.bottom, (model.readerExpanded && !panel) || pane ? 24 : 24 + BottomBar.height + 12)
+                        .frame(width: pane ? listWidth : panel && readerShown ? available - readerWidth : available)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            ReaderColumn(besideList: pane || panel, onBack: pane ? nil : { model.back() },
-                         panel: pane ? nil : panelControls)
-                .frame(width: readerWidth)
+            ReaderColumn(besideList: pane, onBack: pane ? nil : { model.back() },
+                         panel: panelLayout ? panelControls(left: available - readerWidth) : nil)
+                .frame(width: readerWidth, height: panelLayout ? height : max(height - header, 0))
                 .overlay(alignment: .leading) {
                     if panel { Hairline(vertical: true) }
                 }
                 .modifier(PanelShadow(on: panel && readerShown))
                 .offset(x: readerOffset(pane: pane, panel: panel, shown: readerShown, listWidth: listWidth,
-                                        readerWidth: readerWidth, available: available))
+                                        readerWidth: readerWidth, available: available),
+                        y: panelLayout ? 0 : header)
                 .opacity(readerShown ? 1 : 0)
                 .allowsHitTesting(readerShown)
                 .accessibilityHidden(!readerShown)
         }
-        .frame(width: available, alignment: .topLeading)
+        .frame(width: available, height: height, alignment: .topLeading)
         .clipped()
-        .overlay(alignment: .bottom) {
-            ToastStack()
-                .padding(.bottom, model.readerExpanded || pane ? 24 : 24 + BottomBar.height + 12)
-                .frame(width: pane ? listWidth : available)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
     }
 
-    /// The panel's expand button, while conversations open in the slide-over.
-    private var panelControls: ReaderPanelControls? {
-        guard model.prefs.readerOverlay == .panel else { return nil }
-        return ReaderPanelControls(wide: model.readerWide, help: model.registry?.hint(model.readerWide ? "Show in Panel" : "Expand", "readerWide")) {
+    /// The panel's expand button, while conversations open in the slide-over. `left` is where the panel starts in
+    /// the list area: one that reaches under the traffic lights (expanded, no sidebar) keeps its buttons clear of them.
+    private func panelControls(left: CGFloat) -> ReaderPanelControls {
+        let lights = model.prefs.sidebarOpen ? 0 : max(TitleBar.trafficLightsWidth - 8 - left, 0)
+        return ReaderPanelControls(wide: model.readerWide, help: model.registry?.hint(model.readerWide ? "Show in Panel" : "Expand", "readerWide"),
+                                   trafficLights: lights) {
             model.toggleReaderWide()
         }
     }
 
-    /// The slide-over's width: most of a narrow window, about half of a wide one.
+    /// The slide-over's width: half the list area, never narrower than the reader's minimum.
     private func panelWidth(available: CGFloat) -> CGFloat {
         min(max(available * Self.panelFraction, Self.readerMinWidth), available)
     }
@@ -198,13 +207,13 @@ struct MainView: View {
     }
 }
 
-/// The slide-over panel's lift off the list behind it.
+/// The slide-over panel's lift off the list behind it: a few points of shade along its edge.
 private struct PanelShadow: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     let on: Bool
 
     func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(on ? (scheme == .dark ? 0.45 : 0.10) : 0), radius: 24, x: 0, y: 8)
+        content.shadow(color: .black.opacity(on ? (scheme == .dark ? 0.35 : 0.06) : 0), radius: 3, x: -1, y: 0)
     }
 }
 

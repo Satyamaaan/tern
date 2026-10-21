@@ -38,6 +38,8 @@ struct ReaderView: View {
     /// The page's reading column (720 pt of content plus 32 pt each side); the bars below match it.
     static let columnWidth: CGFloat = 784
     static let columnPadding: CGFloat = 32
+    /// The slide-over's margin on both sides of its column (reader.css matches it).
+    static let panelPadding: CGFloat = 42
 
     init(key: ThreadKey?, prefetch: [ThreadKey] = [], position: ReaderPosition? = nil, onBack: (() -> Void)? = nil,
          panel: ReaderPanelControls? = nil, active: Bool = true) {
@@ -54,8 +56,9 @@ struct ReaderView: View {
             ReaderTopBar(model: model, position: position, onBack: onBack, panel: panel)
             if model.findVisible, key != nil {
                 ReaderFindBar(model: model)
-                    .readerColumn()
+                    .readerColumn(panel: panel != nil)
                     .padding(.bottom, 8)
+                    .padding(.top, panel != nil ? 8 : 0)
             }
             ZStack(alignment: .bottomLeading) {
                 ReaderWebHost(webView: model.engine.webView, hiddenFromAccessibility: !active || key == nil)
@@ -81,9 +84,14 @@ struct ReaderView: View {
                     // The card takes the reply pill's place and grows with its text.
                     InlineComposerView(request: request, onClose: { model.composing = nil })
                         .fixedSize(horizontal: false, vertical: true)
-                        .readerColumn()
+                        .readerColumn(panel: panel != nil)
                         .padding(.top, 10)
                         .padding(.bottom, 18)
+                } else if panel != nil {
+                    ReaderPanelActions(model: model)
+                        .readerColumn(panel: true)
+                        .padding(.top, 10)
+                        .padding(.bottom, 35)
                 } else {
                     ReaderReplyBar(model: model)
                         .readerColumn()
@@ -98,6 +106,7 @@ struct ReaderView: View {
         }
         .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
+        .onChange(of: panel != nil, initial: true) { model.setLayout(panel: panel != nil) }
         .animation(.easeOut(duration: 0.12), value: model.toast)
     }
 
@@ -128,10 +137,11 @@ struct ReaderWebHost: NSViewRepresentable {
 }
 
 extension View {
-    /// Centres the view in the reader's reading column, so the bars line up with the page.
-    func readerColumn() -> some View {
-        padding(.horizontal, ReaderView.columnPadding)
-            .frame(maxWidth: ReaderView.columnWidth)
+    /// Centres the view in the reader's reading column, so the bars line up with the page. The slide-over's
+    /// column is 42 pt in from both edges, as wide as the panel up to the same 784 pt of content.
+    func readerColumn(panel: Bool = false) -> some View {
+        padding(.horizontal, panel ? ReaderView.panelPadding : ReaderView.columnPadding)
+            .frame(maxWidth: ReaderView.columnWidth - 2 * ReaderView.columnPadding + 2 * (panel ? ReaderView.panelPadding : ReaderView.columnPadding))
             .frame(maxWidth: .infinity)
     }
 }
@@ -154,14 +164,6 @@ final class ReaderWebContainer: NSView {
 
 // MARK: - Top bar
 
-/// The slide-over panel's expand button: the open conversation over the whole list, or back in the panel.
-struct ReaderPanelControls {
-    /// The conversation covers the whole list for now.
-    let wide: Bool
-    /// The button's tooltip with its shortcut.
-    var help: String?
-    let toggle: () -> Void
-}
 
 struct ReaderTopBar: View {
     @Bindable var model: ReaderModel
@@ -177,15 +179,69 @@ struct ReaderTopBar: View {
     @State private var hovering = false
 
     var body: some View {
+        if let panel, let onBack {
+            panelBar(panel, onBack: onBack)
+        } else {
+            columnBar
+        }
+    }
+
+    /// The slide-over's bar, in the window's title row: close and expand; More, Archive, the people in the
+    /// conversation and its attachments.
+    private func panelBar(_ panel: ReaderPanelControls, onBack: @escaping () -> Void) -> some View {
+        HStack(spacing: 2.5) {
+            ReaderIconButton(icon: .panelClose, help: hint("Close", "back"), action: onBack)
+            ReaderIconButton(icon: panel.wide ? .collapse : .expand, help: panel.help ?? (panel.wide ? "Show in Panel" : "Expand"),
+                             action: panel.toggle)
+            Spacer(minLength: 0)
+            if let key = model.key {
+                HStack(spacing: 5) {
+                    ReaderMenuButton(icon: .ellipsis, help: "More") {
+                        Menu("Snooze") { SnoozeMenuItems(threads: [key]) { model.pickingSnoozeDate = true } }
+                        moreMenu
+                    }
+                    .popover(isPresented: $model.pickingSnoozeDate, arrowEdge: .bottom) {
+                        ReaderSnoozePicker { date in
+                            model.pickingSnoozeDate = false
+                            model.perform(.snooze(until: date))
+                        }
+                    }
+                    archiveButton(icon: .archiveBox)
+                }
+                Rectangle()
+                    .fill(Color(Theme.hairlineStrong))
+                    .frame(width: 1, height: 15)
+                    .padding(.leading, 11)
+                    .accessibilityHidden(true)
+                ReaderParticipants(people: model.participants)
+                    .padding(.leading, 11)
+                let attachments = model.attachments
+                if !attachments.isEmpty {
+                    ReaderAttachmentPill(attachments: attachments) { model.openAttachment($0) }
+                        .padding(.leading, 9)
+                }
+            }
+        }
+        .padding(.leading, 15 + panel.trafficLights)
+        .padding(.trailing, 20)
+        .frame(height: MainWindow.headerHeight)
+        .background(WindowDragArea())
+        .overlay(alignment: .bottom) { Hairline() }
+    }
+
+    /// Archive, or Move to Inbox in the Archive mailbox. The slide-over draws Archive as a box.
+    @ViewBuilder private func archiveButton(icon: Icon = .archive) -> some View {
+        if app?.inArchive == true {
+            ReaderIconButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox) }
+        } else {
+            ReaderIconButton(icon: icon, help: hint("Archive", "archive")) { model.perform(.archive) }
+        }
+    }
+
+    private var columnBar: some View {
         HStack(spacing: 2) {
             if let onBack {
-                ReaderIconButton(icon: panel == nil ? .back : .panelClose, help: hint(panel == nil ? "Back to list" : "Close", "back"),
-                                 action: onBack)
-                    .padding(.trailing, panel == nil ? 4 : 0)
-            }
-            if let panel {
-                ReaderIconButton(icon: panel.wide ? .collapse : .expand,
-                                 help: panel.help ?? (panel.wide ? "Show in Panel" : "Expand"), action: panel.toggle)
+                ReaderIconButton(icon: .back, help: hint("Back to list", "back"), action: onBack)
                     .padding(.trailing, 4)
             }
             if let position, hovering || Self.alwaysShowPosition, model.key != nil {
@@ -200,11 +256,7 @@ struct ReaderTopBar: View {
             }
             Spacer(minLength: 0)
             if let key = model.key {
-                if app?.inArchive == true {
-                    ReaderIconButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox) }
-                } else {
-                    ReaderIconButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive) }
-                }
+                archiveButton()
                 ReaderMenuButton(icon: .snoozed, help: hint("Snooze", "snooze")) {
                     SnoozeMenuItems(threads: [key]) { model.pickingSnoozeDate = true }
                 }

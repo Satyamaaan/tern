@@ -167,6 +167,9 @@ enum ReaderPayload {
         if let me = toNames.firstIndex(of: "me"), me > 0 { toNames.insert(toNames.remove(at: me), at: 0) }
         var toLine = "to " + (toNames.isEmpty ? "undisclosed recipients" : toNames.prefix(3).joined(separator: ", "))
         if toNames.count > 3 { toLine += " +\(toNames.count - 3)" }
+        // The slide-over's "To:" line: the addresses themselves.
+        var toAddresses = recipients.prefix(2).map(\.email).joined(separator: ", ")
+        if recipients.count > 2 { toAddresses += " +\(recipients.count - 2)" }
 
         var details: [[String]] = [["From", formatted(message.from)]]
         if !message.toList.isEmpty { details.append(["To", message.toList.map(formatted).joined(separator: ", ")]) }
@@ -192,6 +195,7 @@ enum ReaderPayload {
             "email": message.fromEmail.lowercased(),
             "initials": initials(message.from),
             "toLine": toLine,
+            "toAddresses": recipients.isEmpty ? "undisclosed recipients" : toAddresses,
             "details": details,
             "date": shortDate(message.date, now: context.now),
             "dateLong": longDate(message.date, now: context.now),

@@ -37,7 +37,7 @@ struct ListColumn: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if model.prefs.readingPane || !model.readerExpanded {
+                if model.prefs.readingPane || !model.readerExpanded || model.readerInPanel {
                     BottomBar()
                         .padding(.bottom, 14)
                         .transition(.opacity)
