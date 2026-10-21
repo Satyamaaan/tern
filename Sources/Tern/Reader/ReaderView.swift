@@ -107,7 +107,6 @@ struct ReaderView: View {
         .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
         .onChange(of: panel != nil, initial: true) { model.setLayout(panel: panel != nil) }
-        .animation(.easeOut(duration: 0.12), value: model.toast)
     }
 
     /// What the reader should be doing: one change when the key and the visibility change together.
@@ -478,10 +477,14 @@ struct ReaderReplyBar: View {
     /// Shows quick replies without hovering (snapshot harness).
     static var alwaysShowQuickReplies = false
     @Environment(AppModel.self) private var app: AppModel?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var hovering = false
 
     var body: some View {
+        // The replies come in on hover, and again when they arrive later from the AI; the field makes room over
+        // 90 ms. With Reduce Motion the field changes width at once and the replies only fade (ReaderQuickReply).
+        let reveal: Animation? = reduceMotion ? nil : .easeOut(duration: Motion.hover)
         HStack(spacing: 8) {
             Button { model.reply(all: false) } label: {
                 HStack(spacing: 8) {
@@ -509,7 +512,8 @@ struct ReaderReplyBar: View {
             hovering = inside
             if inside { model.requestQuickReplies() }
         }
-        .animation(.easeOut(duration: 0.09), value: hovering)
+        .animation(reveal, value: hovering)
+        .animation(reveal, value: model.quickReplies)
     }
 }
 
@@ -518,6 +522,8 @@ struct ReaderQuickReply: View {
     let action: () -> Void
 
     @State private var hovering = false
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -531,5 +537,11 @@ struct ReaderQuickReply: View {
         }
         .buttonStyle(TernButtonStyle(.secondary))
         .onHover { hovering = $0 }
+        .opacity(shown ? 1 : 0)
+        .onAppear {
+            // Without Reduce Motion the bar's transition fades it in.
+            guard reduceMotion else { shown = true; return }
+            withAnimation(Motion.reduced) { shown = true }
+        }
     }
 }

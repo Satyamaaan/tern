@@ -15,6 +15,8 @@ enum Motion {
     /// What Reduce Motion gets instead of movement: a short crossfade.
     static let reduced = Animation.easeOut(duration: 0.08)
 
+    /// Press feedback: a button shrinking while held.
+    static let press: Double = 0.1
     /// Cursor slide from row to row.
     static let cursor: Double = 0.13
     /// Secondary controls revealed on hover (fade in only; they hide at once).
@@ -23,6 +25,12 @@ enum Motion {
     static let reveal: Double = 0.14
     /// A small overlay opened from the keyboard: the palette, the chord hint.
     static let overlay: Double = 0.12
+    /// A small bar or popover appearing beside what it acts on (the formatting bar).
+    static let popover: Double = 0.12
+    /// A selection fill sliding a short way between options (segmented controls).
+    static let slide: Double = 0.18
+    /// The inline reply card rising out of the reply field.
+    static let cardRise: Double = 0.15
     /// A toast or card coming in, and going out.
     static let enter: Double = 0.16
     static let exit: Double = 0.12

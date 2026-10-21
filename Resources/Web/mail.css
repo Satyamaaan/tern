@@ -1,6 +1,10 @@
 :host { display: block; }
 .tern-body { overflow-wrap: break-word; word-wrap: break-word; min-width: 0; padding: var(--card-padding, 0); }
 .tern-body img { max-width: 100%; height: auto; }
+:where(.tern-body img) { transition: opacity 160ms ease-out; }
+/* A remote image still on its way (reader.js marks only those that haven't painted after the first frames, so
+   cached ones and j/k never fade) fades in when it lands. Zero specificity: mail CSS still wins. */
+.tern-body img:where([data-tern-loading]) { opacity: 0; }
 /* An image left out (Ask first, Spam) or dropped: the box the mail declared, softly filled, with a small picture in
    the middle in place of WebKit's alt text in the corner (the alt text stays for VoiceOver). No declared height:
    a slim 32 px bar. Same specificity as the rule above, so mail CSS sizes these as it sizes its images. */
@@ -36,7 +40,22 @@
   background: var(--hover); color: var(--text3); font: 600 11px/16px var(--ui); letter-spacing: 1px;
   user-select: none; -webkit-user-select: none; white-space: normal; cursor: default;
 }
+.tern-quote-toggle { transition: transform 100ms cubic-bezier(0.2, 0.9, 0.25, 1); }
+.tern-quote-toggle:active { transform: scale(0.94); }
 .tern-quote-toggle:hover { background: var(--selected); color: var(--text2); }
 .tern-quote-toggle.open { background: var(--selected); }
 .tern-quote[hidden] { display: none; }
+/* Quoted text opened by a click fades in; closing it, and quotes reopened when the thread comes back, don't. */
+.tern-quote.revealing { animation: tern-reveal 140ms cubic-bezier(0.2, 0.9, 0.25, 1) both; }
 :host([data-mode="simple"]) .tern-quote, :host([data-mode="plain"]) .tern-quote { color: var(--text2); }
+
+@keyframes tern-reveal { from { opacity: 0; transform: translateY(-3px); } }
+@keyframes tern-fade { from { opacity: 0; } }
+
+/* Reduce Motion (reader.css doesn't reach in here): opacity only, 80 ms. */
+@media (prefers-reduced-motion: reduce) {
+  :where(.tern-body img) { transition-duration: 80ms; }
+  .tern-quote.revealing { animation: tern-fade 80ms ease-out both; }
+  .tern-quote-toggle { transition: none; }
+  .tern-quote-toggle:active { transform: none; }
+}

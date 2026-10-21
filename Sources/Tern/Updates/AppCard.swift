@@ -70,6 +70,7 @@ extension AppCard where Content == EmptyView {
 /// A thin `ink` progress line on an `inkSoft` track. Nil animates a short segment back and forth.
 struct ThinProgress: View {
     var fraction: Double?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -77,9 +78,19 @@ struct ThinProgress: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color(Theme.inkSoft))
                 if let fraction {
+                    // Linear, so reports arriving many times a second read as one steady fill.
                     Capsule().fill(Color(Theme.ink))
                         .frame(width: max(2, width * min(max(fraction, 0), 1)))
-                        .animation(.easeOut(duration: 0.2), value: fraction)
+                        .animation(.linear(duration: 0.25), value: fraction)
+                } else if reduceMotion {
+                    // Reduce Motion: the segment stays put and breathes (opacity 0.5 ↔ 1 over 1.6 s).
+                    TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                        Capsule().fill(Color(Theme.ink))
+                            .frame(width: width * 0.28)
+                            .offset(x: width * 0.36)
+                            .opacity(0.75 + 0.25 * cos(phase * 2 * .pi))
+                    }
                 } else {
                     TimelineView(.animation) { context in
                         let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
@@ -124,7 +135,8 @@ final class CardPanel: NSPanel {
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
         collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        animationBehavior = .alertPanel
+        // Tern's own entrance and exit (present, dismiss), not AppKit's alert animation.
+        animationBehavior = .none
         let margin = Self.margin
         let root = view
             .padding(EdgeInsets(top: margin.top, leading: margin.left, bottom: margin.bottom, trailing: margin.right))
@@ -148,9 +160,12 @@ final class CardPanel: NSPanel {
         onCancel?()
     }
 
-    /// Resizes to the card, keeping the top edge where it is.
+    /// Resizes to the card, keeping the top edge where it is (and where it will rest, while it moves).
     private func fit(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
+        if let resting {
+            self.resting = NSPoint(x: resting.x, y: resting.y + frame.height - size.height)
+        }
         let top = frame.maxY
         setFrame(NSRect(x: frame.minX, y: top - size.height, width: size.width, height: size.height), display: true)
     }
@@ -168,17 +183,73 @@ final class CardPanel: NSPanel {
         }
     }
 
+    /// Bumped by every present and dismiss, so a dismiss's late `orderOut` never hides a card shown again since.
+    private var generation = 0
+    /// Where the card rests on screen, kept while it fades out so a present can bring it back there.
+    private var resting: NSPoint?
+    private(set) var isLeaving = false
+
+    /// On screen and not on its way out.
+    var isShown: Bool { isVisible && !isLeaving }
+
     /// Shows the card. `takesFocus` only for something the user just asked for (a check, a prompt at launch): a
     /// card that arrives on its own must not catch the keys of someone typing, where Return would press its
     /// primary button.
+    ///
+    /// It fades in and settles 6 pt into place (180 ms, house curve); a card on its way out turns back from where
+    /// it is. Reduce Motion: an 80 ms fade.
     func present(takesFocus: Bool) {
-        if !isVisible { place() }
+        generation += 1
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !isVisible {
+            place()
+            resting = frame.origin
+            alphaValue = 0
+            if !reduce { setFrameOrigin(NSPoint(x: frame.minX, y: frame.minY + 6)) }
+        }
+        isLeaving = false
         if takesFocus && NSApp.isActive { makeKeyAndOrderFront(nil) } else { orderFront(nil) }
+        // Already resting (a new phase of a card on screen): nothing to move.
+        guard let target = resting else { alphaValue = 1; return }
+        let current = generation
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reduce ? 0.08 : 0.18
+            context.timingFunction = reduce ? CAMediaTimingFunction(name: .easeOut) : Motion.timing
+            animator().alphaValue = 1
+            if frame.origin != target { animator().setFrameOrigin(target) }
+        } completionHandler: {
+            MainActor.assumeIsolated { if self.generation == current { self.resting = nil } }
+        }
     }
 
-    /// Hides the card and lets it go.
+    /// Hides the card and lets it go: it fades and lifts 4 pt (120 ms; an 80 ms fade with Reduce Motion), then
+    /// orders out.
     func dismiss() {
-        parent?.removeChildWindow(self)
-        orderOut(nil)
+        generation += 1
+        let current = generation
+        guard isVisible else {
+            parent?.removeChildWindow(self)
+            orderOut(nil)
+            return
+        }
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !isLeaving { resting = frame.origin }
+        isLeaving = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reduce ? 0.08 : Motion.exit
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            animator().alphaValue = 0
+            if !reduce, let resting { animator().setFrameOrigin(NSPoint(x: resting.x, y: resting.y + 4)) }
+        } completionHandler: {
+            // Holds the panel until it is out, even if its owner has let it go.
+            MainActor.assumeIsolated {
+                guard self.generation == current else { return }
+                self.isLeaving = false
+                self.parent?.removeChildWindow(self)
+                self.orderOut(nil)
+                self.alphaValue = 1
+                self.resting = nil
+            }
+        }
     }
 }

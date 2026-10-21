@@ -37,8 +37,8 @@ struct IconButton: View {
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
 /// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
-/// All three darken a step while pressed, show an `ink` ring when focused from the keyboard and drop
-/// to 40 % when disabled.
+/// All three darken a step and shrink to 97 % while pressed (the shrink only, on the house curve; none under
+/// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 40 % when disabled.
 struct TernButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, quiet }
     enum Size { case regular, small }
@@ -75,6 +75,7 @@ struct TernButtonStyle: ButtonStyle {
                 .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: kind == .secondary ? 1 : 0))
                 .focusRing(isFocused, shape: shape)
                 .contentShape(shape)
+                .pressScale(configuration.isPressed, to: 0.97)
                 .opacity(isEnabled ? 1 : 0.4)
                 .onHover { hovering = $0 && isEnabled }
         }
@@ -92,7 +93,7 @@ struct TernButtonStyle: ButtonStyle {
 }
 
 /// Icon-only buttons: the label sets the size (28 pt by default); `hover` fill under the pointer,
-/// `selected` while pressed, an `ink` ring when focused, 40 % when disabled.
+/// `selected` and 95 % while pressed, an `ink` ring when focused, 40 % when disabled.
 struct IconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         StyledButton(configuration: configuration)
@@ -111,6 +112,7 @@ struct IconButtonStyle: ButtonStyle {
                     configuration.isPressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear))
                 .focusRing(isFocused, shape: shape)
                 .contentShape(shape)
+                .pressScale(configuration.isPressed, to: 0.95)
                 .opacity(isEnabled ? 1 : 0.4)
                 .onHover { hovering = $0 && isEnabled }
         }
@@ -139,9 +141,72 @@ struct LinkButtonStyle: ButtonStyle {
 }
 
 extension View {
+    /// Press feedback: shrinks to `scale` while held, over 100 ms on the house curve. Only the scale animates
+    /// (fills stay instant), and a release mid-press retargets from where it is. Nothing under Reduce Motion.
+    func pressScale(_ pressed: Bool, to scale: CGFloat) -> some View {
+        modifier(PressScale(pressed: pressed, scale: scale))
+    }
+
+    /// A secondary control shown on hover: fades in over 90 ms (80 ms with Reduce Motion), hides at once.
+    func hoverReveal(_ visible: Bool) -> some View {
+        modifier(HoverReveal(visible: visible))
+    }
+
     /// The keyboard focus ring: 1.5 px `ink` at 50 %, 2 px outside the control.
     func focusRing<S: InsettableShape>(_ visible: Bool, shape: S) -> some View {
         overlay(shape.inset(by: -2.5).strokeBorder(Color(Theme.ink).opacity(visible ? 0.5 : 0), lineWidth: 1.5))
+    }
+}
+
+private struct PressScale: ViewModifier {
+    let pressed: Bool
+    let scale: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(Motion.ease(Motion.press)) {
+            $0.scaleEffect(pressed && !reduceMotion ? scale : 1)
+        }
+    }
+}
+
+private struct HoverReveal: ViewModifier {
+    let visible: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(visible ? Motion.or(reduced: reduceMotion, .easeOut(duration: Motion.hover)) : nil) {
+            $0.opacity(visible ? 1 : 0)
+        }
+    }
+}
+
+/// A `text3` label for work in progress ("Writing…"): a soft light passes over it every 1.4 s while it shows.
+/// Still under Reduce Motion.
+struct WaitingText: View {
+    let text: String
+    var size: CGFloat = 12
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        let label = Text(text).font(.ui(size))
+        label
+            .foregroundStyle(Color(Theme.text3))
+            .overlay {
+                if !reduceMotion {
+                    LinearGradient(
+                        stops: [.init(color: .clear, location: 0.35), .init(color: Color(Theme.text1), location: 0.5),
+                                .init(color: .clear, location: 0.65)],
+                        startPoint: UnitPoint(x: -1.5 + phase * 2.5, y: 0.5),
+                        endPoint: UnitPoint(x: 1 + phase * 2.5, y: 0.5))
+                        .mask(label)
+                        .onAppear {
+                            withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { phase = 1 }
+                        }
+                }
+            }
+            .accessibilityLabel(text)
     }
 }
 

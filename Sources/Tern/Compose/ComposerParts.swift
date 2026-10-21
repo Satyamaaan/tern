@@ -54,7 +54,7 @@ struct SignatureBlock: View {
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(IconButtonStyle())
-            .opacity(hovering ? 1 : 0)
+            .hoverReveal(hovering)
             .help("Remove signature from this message")
         }
         .onHover { hovering = $0 }
@@ -118,7 +118,7 @@ struct AttachmentChip: View {
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(IconButtonStyle())
-            .opacity(hovering ? 1 : 0)
+            .hoverReveal(hovering)
             .help("Remove")
         }
         .padding(.leading, 10)
@@ -370,7 +370,7 @@ struct AIInstructionBar: View {
                 onChange: { model.aiInstruction = $0 }, onSubmit: { model.runAI() })
                 .frame(height: 18)
             if model.aiBusy {
-                Text("Writing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
+                WaitingText(text: "Writing…")
             } else {
                 Text("↵").font(.numeric(12)).foregroundStyle(Color(Theme.text3))
             }
