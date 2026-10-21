@@ -1,4 +1,5 @@
 import AppKit
+import GRDB
 import Observation
 import TernCore
 
@@ -92,9 +93,10 @@ final class SettingsState {
     /// Typed in the field above the sections: the page lists matching settings instead of a section.
     var query = ""
     var searchFocused = false
-    var provider: AIProvider { didSet { saveAI() } }
-    var aiModel: String { didSet { saveAI() } }
-    var autoProjects: Bool { didSet { saveAI() } }
+    var provider: AIProvider { didSet { if provider != oldValue { saveAI() } } }
+    /// The saved model name. The field edits its own copy and hands it to `commitAIModel`.
+    private(set) var aiModel: String { didSet { if aiModel != oldValue { saveAI() } } }
+    var autoProjects: Bool { didSet { if autoProjects != oldValue { saveAI() } } }
     let board = AIStatusBoard()
     var indexStatus: String?
     /// Opens the Google client editor at once (snapshots).
@@ -269,17 +271,28 @@ final class SettingsState {
 
     // MARK: Saving
 
-    /// Writes AI settings off the main thread.
+    /// The model field was submitted or let go of the keyboard: saves its text if it changed.
+    func commitAIModel(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        if text != aiModel { aiModel = text }
+    }
+
+    /// Writes the AI settings off the main thread, in one transaction, so whatever watches them (the triage queue)
+    /// sees one change.
     private func saveAI() {
-        let store = model.store
-        let provider = provider
-        let aiModel = aiModel.trimmingCharacters(in: .whitespaces)
-        let autoProjects = autoProjects
+        let database = model.store.database
+        var values: [(String, String?)] = [
+            (SettingKey.aiEnabled, provider == .off ? "false" : "true"),
+            (SettingKey.aiModel, aiModel.isEmpty ? nil : aiModel),
+            (SettingKey.aiAutoProjects, autoProjects ? "true" : "false"),
+        ]
+        if provider != .off { values.append((SettingKey.aiProvider, provider.rawValue)) }
         model.writes.async {
-            try? store.setSetting(SettingKey.aiEnabled, provider == .off ? "false" : "true")
-            if provider != .off { try? store.setSetting(SettingKey.aiProvider, provider.rawValue) }
-            try? store.setSetting(SettingKey.aiModel, aiModel.isEmpty ? nil : aiModel)
-            try? store.setSetting(SettingKey.aiAutoProjects, autoProjects ? "true" : "false")
+            try? database.writer.write { db in
+                for (key, value) in values {
+                    if let value { try Setting(key: key, value: value).upsert(db) } else { _ = try Setting.deleteOne(db, key: key) }
+                }
+            }
         }
     }
 

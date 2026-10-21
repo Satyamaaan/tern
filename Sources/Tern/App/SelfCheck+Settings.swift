@@ -1,4 +1,5 @@
 import AppKit
+import GRDB
 import TernCore
 
 /// The settings page in the main window and edited shortcuts: opening and closing it leaves the mail as it
@@ -9,6 +10,7 @@ import TernCore
 extension SelfCheck {
     func settings() {
         settingsRoundTrip()
+        aiModelSaves()
         settingsLayoutRestore()
         settingsSplitInbox()
         settingsRestoresTyping()
@@ -52,6 +54,35 @@ extension SelfCheck {
         send("[", modifiers: .command, keyCode: 33)
         let table = (model.listView as? MessageListController)?.table
         check("⌘[ closes settings and the list has the keyboard", !model.settingsOpen && model.cursor == listCursor && window.firstResponder === table)
+    }
+
+    /// The AI model name is saved when the field commits it, in one transaction, and not at all when it is unchanged.
+    /// (Typing into the field needs a provider on, which would start the real CLI, so this drives the state.)
+    private func aiModelSaves() {
+        model.openSettings(.ai)
+        wait(0.2)
+        guard let settings = model.settings else { return check("settings: the AI section", false) }
+        final class Count { var value = 0 }
+        let transactions = Count()
+        let observer = DatabaseRegionObservation(tracking: Table("setting")).start(
+            in: model.store.database.writer, onError: { _ in },
+            onChange: { _ in DispatchQueue.main.async { transactions.value += 1 } })
+        defer { observer.cancel() }
+        let saved = settings.aiModel
+        func settle() { model.writes.sync {}; wait(0.1) }
+
+        settings.commitAIModel(saved)
+        settings.commitAIModel(" \(saved) ")
+        settle()
+        check("committing the AI model unchanged writes nothing", transactions.value == 0)
+        settings.commitAIModel("check-model")
+        settle()
+        let stored = (try? model.store.setting(SettingKey.aiModel)) ?? nil
+        print("  ai model: committing a new name wrote \(transactions.value) transaction(s)")
+        check("a new AI model is saved in one transaction", transactions.value == 1 && stored == "check-model")
+        settings.commitAIModel(saved)
+        settle()
+        model.closeSettings()
     }
 
     /// Layout's reading pane toggle runs `toggleReadingPane`, as ⌘\ does.

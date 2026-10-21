@@ -162,17 +162,26 @@ struct AIProviderItem: View {
     }
 }
 
+/// The model name is saved on Return and when the field lets go of the keyboard, not on every key.
 struct AIModelItem: View {
     @Bindable var state: SettingsState
+    @State private var text = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         SettingsRow(title: "Model", detail: "Leave empty for the tool's default.") {
-            TextField("Default", text: $state.aiModel)
+            TextField("Default", text: $text)
                 .textFieldStyle(.plain)
                 .font(.numeric(12))
                 .multilineTextAlignment(.trailing)
                 .frame(width: 180)
+                .autocorrectionDisabled()
                 .disabled(state.provider == .off)
+                .focused($focused)
+                .onSubmit { state.commitAIModel(text) }
+                .onChange(of: focused) { if !focused { state.commitAIModel(text) } }
+                .onChange(of: state.aiModel, initial: true) { if !focused { text = state.aiModel } }
+                .onDisappear { state.commitAIModel(text) }
         }
     }
 }
