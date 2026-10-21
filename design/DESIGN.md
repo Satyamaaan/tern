@@ -96,7 +96,7 @@ headlines. No serif, no monospace in the interface (mail's own `<pre>` keeps a s
 | Row sender | Inter 13, 600 `text1` unread, 400 `text2` read |
 | Row subject | Inter 13, 500 `text1` unread, 400 `text2` read; preview 400 `text3` |
 | Small, meta, tags | Inter 11.5–12, tags 500 |
-| Date headers | Inter 12 500, sentence case, `text3`, left in line with the avatars |
+| Date headers | Inter 12 500, sentence case, `text3`, left in line with the avatars, vertically centred |
 | Section caps (sidebar) | Inter 11 500, +0.6 tracking, `text3` |
 | Times, counts, keycaps | Inter 12 tabular (`numeric`) |
 | Tabs | Inter 13, 500 active / 400 others; count 12 tabular `text3` |
@@ -175,8 +175,10 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
 
 ### List
 - A centred column: full width minus 8 px margins when narrow, 28 px margins from 760 px, at most **1040 px**.
-- **Date headers**, 34 px, sticky: `Today · Yesterday · This week · Earlier this month ·` month names · years,
-  left-aligned with the avatars in `text3`, hairline below. Every list is in date order; nothing floats to the top.
+- **Date headers**, 38 px, sticky: `Today · Yesterday · This week · Earlier this month ·` month names · years,
+  left-aligned with the avatars in `text3`, centred in their height, hairline below across the column. No line
+  under the title bar: the window draws no separator, and the scroll edge pocket macOS puts behind a floating
+  header (a line across the whole window) is hidden (`ListScrollView`). Every list is in date order; nothing floats to the top.
 - **Rows** (NSTableView, custom-drawn, fixed heights, reused): one line at **40 pt** when the list is ≥ 600 px
   wide, two lines at 56 pt otherwise (the reading pane). Density Comfortable (40 pt) / Compact (32 pt); both are
   one line when wide. Read rows step back to `text2` so unread mail is what the eye lands on.
@@ -186,7 +188,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     right-aligned: "17m", "3h", "Tue", "Oct 12", "Oct 12 '25").
   - Two lines: avatar · sender (count) · dot … tag · paperclip · time, then subject — preview.
   - **Avatar**: a rounded square (radius a quarter of its side): the sender's domain logo (`SenderLogos`, full
-    bleed on white with a faint ring), else one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
+    bleed on white with a faint ring; a logo that is its own rounded tile, like GitHub's, is cropped to the tile
+    and backed with its edge colour so no white corners show, `LogoTile`), else one initial on `avatarFill`, with the account's dot while several accounts share the list. Logos are asked for
     as rows come into view; rows on screen refresh when one arrives. Spam and Trash show initials only (no
     fetch, no cached logo), in the list and the reader.
   - **Sender names** drop a bot's `[bot]`: `vercel[bot]` reads "Vercel".

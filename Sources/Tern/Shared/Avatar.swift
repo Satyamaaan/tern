@@ -41,14 +41,16 @@ enum Avatar {
         (text as NSString).draw(at: CGPoint(x: rect.midX - width / 2, y: y), withAttributes: attributes)
     }
 
-    /// A logo clipped to `shape` on white (most site icons are drawn for white), full bleed, with a faint
-    /// ring so it holds its edge on any background.
+    /// A logo clipped to `shape`, full bleed, with a faint ring so it holds its edge on any background. It
+    /// sits on white (most site icons are drawn for white), except an icon that is its own tile, which is
+    /// cropped to the tile and backed with its edge colour (`LogoTile`).
     static func drawLogo(_ image: NSImage, in rect: CGRect, shape: Shape = .circle) {
+        let tile = LogoTile.fit(image)
         NSGraphicsContext.saveGraphicsState()
         shape.path(in: rect).addClip()
-        NSColor.white.setFill()
+        tile.backdrop.setFill()
         rect.fill()
-        image.draw(in: rect, from: .zero, operation: .sourceOver,
+        image.draw(in: rect, from: tile.source, operation: .sourceOver,
                    fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         NSGraphicsContext.restoreGraphicsState()
         let ring = shape.path(in: rect.insetBy(dx: 0.25, dy: 0.25))

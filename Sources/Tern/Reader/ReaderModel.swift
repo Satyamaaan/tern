@@ -204,7 +204,10 @@ final class ReaderModel {
         #if DEBUG
         if let override = Self.logoOverride { return ReaderPayload.logos(senders, lookup: override) }
         #endif
-        return ReaderPayload.logos(senders) { SenderLogos.shared.pngData(forEmail: $0) }
+        // Drawn as the list draws them, so a logo that is its own tile has no white corners.
+        return ReaderPayload.logos(senders) { email in
+            SenderLogos.shared.logo(forEmail: email).flatMap { LogoTile.squarePNG($0) }
+        }
     }
 
     /// Follows `SenderLogos.revision` for as long as this model lives.

@@ -18,6 +18,8 @@ final class MainWindow: NSWindow {
         title = "Tern"
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        // The list scrolls under the title bar; macOS would draw its own line there. Date headers have theirs.
+        titlebarSeparatorStyle = .none
         isReleasedWhenClosed = false
         minSize = Self.minimumSize
         backgroundColor = Theme.bg

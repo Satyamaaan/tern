@@ -16,7 +16,7 @@ struct MessageListView: NSViewRepresentable {
 @MainActor
 final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewDelegate, ListPresenting {
     let model: AppModel
-    let scrollView = NSScrollView()
+    let scrollView = ListScrollView()
     let table = MessageTableView()
     private var items: [ListItem] = []
     private var snapshot = ListSnapshot.empty
@@ -32,7 +32,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     /// A report of the rows in view to AI sorting is on its way.
     private var screenReportPending = false
 
-    static let headerHeight: CGFloat = 34
+    static let headerHeight: CGFloat = 38
     static let footerHeight: CGFloat = 44
 
     init(model: AppModel) {

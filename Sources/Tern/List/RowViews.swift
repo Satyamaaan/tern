@@ -423,6 +423,11 @@ final class HeaderRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override var isFloating: Bool { didSet { needsDisplay = true } }
 
+    // The title is drawn, so VoiceOver reads it from here.
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+    override func accessibilityLabel() -> String? { title }
+
     override func setFrameSize(_ newSize: NSSize) {
         let changed = newSize != frame.size
         super.setFrameSize(newSize)
@@ -443,7 +448,7 @@ final class HeaderRowView: NSTableRowView {
         }
         let text = title as NSString
         let size = text.size(withAttributes: Self.attributes)
-        text.draw(at: CGPoint(x: column.minX + ThreadRowView.padding, y: bounds.maxY - 8 - size.height), withAttributes: Self.attributes)
+        text.draw(at: CGPoint(x: column.minX + ThreadRowView.padding, y: floor(bounds.midY - size.height / 2)), withAttributes: Self.attributes)
     }
 }
 
@@ -499,5 +504,25 @@ extension ThreadRowView {
               let range = text.range(of: title, options: [.anchored, .caseInsensitive]) else { return text }
         let rest = text[range.upperBound...].drop { $0.isWhitespace || $0.isPunctuation && $0 != "(" && $0 != "\"" }
         return rest.isEmpty ? text : String(rest)
+    }
+}
+
+/// The list's scroll view. macOS backs a floating date header with a scroll edge "pocket" whose hard
+/// edge is a line across the whole window; the header paints its own background and a hairline across
+/// the column, so the pocket is hidden. (There is no public switch for it; if AppKit renames the class,
+/// the line simply comes back.)
+final class ListScrollView: NSScrollView {
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if Self.isEdgePocket(subview) { subview.isHidden = true }
+    }
+
+    override func layout() {
+        super.layout()
+        for subview in subviews where Self.isEdgePocket(subview) && !subview.isHidden { subview.isHidden = true }
+    }
+
+    private static func isEdgePocket(_ view: NSView) -> Bool {
+        NSStringFromClass(type(of: view)).contains("ScrollPocket")
     }
 }

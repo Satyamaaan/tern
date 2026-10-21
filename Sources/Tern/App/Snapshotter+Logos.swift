@@ -16,8 +16,12 @@ extension Snapshotter {
             ("uber.com", 0x000000, "U", 0xFFFFFF), ("amazon.com", 0x232F3E, "a", 0xFF9900),
             ("tldrnewsletter.com", 0x0B0B0B, "T", 0xFFFFFF), ("stratechery.com", 0xF3EFE6, "S", 0x1F3A5F),
         ]
+        // Like many real site icons, these two are drawn as their own rounded tile with see-through
+        // corners (Linear's and Figma's inside a margin too), so the shots show how such logos fill an avatar.
+        let tiles: [String: CGFloat] = ["github.com": 0, "linear.app": 6, "figma.com": 5]
         for mark in marks {
-            guard let png = drawMark(mark.glyph, background: mark.background, foreground: mark.foreground) else { continue }
+            guard let png = drawMark(mark.glyph, background: mark.background, foreground: mark.foreground,
+                                     tileMargin: tiles[mark.domain]) else { continue }
             SenderLogos.shared.install(png, forDomain: mark.domain)
         }
     }
@@ -39,15 +43,21 @@ extension Snapshotter {
         }
     }
 
-    /// A 64 px square icon with one glyph, as a PNG.
-    private static func drawMark(_ glyph: String, background: UInt32, foreground: UInt32) -> Data? {
+    /// A 64 px square icon with one glyph, as a PNG. With `tileMargin` it is a rounded tile that far inside
+    /// a transparent square.
+    private static func drawMark(_ glyph: String, background: UInt32, foreground: UInt32, tileMargin: CGFloat? = nil) -> Data? {
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 4,
                                          hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
               let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         Theme.rgb(background).setFill()
-        NSRect(x: 0, y: 0, width: 64, height: 64).fill()
+        if let margin = tileMargin {
+            let tile = NSRect(x: 0, y: 0, width: 64, height: 64).insetBy(dx: margin, dy: margin)
+            NSBezierPath(roundedRect: tile, xRadius: tile.width * 0.22, yRadius: tile.width * 0.22).fill()
+        } else {
+            NSRect(x: 0, y: 0, width: 64, height: 64).fill()
+        }
         let font = Theme.display(34)
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Theme.rgb(foreground)]
         let size = (glyph as NSString).size(withAttributes: attributes)
