@@ -46,7 +46,7 @@ public enum ProjectRules {
     /// icon or colour) needs no `recomputeAll`.
     public static func sameRules(_ lhs: [ProjectRule], _ rhs: [ProjectRule]) -> Bool {
         func normalized(_ rules: [ProjectRule]) -> Set<[String]> {
-            Set(rules.map { [$0.field.rawValue, $0.value.trimmingCharacters(in: .whitespaces)] })
+            Set(rules.map { [$0.field.rawValue, $0.value.trimmingCharacters(in: .whitespacesAndNewlines)] })
         }
         return normalized(lhs) == normalized(rhs)
     }

@@ -248,7 +248,7 @@ private func links(_ store: MailStore, _ projectId: String) throws -> [String: T
     let label = ProjectRule(id: 5, projectId: "p", field: .label, value: "Clients")
     let draft = [
         ProjectRule(projectId: "p", field: .label, value: " Clients "),
-        ProjectRule(projectId: "p", field: .fromDomain, value: "acme.com"),
+        ProjectRule(projectId: "p", field: .fromDomain, value: "acme.com\n"),
         ProjectRule(projectId: "p", field: .fromDomain, value: "acme.com"),
     ]
     #expect(ProjectRules.sameRules([domain, label], draft))
