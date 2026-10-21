@@ -216,10 +216,22 @@ final class ComposerModel: Identifiable {
         setRecipients(recipients(kind) + [drag.participant], for: kind)
     }
 
-    func suggestions(for query: String) -> [Participant] {
-        let present = Set((to + cc + bcc).map { $0.email.lowercased() })
-        return (try? drafts.suggestRecipients(prefix: query, limit: 6, excluding: present)) ?? []
+    /// Autocomplete for the recipient fields, leaving out the addresses already present; read off the main thread.
+    func suggestions(for query: String) async -> [Participant] {
+        let present = presentAddresses, drafts = drafts
+        return await Task.detached(priority: .userInitiated) {
+            (try? drafts.suggestRecipients(prefix: query, limit: Self.suggestionLimit, excluding: present)) ?? []
+        }.value
     }
+
+    /// The same, read at once.
+    func suggestionsNow(for query: String) -> [Participant] {
+        (try? drafts.suggestRecipients(prefix: query, limit: Self.suggestionLimit, excluding: presentAddresses)) ?? []
+    }
+
+    nonisolated static let suggestionLimit = 6
+
+    private var presentAddresses: Set<String> { Set((to + cc + bcc).map { $0.email.lowercased() }) }
 
     func removeSignature() {
         signatureHtml = nil

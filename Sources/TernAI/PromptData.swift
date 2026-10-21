@@ -39,21 +39,40 @@ enum PromptData {
                 key: thread.key, subject: thread.subject, messageCount: thread.messageCount, lastDate: thread.lastDate,
                 labels: readableLabels(thread.labelIds), messages: [])
         }
+        // Each thread's latest messages come from a backwards walk of `message_by_thread` that stops after
+        // `limit`, so only those rows are read and only their bodies cut.
+        var unique = Set<ThreadKey>()
+        var latestArguments: StatementArguments = []
+        for key in keys where unique.insert(key).inserted {
+            _ = latestArguments.append(contentsOf: [key.accountId, key.threadId])
+        }
+        _ = latestArguments.append(contentsOf: [max(limit, 0)])
         var latest: [ThreadKey: [Row]] = [:]
         for row in try Row.fetchAll(db, sql: """
-            SELECT accountId, threadId, date, fromName, fromEmail, toList, ccList, snippet,
-              substr(bodyText, 1, 6000) AS bodyHead, isFromMe
-            FROM message WHERE (accountId, threadId) IN (VALUES \(placeholders)) AND isDraft = 0
-            ORDER BY date
-            """, arguments: arguments) {
-            let key = ThreadKey(accountId: row["accountId"], threadId: row["threadId"])
-            latest[key, default: []].append(row)
-            if latest[key]!.count > limit { latest[key]!.removeFirst() }
+            WITH k(accountId, threadId) AS (VALUES \(unique.map { _ in "(?, ?)" }.joined(separator: ", ")))
+            SELECT m.accountId, m.threadId, m.date, m.fromName, m.fromEmail, m.toList, m.ccList, m.snippet,
+              substr(m.bodyText, 1, 6000) AS bodyHead, m.isFromMe
+            FROM k JOIN message m ON m.seq IN (
+              SELECT seq FROM message
+              WHERE accountId = k.accountId AND threadId = k.threadId AND isDraft = 0
+              ORDER BY date DESC, seq DESC LIMIT ?)
+            ORDER BY m.date, m.seq
+            """, arguments: latestArguments) {
+            latest[ThreadKey(accountId: row["accountId"], threadId: row["threadId"]), default: []].append(row)
         }
         for (key, rows) in latest {
             threads[key]?.messages = rows.map { message($0, characters: characters) }
         }
         return keys.compactMap { threads[$0] }.filter { !$0.messages.isEmpty }
+    }
+
+    /// The thread's message count, read without any body, when `threads` would return it (it has a message that
+    /// isn't a draft); nil otherwise.
+    static func messageCount(_ db: Database, key: ThreadKey) throws -> Int? {
+        try Int.fetchOne(db, sql: """
+            SELECT messageCount FROM thread t WHERE accountId = ? AND id = ?
+              AND EXISTS (SELECT 1 FROM message WHERE accountId = t.accountId AND threadId = t.id AND isDraft = 0)
+            """, arguments: [key.accountId, key.threadId])
     }
 
     /// The owner's own earlier messages, as voice samples for drafting: from this thread first, then

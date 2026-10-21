@@ -210,7 +210,11 @@ final class TypingCheck {
             model.settings?.shortcutFilter = ""
             model.settings?.takeKeyboard()
         case .aiModel:
-            model.settings?.aiModel = ""
+            // Emptied as a person would, then let go of: the field saves what it holds when it loses the keyboard.
+            KeyRouter.textInput(in: window)?.selectAll(nil)
+            KeyRouter.textInput(in: window)?.delete(nil)
+            model.settings?.takeKeyboard()
+            await wait(0.1)
             model.closeSettings()
         case .searchPill: model.endSearch(restoreFocus: true)
         case .palette: model.palette = nil
@@ -231,10 +235,12 @@ final class TypingCheck {
         switch field {
         case .settingsSearch: model.settings?.query = ""
         case .shortcutsFilter: model.settings?.shortcutFilter = ""
-        case .aiModel: model.settings?.aiModel = ""
         case .searchPill: model.searchText = ""
         case .palette: palette.query = ""
         case .findBar: model.services.reader.model?.findText = ""
+        case .aiModel:
+            KeyRouter.textInput(in: window)?.selectAll(nil)
+            KeyRouter.textInput(in: window)?.delete(nil)
         case .composerSubject:
             // As a person would: select all and delete, which tells the field and the model.
             KeyRouter.textInput(in: composer?.window)?.selectAll(nil)
@@ -249,12 +255,12 @@ final class TypingCheck {
         switch field {
         case .settingsSearch: model.settings?.query
         case .shortcutsFilter: model.settings?.shortcutFilter
-        case .aiModel: model.settings?.aiModel
         case .searchPill: model.searchText
         case .palette: palette.query
         case .findBar: model.services.reader.model?.findText
         case .composerSubject: composer?.model.subject
-        case .inlineReply, .composerBody: nil
+        // The model field saves on Return or when it loses the keyboard, not as it is typed.
+        case .aiModel, .inlineReply, .composerBody: nil
         }
     }
 

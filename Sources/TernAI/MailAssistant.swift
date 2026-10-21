@@ -21,6 +21,11 @@ public actor MailAssistant {
 
     /// Two to four bullets for a long thread. Cached in memory until the thread grows.
     public func summarize(thread key: ThreadKey) async throws -> [String] {
+        // A cached summary is checked against the thread's count before any body is read.
+        if let cached = summaries[key],
+           try await database.reader.read({ db in try PromptData.messageCount(db, key: key) }) == cached.messageCount {
+            return cached.bullets
+        }
         let thread = try await load(key, messages: 12, characters: 1_200)
         if let cached = summaries[key], cached.messageCount == thread.messageCount { return cached.bullets }
         let object = try await ask(Prompts.summary(thread))

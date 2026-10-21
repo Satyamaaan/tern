@@ -271,8 +271,9 @@ final class CommandRegistry {
 
         // The open conversation. The reader page answers the keys of Next and Previous Message, Open and Quick
         // Look itself while it has the keyboard; these run the same actions from the list, the menus and the palette.
+        // They need the reader on screen with the selected thread: hidden, it still holds the last one it showed.
         let reader = m.services.reader
-        func reading() -> Bool { reader.isActive && m.readerKey != nil }
+        func reading() -> Bool { m.readerVisible && reader.shows(m.readerKey) }
         list += [
             Command(id: "nextMessage", title: "Next Message", group: .goTo, keys: [.key("n")], menu: .go, section: 2,
                     isEnabled: reading) { reader.nextMessage() },
@@ -286,8 +287,8 @@ final class CommandRegistry {
                     aliases: ["source", "headers", "raw"], isEnabled: reading) { reader.showOriginal() },
             // ⌘F finds in the open conversation while it is on screen, and searches mail otherwise.
             Command(id: "find", title: "Find in Conversation…", group: .actions, keys: [.command("f")], menu: .edit, isTextSafe: true,
-                    currentTitle: { reading() && m.readerVisible ? "Find in Conversation…" : "Search Mail" }) {
-                if reading() && m.readerVisible { reader.find() } else { m.beginSearch() }
+                    currentTitle: { reading() ? "Find in Conversation…" : "Search Mail" }) {
+                if reading() { reader.find() } else { m.beginSearch() }
             },
             Command(id: "findNext", title: "Find Next", group: .actions, keys: [.command("g")], menu: .edit,
                     hiddenInPalette: true, isTextSafe: true, isEnabled: reading) { reader.findNext() },

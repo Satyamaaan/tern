@@ -172,15 +172,7 @@ public struct MailStore: Sendable {
 
         switch mailbox.kind {
         case .project(let projectId):
-            sql = """
-                SELECT \(rowColumns) FROM thread_project p
-                JOIN thread t ON t.accountId = p.accountId AND t.id = p.threadId
-                \(rowJoins)
-                WHERE p.projectId = ? AND \(notTrashOrSpam)
-                """
-            _ = arguments.append(contentsOf: [projectId])
-            if let before { sql += " AND t.lastDate < ?"; _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
-            sql += " ORDER BY t.lastDate DESC LIMIT ?"
+            return try fetchProjectRows(db, projectId: projectId, limit: limit, before: before)
 
         case .snoozed:
             sql = """

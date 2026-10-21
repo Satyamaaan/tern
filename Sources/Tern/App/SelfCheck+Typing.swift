@@ -1,4 +1,5 @@
 import AppKit
+import TernCore
 
 /// Typing the way a person does: `PostedKeys` dispatched by `NSApplication.sendEvent`, with the router's monitor
 /// installed. Every field holds exactly what was typed, in a burst, a key at a time and with auto-repeat, and a
@@ -81,11 +82,94 @@ extension SelfCheck {
         orderIn(target)
         defer { target.close() }
         pump(0.2)
+        recipientAutocomplete(in: target, composer)
         if let subject = editableField(in: target, label: "Subject") { target.makeFirstResponder(subject) }
         typeInto("the composer's subject", in: target) { composer.subject }
         composer.focus(.body)
         pumpUntil { KeyRouter.textInput(in: target).map { !$0.isFieldEditor } ?? false }
         typeInto("the composer's body", in: target)
+    }
+
+    /// Recipient autocomplete: a burst of keys reads the suggestions once, off the main thread; an answer slower than
+    /// the next key never shows; and Return, ↓ and Esc do what they did when the suggestions were read on every key.
+    private func recipientAutocomplete(in target: NSWindow, _ composer: ComposerModel) {
+        func find(_ view: NSView) -> RecipientTokenField? {
+            if let field = view as? RecipientTokenField, field.kind == .to { return field }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        let letters = "abcdefghijklmnopqrstuvwxyz".map(String.init)
+        guard let field = target.contentView.flatMap(find),
+              let email = letters.lazy.compactMap({ composer.suggestionsNow(for: $0).first?.email }).first(where: { $0.count > 3 })
+        else { return check("recipients: a To field and a contact", false) }
+        let suggest = field.suggest, suggestNow = field.suggestNow
+        final class Reads { var asked: [String] = []; var now = 0 }
+        let reads = Reads()
+        field.suggest = { reads.asked.append($0); return await suggest($0) }
+        field.suggestNow = { reads.now += 1; return suggestNow($0) }
+        defer {
+            field.suggest = suggest
+            field.suggestNow = suggestNow
+            composer.setRecipients([], for: .to)
+        }
+        func begin() {
+            target.makeKey()
+            target.makeFirstResponder(field.input)
+            field.input.stringValue = ""
+            field.hideSuggestions()
+            reads.asked = []
+            reads.now = 0
+        }
+
+        let prefix = String(email.prefix(3))
+        begin()
+        PostedKeys.type(prefix, to: target)
+        pumpUntil { !field.shownSuggestions.isEmpty }
+        pump(0.1)
+        print("  recipients: “\(prefix)” typed in a burst read \(reads.asked.count) time(s) in the background, \(reads.now) on the main thread")
+        check("a burst of keys in To reads the suggestions once, in the background",
+              reads.asked == [prefix] && reads.now == 0 && field.shownSuggestions == suggestNow(prefix))
+        let shown = field.shownSuggestions
+        PostedKeys.press(125, to: target)
+        PostedKeys.press(36, to: target)
+        pump(0.1)
+        check("↓ Return in To picks the second suggestion", field.tokens.last == shown.dropFirst().first ?? shown.first)
+
+        // The first key's answer comes back after the second key's: it is dropped.
+        begin()
+        field.suggest = { query in
+            reads.asked.append(query)
+            if query.count == 1 { try? await Task.detached { try await Task.sleep(for: .milliseconds(300)) }.value }
+            return await suggest(query)
+        }
+        let first = String(email.prefix(1)), second = String(email.prefix(2))
+        PostedKeys.type(first, to: target)
+        pump(0.08)
+        PostedKeys.type(String(email.dropFirst().prefix(1)), to: target)
+        var stale = false
+        poll(0.6) {
+            pump(0.01)
+            if !field.shownSuggestions.allSatisfy({ DraftStore.suggestion($0, fits: field.input.stringValue) }) { stale = true }
+        }
+        check("an answer for older text in To never shows", !stale && field.shownSuggestions == suggestNow(second))
+        field.suggest = { reads.asked.append($0); return await suggest($0) }
+
+        // Return before the answer arrives picks what it would have picked had it been there.
+        begin()
+        let count = field.tokens.count, top = suggestNow(prefix).first
+        PostedKeys.type(prefix, to: target)
+        PostedKeys.press(36, to: target)
+        pump(0.1)
+        check("Return right after typing in To picks the top suggestion",
+              top != nil && field.tokens.count == count + 1 && field.tokens.last == top && field.input.stringValue.isEmpty)
+
+        begin()
+        PostedKeys.type(prefix, to: target)
+        pumpUntil { !field.shownSuggestions.isEmpty }
+        PostedKeys.press(53, to: target)
+        pump(0.1)
+        check("Esc in To closes the suggestions and leaves the composer open", field.shownSuggestions.isEmpty && field.window === target
+              && field.input.stringValue == prefix)
+        field.input.stringValue = ""
     }
 
     /// Types into the text field with this placeholder in the main window, given the keyboard by hand if
