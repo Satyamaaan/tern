@@ -74,7 +74,10 @@ extension AppModel {
         let store = self.store
         let changed = services.projectRulesChanged
         writes.async {
+            // Name, icon and colour edits keep the rules; only a rule change re-runs them over every thread.
+            let stored = try? store.projectRules(project.id)
             do { try store.saveProject(project, rules: rules) } catch { NSLog("Tern: saving project failed: \(error)") }
+            if let stored, ProjectRules.sameRules(stored, rules) { return }
             DispatchQueue.main.async { changed(project.id) }
         }
         projectEditor = nil
