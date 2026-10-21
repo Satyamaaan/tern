@@ -4,6 +4,7 @@ import GRDB
 extension MailStore {
     static func fetchProjectRows(_ db: Database, projectId: String, limit: Int, before: Date?) throws -> [ThreadRow] {
         guard limit != 0 else { return [] }
+        // thread_by_date breaks equal dates by rowid, as in All Mail. Keep that order in every path.
         let dateFilter = before == nil ? "" : " AND t.lastDate < ?"
         var arguments: StatementArguments = [projectId]
         if let before { _ = arguments.append(contentsOf: [before.timeIntervalSince1970]) }
@@ -26,7 +27,7 @@ extension MailStore {
                     WHERE p.accountId = t.accountId AND p.threadId = t.id AND p.projectId = ?)
                   THEN \(notTrashOrSpam) ELSE 0 END AS eligible
                 FROM thread t INDEXED BY thread_by_date
-                WHERE 1 \(dateFilter) ORDER BY t.lastDate DESC LIMIT ?
+                WHERE 1 \(dateFilter) ORDER BY t.lastDate DESC, t.rowid ASC LIMIT ?
                 """, arguments: probeArguments)
             var scanned = 0
             while let candidate = try candidates.next() {
@@ -43,7 +44,7 @@ extension MailStore {
                 return try ThreadRow.fetchAll(db, sql: """
                     SELECT \(rowColumns) FROM thread t \(rowJoins)
                     WHERE t.rowid IN (\(databaseQuestionMarks(count: rowIds.count)))
-                    ORDER BY t.lastDate DESC
+                    ORDER BY t.lastDate DESC, t.rowid ASC
                     """, arguments: StatementArguments(rowIds))
             }
         }
@@ -54,7 +55,7 @@ extension MailStore {
                 JOIN thread t ON t.accountId = p.accountId AND t.id = p.threadId
                 \(rowJoins)
                 WHERE p.projectId = ? AND \(notTrashOrSpam) \(dateFilter)
-                ORDER BY t.lastDate DESC LIMIT ?
+                ORDER BY t.lastDate DESC, t.rowid ASC LIMIT ?
                 """, arguments: arguments)
         }
 
@@ -65,12 +66,12 @@ extension MailStore {
               SELECT t.rowid AS threadRowid, t.lastDate FROM thread_project p
               JOIN thread t ON t.accountId = p.accountId AND t.id = p.threadId
               WHERE p.projectId = ? AND \(notTrashOrSpam) \(dateFilter)
-              ORDER BY t.lastDate DESC LIMIT ?
+              ORDER BY t.lastDate DESC, t.rowid ASC LIMIT ?
             )
             SELECT \(rowColumns) FROM page
             JOIN thread t ON t.rowid = page.threadRowid
             \(rowJoins)
-            ORDER BY t.lastDate DESC
+            ORDER BY t.lastDate DESC, t.rowid ASC
             """, arguments: arguments)
     }
 }

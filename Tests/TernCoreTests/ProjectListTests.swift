@@ -89,3 +89,37 @@ func projectPagesMatchMembershipSortAcrossDateDistributions(shape: String) throw
     }
     #expect(actual == all)
 }
+
+@Test func projectDateTiesMatchAllMailAcrossStrategies() throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    let accounts = [Account(email: "one@example.com"), Account(email: "two@example.com")]
+    for account in accounts { try store.upsertAccount(account) }
+    let messages: [MailMessage] = (0..<1_100).map { i in
+        MailMessage(accountId: accounts[i % 2].id, id: "m\(i / 2)", threadId: "t\(i / 2)",
+                    date: Date(timeIntervalSince1970: i < 700 ? 2 : 1), fromEmail: "sender@example.com",
+                    labelIds: ["INBOX"])
+    }
+    try store.upsertMessages(messages)
+    let all = try store.threadRows(in: Mailbox(.allMail), limit: -1)
+    for size in [12, 1_100] {
+        let project = Project(id: "ties-\(size)", name: "Ties")
+        try store.saveProject(project, rules: [])
+        let members = size == 12 ? Array(all.prefix(6)) + Array(all.suffix(6)) : all
+        let memberIds = Set(members.map(\.id))
+        try store.database.writer.write { db in
+            // Membership insertion order intentionally disagrees with the main date index.
+            for row in members.reversed() {
+                try ThreadProject(accountId: row.id.accountId, threadId: row.id.threadId,
+                                  projectId: project.id, source: .manual).insert(db)
+            }
+        }
+        let cursors: [Date?] = [nil, Date(timeIntervalSince1970: 2), Date(timeIntervalSince1970: 1)]
+        for before in cursors {
+            let expected = all.filter { memberIds.contains($0.id) && (before == nil || $0.thread.lastDate < before!) }
+            for limit in [0, 37, 1_000, -1] {
+                let rows = try store.threadRows(in: Mailbox(.project(project.id)), limit: limit, before: before)
+                #expect(rows.map(\.id) == (limit < 0 ? expected : Array(expected.prefix(limit))).map(\.id))
+            }
+        }
+    }
+}
