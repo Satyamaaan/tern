@@ -43,7 +43,7 @@ enum SearchParser {
     }
 
     static let operators: Set<String> = [
-        "from", "to", "cc", "bcc", "subject", "filename", "has", "is", "in", "label", "before", "after",
+        "from", "to", "cc", "bcc", "subject", "filename", "due", "has", "is", "in", "label", "before", "after",
         "older_than", "newer_than", "larger", "smaller", "category", "project", "account",
     ]
 
@@ -222,8 +222,11 @@ enum SearchParser {
         case "has":
             if ["attachment", "attachments"].contains(lower) { return .filter(.hasAttachment) }
             return partial(lower, of: ["attachment"]) ? nil : fallback()
+        case "due":
+            return ["overdue", "today", "week", "none"].contains(lower) ? .filter(.due(lower)) : fallback()
         case "is":
             switch lower {
+            case "waiting": return .filter(.waiting)
             case "unread": return .filter(.unread)
             case "read": return .filter(.read)
             case "starred": return .filter(.starred)
@@ -236,7 +239,7 @@ enum SearchParser {
             case "trash": return .filter(.folder(.trash))
             case "spam": return .filter(.folder(.spam))
             default:
-                return partial(lower, of: ["unread", "read", "starred", "important", "snoozed", "needsreply"]) ? nil : fallback()
+                return partial(lower, of: ["unread", "read", "starred", "important", "snoozed", "needsreply", "waiting"]) ? nil : fallback()
             }
         case "in":
             switch lower {
@@ -249,6 +252,7 @@ enum SearchParser {
             case "snoozed": return .filter(.snoozed)
             case "starred": return .filter(.starred)
             case "important": return .filter(.important)
+            case "waiting": return .filter(.waiting)
             case "unread": return .filter(.unread)
             default: return .filter(.label(value))
             }

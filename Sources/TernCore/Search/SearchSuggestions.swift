@@ -115,7 +115,7 @@ extension SearchService {
     static let operatorCatalog: [(name: String, hint: String)] = [
         ("from:", "Sender"), ("to:", "Recipient"), ("subject:", "Words in the subject"),
         ("has:attachment", "With attachments"), ("is:unread", "Unread"), ("is:starred", "Starred"),
-        ("is:important", "Important"), ("is:snoozed", "Snoozed"), ("is:needsreply", "Waiting on your reply"),
+        ("is:important", "Important"), ("is:snoozed", "Snoozed"), ("is:needsreply", "Waiting on your reply"), ("is:waiting", "Waiting on someone else"), ("due:", "Commitment due date"),
         ("in:inbox", "In the inbox"), ("in:sent", "Sent"), ("in:drafts", "Drafts"), ("in:trash", "Trash"),
         ("in:spam", "Spam"), ("in:anywhere", "Including trash and spam"), ("label:", "A label"),
         ("category:", "Split-inbox category"), ("project:", "A project"), ("account:", "One account"),
@@ -221,10 +221,12 @@ extension SearchService {
                             detail: account.displayName.isEmpty ? nil : account.email, token: account.email)
             }.prefix(limit).map { $0 }
 
+        case "due":
+            return ["overdue", "today", "week", "none"].filter { value.isEmpty || $0.hasPrefix(lower) }.prefix(limit).map { make(.operator, "due:\($0)", detail: "Commitment due date", token: $0) }
         case "is", "in", "has":
             let options: [(String, String)] = switch op {
             case "is": [("unread", "Unread"), ("read", "Read"), ("starred", "Starred"), ("important", "Important"),
-                        ("snoozed", "Snoozed"), ("needsreply", "Waiting on your reply")]
+                        ("snoozed", "Snoozed"), ("needsreply", "Waiting on your reply"), ("waiting", "Waiting on someone else")]
             case "in": [("inbox", "Inbox"), ("sent", "Sent"), ("drafts", "Drafts"), ("trash", "Trash"), ("spam", "Spam"),
                         ("anywhere", "Everywhere, trash and spam too"), ("snoozed", "Snoozed")]
             default: [("attachment", "With attachments")]

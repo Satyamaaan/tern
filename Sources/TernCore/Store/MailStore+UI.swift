@@ -22,6 +22,7 @@ public struct ScopeCounts: Hashable, Sendable {
     public var inboxUnread = 0
     /// Inbox threads flagged as waiting on your reply, read or not.
     public var needsReply = 0
+    public var waitingOn = 0
     public var snoozed = 0
     public var drafts = 0
     /// Unread inbox threads per project id, across accounts.
@@ -80,6 +81,7 @@ extension MailStore {
     /// One pass over the scope's inbox rows (its index) for the inbox, tab and needs-reply counts.
     public static func fetchScopeCounts(_ db: Database, accountId: String?) throws -> ScopeCounts {
         var counts = ScopeCounts()
+        counts.waitingOn = try Self.fetchLedgerCount(db, accountId: accountId)
         let scoped = accountId == nil ? "" : " AND i.accountId = ?"
         let scopeArguments: StatementArguments = accountId.map { [$0] } ?? []
 

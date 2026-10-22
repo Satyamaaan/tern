@@ -221,7 +221,7 @@ public final class SyncCoordinator {
         let store = self.store
         let now = clock.now()
         _ = try? await Task.detached(priority: .utility) {
-            try await store.database.writer.write { db in try RuleClassifier.expireNeedsReply(db, now: now) }
+            try await store.database.writer.write { db in try RuleClassifier.expireNeedsReply(db, now: now); try Ledger.sweep(db, now: now) }
         }.value
     }
 

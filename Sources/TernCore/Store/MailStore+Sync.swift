@@ -220,6 +220,7 @@ extension MailStore {
         try endSnoozesAnswered(db, keys: present)
         try RuleClassifier.classify(db, keys: present, now: now)
         try ProjectRules.apply(db, keys: present)
+        try Ledger.refresh(db, keys: present, now: now)
     }
 
     // MARK: Pending ops

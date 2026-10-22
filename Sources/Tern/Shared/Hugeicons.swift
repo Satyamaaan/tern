@@ -7,6 +7,7 @@ import CoreGraphics
 enum Icon: String, CaseIterable, Sendable {
     case inbox
     case needsReply
+    case waitingOn
     case snoozed
     case starred
     case drafts
@@ -109,6 +110,11 @@ enum Icon: String, CaseIterable, Sendable {
                 IconPart("M 2 5 L 8.913 8.925 C 11.439 10.358 12.561 10.358 15.087 8.925 L 22 5", stroke: 1.5),
                 IconPart("M 21.919 11.033 C 21.919 10.54 21.914 10.047 21.904 9.552 C 21.839 6.474 21.806 4.936 20.68 3.796 C 19.553 2.656 17.985 2.616 14.849 2.537 C 12.916 2.488 11.003 2.488 9.07 2.537 C 5.934 2.616 4.366 2.656 3.24 3.796 C 2.113 4.936 2.081 6.474 2.016 9.552 C 1.995 10.541 1.995 11.525 2.016 12.515 C 2.081 15.592 2.113 17.131 3.24 18.271 C 4.366 19.411 5.934 19.451 9.07 19.53 C 10.037 19.554 10.998 19.567 11.96 19.567", stroke: 1.5),
                 IconPart("M 22 21.5 C 21.884 18.976 21.987 18.057 20.344 16.879 C 19.536 16.3 17.912 15.919 15.718 16.125 M 17.452 13.593 L 15.155 15.746 C 14.961 15.941 14.96 16.256 15.152 16.452 L 17.452 18.64", stroke: 1.5),
+            ]
+        case .waitingOn: // Clock01Icon
+            [
+                IconPart("M 2 12 A 10 10 0 1 0 22 12 A 10 10 0 1 0 2 12 Z", stroke: 1.5),
+                IconPart("M 12 8 L 12 12 L 14 14", stroke: 1.5),
             ]
         case .snoozed: // Clock01Icon
             [

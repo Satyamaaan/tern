@@ -27,6 +27,7 @@ ICONS = [
     # Mailboxes and tabs
     ("inbox", "InboxIcon"),
     ("needsReply", "MailReply01Icon"),
+    ("waitingOn", "Clock01Icon"),
     ("snoozed", "Clock01Icon"),
     ("starred", "StarIcon"),
     ("drafts", "PencilEdit02Icon"),

@@ -16,6 +16,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case category(MailCategory)
         /// Inbox threads the classifier flagged as waiting on your reply.
         case needsReply
+        case waitingOn, iOwe
     }
 
     public var kind: Kind
@@ -39,7 +40,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case .spam: SystemLabel.spam
         case .trash: SystemLabel.trash
         case .label(let id): id
-        case .snoozed, .allMail, .archive, .project: nil
+        case .snoozed, .allMail, .archive, .project, .waitingOn, .iOwe: nil
         }
     }
 }
@@ -53,11 +54,16 @@ public struct ThreadRow: Hashable, Sendable, Identifiable, FetchableRecord {
     public var summary: String?
     public var snoozedUntil: Date?
     public var projectIds: [String]
+    public var ledger: CommitmentBrief?
 
     public var id: ThreadKey { thread.key }
 
     public init(row: Row) throws {
         thread = try MailThread(row: row)
+        if row.hasColumn("ledgerId"), let id: Int64 = row["ledgerId"] {
+            ledger = CommitmentBrief(id: id, counterpartyEmail: row["ledgerEmail"], counterpartyName: row["ledgerName"],
+                sourceDate: Date(timeIntervalSince1970: row["ledgerDate"]), extraCount: row["ledgerExtra"], surfaceAt: Date(timeIntervalSince1970: row["ledgerSurface"]))
+        } else { ledger = nil }
         category = row["aiCategory"]
         needsReply = row["aiNeedsReply"] ?? false
         priority = row["aiPriority"] ?? 1
@@ -171,6 +177,8 @@ public struct MailStore: Sendable {
         var sql: String
 
         switch mailbox.kind {
+        case .waitingOn, .iOwe:
+            return try fetchLedgerRows(db, in: mailbox, limit: limit)
         case .project(let projectId):
             return try fetchProjectRows(db, projectId: projectId, limit: limit, before: before)
 

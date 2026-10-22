@@ -168,6 +168,8 @@ extension ListTab {
 extension Mailbox.Kind {
     var icon: Icon {
         switch self {
+        case .waitingOn: .waitingOn
+        case .iOwe: .needsReply
         case .inbox: .inbox
         case .needsReply: .needsReply
         case .snoozed: .snoozed

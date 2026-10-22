@@ -8,11 +8,13 @@ import GRDB
 public enum FakeMailbox {
     public struct Options: Sendable {
         public var messages: Int
+        public var ledgerGold: Int
         public var seed: UInt64
         public var now: Date
 
-        public init(messages: Int = 50_000, seed: UInt64 = 7, now: Date = Date()) {
+        public init(messages: Int = 50_000, seed: UInt64 = 7, now: Date = Date(), ledgerGold: Int = 0) {
             self.messages = messages
+            self.ledgerGold = ledgerGold
             self.seed = seed
             self.now = now
         }
@@ -50,16 +52,21 @@ public enum FakeMailbox {
             for snooze in batch.snoozes { try snooze.upsert(db) }
         }
         try MailStore(database).rebuildContacts()
+        if options.ledgerGold > 0 {
+            _ = try populateLedgerGold(database, count: options.ledgerGold, seed: options.seed, now: options.now)
+        }
 
         return Summary(
-            accounts: accounts.count, threads: batch.threadCount, messages: batch.messages.count,
+            accounts: accounts.count, threads: batch.threadCount + max(0, options.ledgerGold),
+            messages: batch.messages.count + max(0, options.ledgerGold)
+                + (0..<max(0, options.ledgerGold)).filter { $0 % 8 == 4 || $0 % 8 == 5 }.count,
             seconds: Date().timeIntervalSince(started))
     }
 }
 
 // MARK: - Generator
 
-private struct SplitMix64: RandomNumberGenerator {
+struct SplitMix64: RandomNumberGenerator {
     var state: UInt64
     mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15

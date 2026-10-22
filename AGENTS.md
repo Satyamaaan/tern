@@ -49,6 +49,7 @@ design/               research and the visual spec (DESIGN.md)
 - `Mailbox` / `ThreadRow` / `ThreadDetail` / `SidebarCounts` — what the UI reads. Scope counts
   (`fetchScopeCounts`) are a pass over the scope's whole inbox, so they are only ever read off the main thread;
   the tab bar's Gmail tabs come from a bounded probe (`fetchTabsWithMail`) when the scope is set.
+- `Ledger` owns only `commitment` and `ledger_scan`. `MailStore.applyRules` refreshes touched threads after project rules; background sweeps materialize time thresholds. Local state changes never queue Gmail operations.
 - `SearchService.search(_:accountId:limit:) -> [ThreadRow]`.
 - `TernSync/GmailAPI.swift` — protocol + DTOs mirroring Gmail API v1 JSON. The engine is tested against an
   in-memory fake implementation; the app uses the HTTP client.

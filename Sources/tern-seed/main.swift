@@ -16,5 +16,5 @@ for suffix in ["", "-wal", "-shm"] {
     try? FileManager.default.removeItem(atPath: url.path + suffix)
 }
 let database = try AppDatabase.open(at: url)
-let summary = try FakeMailbox.populate(database, options: .init(messages: count, seed: seed))
+let summary = try FakeMailbox.populate(database, options: .init(messages: count, seed: seed, ledgerGold: value("--ledger-gold").flatMap(Int.init) ?? 0))
 print("Wrote \(summary.messages) messages in \(summary.threads) threads to \(url.path) in \(String(format: "%.1f", summary.seconds)) s")

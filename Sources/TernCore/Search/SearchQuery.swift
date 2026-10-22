@@ -86,6 +86,8 @@ public enum SearchFilter: Hashable, Sendable {
     case unread, read, starred, important, snoozed
     /// Tern: the classifier thinks the thread waits on your reply.
     case needsReply
+    case waiting
+    case due(String)
     case folder(SearchFolder)
     /// A label id or name, as typed.
     case label(String)
@@ -260,7 +262,7 @@ extension SearchFilter {
         case .read: "is:read"
         case .starred: "is:starred"
         case .important: "is:important"
-        case .snoozed, .needsReply, .category, .project, .account: nil
+        case .snoozed, .needsReply, .waiting, .due, .category, .project, .account: nil
         case .folder(let folder): "in:\(folder.rawValue)"
         case .label(let name): "label:" + name.split(whereSeparator: \.isWhitespace).joined(separator: "-")
         case .before(let day): "before:\(day.gmail)"

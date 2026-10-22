@@ -1,0 +1,86 @@
+import Foundation
+import GRDB
+
+/// Who owes the next action.
+public enum LedgerDirection: String, Codable, Sendable, DatabaseValueConvertible { case waitingOn, iOwe }
+/// A user's decision locks a commitment against automatic state changes.
+public enum CommitmentState: String, Codable, Sendable, DatabaseValueConvertible { case open, done, dismissed, stale }
+
+/// A local promise or unanswered request, with evidence and room for later semantic resolution.
+public struct Commitment: TernRecord, Hashable {
+    public static let databaseTableName = "commitment"
+    public var id: Int64?
+    public var accountId: String
+    public var threadId: String
+    public var direction: LedgerDirection
+    public var kind: String
+    public var counterpartyEmail: String
+    public var counterpartyName: String
+    public var deliverable: String
+    public var dueAt: Date?
+    public var dueText: String?
+    public var sourceMessageId: String
+    public var sourceQuote: String
+    public var sourceDate: Date
+    public var origin: String
+    public var confidence: Int
+    public var state: CommitmentState
+    public var stateSource: String
+    public var resolvedMessageId: String?
+    public var resolvedAt: Date?
+    public var resolutionNote: String?
+    public var hintMessageId: String?
+    public var hintAt: Date?
+    public var checkedCount: Int
+    public var surfaceAt: Date
+    public var surfaced: Bool
+    public var fingerprint: String
+    public var createdAt: Date
+    public var updatedAt: Date
+}
+
+/// Records the evidence version a later AI scan has inspected.
+public struct LedgerScan: TernRecord, Hashable {
+    public static let databaseTableName = "ledger_scan"
+    public var accountId: String
+    public var threadId: String
+    public var messageCount: Int
+    public var scannedAt: Date
+    public var origin: String
+    public var promptVersion: Int
+}
+
+/// The highest ranked commitment in a thread and the number behind it.
+public struct CommitmentBrief: Hashable, Sendable {
+    public var id: Int64
+    public var counterpartyEmail: String
+    public var counterpartyName: String
+    public var sourceDate: Date
+    public var extraCount: Int
+    public var surfaceAt: Date
+    public var displayName: String { counterpartyName.isEmpty ? counterpartyEmail : counterpartyName }
+}
+
+/// Exact previous rows for a local undo. No Gmail operation is queued.
+public struct LedgerUndo: Hashable, Sendable {
+    public var previous: [Commitment]
+}
+
+/// Mail preferences shared by detection, list reads and the settings page.
+public struct LedgerSettings: Hashable, Sendable {
+    public var enabled = true
+    public var waitingDays = 3
+    public var ai = true
+    public var showMaybe = false
+
+    /// Reads defaults and validated values from the shared setting table.
+    public static func load(_ db: Database) throws -> LedgerSettings {
+        var result = LedgerSettings()
+        let settings = try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value }
+        result.enabled = settings["ledger.enabled"] != "false"
+        result.waitingDays = Int(settings["ledger.waitingDays"] ?? "3").flatMap { [2, 3, 5, 7].contains($0) ? $0 : nil } ?? 3
+        result.ai = settings["ledger.ai"] != "false"
+        result.showMaybe = settings["ledger.showMaybe"] == "true"
+        return result
+    }
+}

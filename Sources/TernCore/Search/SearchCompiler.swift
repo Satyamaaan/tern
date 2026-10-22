@@ -176,6 +176,8 @@ final class SearchCompiler {
             if let id = try labelDriverId(name) { compiled.drivers.append(.label(id)) }
         case .snoozed:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM snooze")))
+        case .waiting, .due:
+            compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM commitment WHERE state='open' AND surfaced=1")))
         case .needsReply:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM thread_ai WHERE needsReply = 1")))
         case .category(let category):
@@ -423,6 +425,27 @@ final class SearchCompiler {
         case .important: return hasLabel(t, SystemLabel.important)
         case .snoozed:
             return SQLFragment("EXISTS (SELECT 1 FROM snooze sn WHERE sn.accountId = \(t).accountId AND sn.threadId = \(t).id)")
+        case .waiting, .due:
+            let settings = try LedgerSettings.load(db)
+            guard settings.enabled else { return .never }
+            var condition = "c.state='open' AND c.surfaced=1"
+            if !settings.showMaybe { condition += " AND c.confidence=2" }
+            var args: [any DatabaseValueConvertible] = []
+            if case .waiting = filter { condition += " AND c.direction='waitingOn'" }
+            if case .due(let value) = filter {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = options.timeZone
+                let today = calendar.startOfDay(for: options.now)
+                switch value {
+                case "none": condition += " AND c.dueAt IS NULL"
+                case "overdue": condition += " AND c.dueAt<?"; args = [options.now.timeIntervalSince1970]
+                default:
+                    let end = calendar.date(byAdding: .day, value: value == "week" ? 7 : 1, to: today)!
+                    condition += " AND c.dueAt>=? AND c.dueAt<?"
+                    args = [today.timeIntervalSince1970, end.timeIntervalSince1970]
+                }
+            }
+            return SQLFragment("EXISTS (SELECT 1 FROM commitment c WHERE c.accountId=\(t).accountId AND c.threadId=\(t).id AND \(condition))", args)
         case .needsReply:
             return SQLFragment("""
                 EXISTS (SELECT 1 FROM thread_ai ai WHERE ai.accountId = \(t).accountId AND ai.threadId = \(t).id \
