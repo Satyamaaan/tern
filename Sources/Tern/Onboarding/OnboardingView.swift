@@ -114,7 +114,7 @@ struct OnboardingView: View {
     /// is still out.
     private var provider: AIProvider? {
         if let picked { return picked }
-        if let ready = board.firstReady { return ready }
+        if let ready = AIProvider.tools.first(where: { $0 != .groq && board.statuses[$0] == .ready }) { return ready }
         return board.statuses.isEmpty && services.aiAvailability != nil ? nil : .off
     }
 

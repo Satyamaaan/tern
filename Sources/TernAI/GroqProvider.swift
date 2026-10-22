@@ -40,7 +40,13 @@ public struct GroqProvider: AIProvider {
                 "model": request.model ?? Self.defaultModel,
                 "messages": [["role": "system", "content": request.instructions], ["role": "user", "content": request.input]],
             ]
-            if request.effort == .fast { body["reasoning_effort"] = "none" }
+            let model = request.model ?? Self.defaultModel
+            if model.hasPrefix("qwen/") {
+                body["reasoning_format"] = "hidden"
+                if request.effort == .fast { body["reasoning_effort"] = "none" }
+            } else if model.hasPrefix("openai/gpt-oss-"), request.effort == .fast {
+                body["reasoning_effort"] = "low"
+            }
             if let schema = request.schema {
                 guard let object = try? JSONSerialization.jsonObject(with: Data(schema.utf8)) as? [String: Any] else {
                     throw AIError.invalidOutput("Invalid response schema.")
@@ -49,35 +55,49 @@ public struct GroqProvider: AIProvider {
                     ? ["type": "json_schema", "json_schema": ["name": "tern_response", "strict": true, "schema": object]]
                     : ["type": "json_object"]
             }
-            http.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let data: Data
-            let response: URLResponse
-            do {
-                (data, response) = try await session.data(for: http)
-            } catch let error as URLError {
-                if error.code == .timedOut { throw AIError.timedOut }
-                if error.code == .cancelled { throw CancellationError() }
-                throw AIError.failed("Groq couldn't be reached.")
-            } catch is CancellationError { throw CancellationError() }
-            catch { throw AIError.failed("Groq couldn't be reached.") }
-            guard let response = response as? HTTPURLResponse else { throw AIError.failed("Groq returned an invalid response.") }
-            switch response.statusCode {
-            case 200..<300: break
-            case 401, 403: throw AIError.notSignedIn(provider: displayName)
-            case 429:
-                let retry = response.value(forHTTPHeaderField: "Retry-After")
-                throw AIError.rateLimited("Groq's rate limit was reached." + (retry.map { " Retry after \($0)." } ?? " Try again later."))
-            default: throw AIError.failed("Groq request failed (HTTP \(response.statusCode)).")
+            if request.schema != nil {
+                body["messages"] = [["role": "system", "content": request.instructions + "\nReturn JSON."], ["role": "user", "content": request.input]]
             }
-            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = object["choices"] as? [[String: Any]],
-                  let message = choices.first?["message"] as? [String: Any], let content = message["content"] as? String else {
-                throw AIError.invalidOutput("Groq returned no answer.")
+            for attempt in 0...1 {
+                http.httpBody = try JSONSerialization.data(withJSONObject: body)
+                let data: Data
+                let response: URLResponse
+                do {
+                    (data, response) = try await session.data(for: http)
+                } catch let error as URLError {
+                    if error.code == .timedOut { throw AIError.timedOut }
+                    if error.code == .cancelled { throw CancellationError() }
+                    throw AIError.failed("Groq couldn't be reached.")
+                } catch is CancellationError { throw CancellationError() }
+                catch { throw AIError.failed("Groq couldn't be reached.") }
+                guard let response = response as? HTTPURLResponse else { throw AIError.failed("Groq returned an invalid response.") }
+                if response.statusCode == 400, attempt == 0, request.schema != nil,
+                   let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? [String: Any],
+                   let message = error["message"] as? String,
+                   message.lowercased().contains("response_format") || message.lowercased().contains("schema") {
+                    body["response_format"] = ["type": "json_object"]
+                    continue
+                }
+                switch response.statusCode {
+                case 200..<300: break
+                case 401, 403: throw AIError.notSignedIn(provider: displayName)
+                case 429:
+                    let retry = response.value(forHTTPHeaderField: "Retry-After")
+                    throw AIError.rateLimited("Groq's rate limit was reached." + (retry.map { " Retry after \($0)." } ?? " Try again later."))
+                default: throw AIError.failed("Groq request failed (HTTP \(response.statusCode)).")
+                }
+                guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let choices = object["choices"] as? [[String: Any]],
+                      let message = choices.first?["message"] as? [String: Any], let content = message["content"] as? String else {
+                    throw AIError.invalidOutput("Groq returned no answer.")
+                }
+                let clean = content.replacingOccurrences(of: "(?is)<think>.*?</think>", with: "", options: .regularExpression)
+                    .replacingOccurrences(of: "(?is)^\\s*<think>.*$", with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !clean.isEmpty else { throw AIError.invalidOutput("Groq returned no answer.") }
+                return clean
             }
-            let clean = content.replacingOccurrences(of: "(?is)<think>.*?</think>", with: "", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !clean.isEmpty else { throw AIError.invalidOutput("Groq returned no answer.") }
-            return clean
+            throw AIError.failed("Groq request failed after retry.")
         }
     }
 

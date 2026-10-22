@@ -130,11 +130,11 @@ final class ThreadRowView: NSTableRowView {
         }
     }
 
-    /// Hover exposes the original subject; the avatar names its account.
+    /// The avatar names its account.
     private func updateToolTip() {
         removeAllToolTips()
-        guard model != nil else { return }
-        addToolTip(bounds, owner: self, userData: nil)
+        guard let model, model.account != nil else { return }
+        addToolTip(RowPainter(model: model, column: ListLayout.column(in: bounds)).avatarRect, owner: self, userData: nil)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -162,7 +162,7 @@ extension ThreadRowView: NSViewToolTipOwner {
            RowPainter(model: model, column: ListLayout.column(in: bounds)).avatarRect.contains(point) {
             return account.help
         }
-        return model?.row.thread.subject ?? ""
+        return ""
     }
 }
 
@@ -333,6 +333,7 @@ private struct RowPainter {
             Self.drawText(summary, subjectAttrs, in: CGRect(x: x, y: rect.minY, width: width, height: rect.height))
             let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
             let secondaryX = x + width + 6
+            guard rect.maxX - secondaryX > 24 else { return }
             Self.drawText("— " + subject, secondary, in: CGRect(x: secondaryX, y: rect.minY, width: max(0, rect.maxX - secondaryX), height: rect.height))
             return
         }
@@ -344,7 +345,7 @@ private struct RowPainter {
             Self.drawText(subject, subjectAttrs, in: subjectRect)
         }
 
-        let x = rect.minX + subjectWidth + 6
+        var x = rect.minX + subjectWidth + 6
         guard rect.maxX - x > 24 else { return }
         let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
         if let highlight = model.highlight {
@@ -359,8 +360,17 @@ private struct RowPainter {
             Self.drawMarked(text, ranges: ranges, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
             return
         }
-        let snippet = ThreadRowView.preview(thread.snippet, subject: thread.subject)
-        Self.drawText("— " + snippet, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
+        if let summary = model.row.summary, !summary.isEmpty {
+            // The AI summary replaces the preview, after a small sparkle.
+            Self.drawText("—", preview, in: CGRect(x: x, y: rect.minY, width: 14, height: rect.height))
+            x += 17
+            Icon.sparkles.draw(in: CGRect(x: x, y: rect.midY - 6, width: 12, height: 12), color: quiet)
+            x += 17
+            Self.drawText(summary, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
+        } else {
+            let snippet = ThreadRowView.preview(thread.snippet, subject: thread.subject)
+            Self.drawText("— " + snippet, preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
+        }
     }
 
     // MARK: Text

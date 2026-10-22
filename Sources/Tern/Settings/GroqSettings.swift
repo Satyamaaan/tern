@@ -8,7 +8,7 @@ struct GroqKeyItem: View {
     @State private var status: String?
 
     var body: some View {
-        SettingsRow(title: "Groq API key", detail: status ?? (hasKey ? "Stored in Keychain. Enter a key to replace it." : "Stored only in this Mac's Keychain.")) {
+        SettingsRow(title: "Groq API key", detail: saving ? "Saving…" : status ?? (hasKey ? "Stored in Keychain. Enter a key to replace it." : "Stored only in this Mac's Keychain.")) {
             HStack(spacing: 8) {
                 SecureField("API key", text: $key)
                     .textFieldStyle(.plain)

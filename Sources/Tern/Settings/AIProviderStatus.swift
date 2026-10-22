@@ -37,7 +37,7 @@ extension AIProvider {
         switch self {
         case .claude: "Uses your Claude subscription"
         case .codex: "Uses your ChatGPT plan"
-        case .automatic: "Groq with a key, then a ready CLI"
+        case .automatic: "Add a Groq key or sign in to a CLI to turn on"
         case .groq: "Uses your Groq API key"
         case .off: "No AI features"
         }

@@ -62,7 +62,7 @@ private func requestBody(_ request: URLRequest) throws -> Data {
             #expect(body["model"] as? String == GroqProvider.defaultModel)
             #expect(body["reasoning_effort"] as? String == "none")
             let messages = try #require(body["messages"] as? [[String: String]])
-            #expect(messages == [["role": "system", "content": "instructions"], ["role": "user", "content": "mail"]])
+            #expect(messages == [["role": "system", "content": "instructions\nReturn JSON."], ["role": "user", "content": "mail"]])
             let format = try #require(body["response_format"] as? [String: Any])
             #expect(format["type"] as? String == "json_schema")
             #expect((format["json_schema"] as? [String: Any])?["strict"] as? Bool == true)
@@ -72,6 +72,41 @@ private func requestBody(_ request: URLRequest) throws -> Data {
         #expect(try await provider.complete(AIRequest(instructions: "instructions", input: "mail", schema: schema, timeout: 17)) == "Final answer")
         #expect(await provider.availability(refresh: false) == .ready)
         #expect(await GroqProvider().availability(refresh: false) == .signedOut)
+    }
+
+    @Test(arguments: ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b", "custom-model"])
+    func modelParameters(model: String) async throws {
+        for effort in [AIRequest.Effort.fast, .careful] {
+            let answer = answer
+            let provider = provider { request in
+                let body = try #require(JSONSerialization.jsonObject(with: requestBody(request)) as? [String: Any])
+                let expected = effort == .fast ? (model.hasPrefix("qwen/") ? "none" : model.hasPrefix("openai/gpt-oss-") ? "low" : nil) : nil
+                #expect(body["reasoning_effort"] as? String == expected)
+                #expect(body["reasoning_format"] as? String == (model.hasPrefix("qwen/") ? "hidden" : nil))
+                return (200, [:], answer)
+            }
+            _ = try await provider.complete(AIRequest(instructions: "", input: "test", model: model, effort: effort))
+        }
+    }
+
+    @Test func schemaRetry() async throws {
+        var calls = 0
+        let answer = answer
+        let provider = provider { request in
+            calls += 1
+            let body = try #require(JSONSerialization.jsonObject(with: requestBody(request)) as? [String: Any])
+            if calls == 1 { return (400, [:], Data(#"{"error":{"message":"response_format schema unsupported"}}"#.utf8)) }
+            #expect((body["response_format"] as? [String: String])?["type"] == "json_object")
+            #expect((body["messages"] as? [[String: String]])?.first?["content"]?.contains("JSON") == true)
+            return (200, [:], answer)
+        }
+        _ = try await provider.complete(AIRequest(instructions: "", input: "", schema: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#))
+        #expect(calls == 2)
+    }
+
+    @Test func unclosedReasoning() async {
+        let provider = provider { _ in (200, [:], Data(#"{"choices":[{"message":{"content":"  <think>private unfinished reasoning"}}]}"#.utf8)) }
+        await #expect(throws: AIError.invalidOutput("Groq returned no answer.")) { try await provider.complete("test") }
     }
 
     @Test func fallbackAndCareful() async throws {

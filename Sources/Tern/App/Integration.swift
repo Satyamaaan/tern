@@ -15,6 +15,8 @@ final class Integration {
     let assistant: MailAssistant
     let triage: TriageQueue
     private var google: GoogleAccounts? { didSet { googleBox.set(google) } }
+    private var aiSettingsTask: Task<Void, Never>?
+    private var effectiveAIState: String?
     private var settingsObservation: AnyDatabaseCancellable?
     /// The Google client for sync's `apiProvider`, which runs off the main actor.
     let googleBox = GoogleBox()
@@ -285,17 +287,26 @@ final class Integration {
 
         // AI helpers exist only while AI is switched on in Settings.
         let observation = ValueObservation.tracking { db in
-            _ = try Setting.fetchOne(db, key: "ai.groqCredentialRevision")
-            return try AISettings.read(db)
+            let revision = try Setting.fetchOne(db, key: "ai.groqCredentialRevision")?.value
+            return (try AISettings.read(db), revision)
         }
         settingsObservation = observation.startRestarting(
             in: services.store.database.reader, scheduling: .async(onQueue: .main),
             onError: { error in NSLog("Tern: AI settings observation failed, restarting it: \(error)") },
-            onChange: { [weak self] settings in
-                Task { @MainActor [weak self] in
-                    let enabled = await providers.isEnabled(settings)
-                    self?.services.ai = enabled ? actions : nil
-                    if let triage = self?.triage { await triage.poke() }
+            onChange: { [weak self] settings, _ in
+                MainActor.assumeIsolated {
+                    self?.aiSettingsTask?.cancel()
+                    GroqCredential.invalidate()
+                    self?.aiSettingsTask = Task { @MainActor [weak self] in
+                        let enabled = await providers.isEnabled(settings)
+                        let provider = enabled ? try? await providers.resolve(settings).id : nil
+                        guard !Task.isCancelled, let self else { return }
+                        let state = "\(enabled):\(provider ?? "none"):\(settings.model ?? "")"
+                        guard state != self.effectiveAIState else { return }
+                        self.effectiveAIState = state
+                        self.services.ai = enabled ? actions : nil
+                        await self.triage.poke()
+                    }
                 }
             })
 

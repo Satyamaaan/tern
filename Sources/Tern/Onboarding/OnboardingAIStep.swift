@@ -12,7 +12,7 @@ struct OnboardingAIStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                ForEach(AIProvider.tools) { provider in
+                ForEach(AIProvider.tools.filter { $0 != .groq }) { provider in
                     AIProviderCard(provider: provider, status: board.statuses[provider], isChecking: board.isChecking, selected: choice == provider) {
                         choose(provider)
                     }
@@ -66,7 +66,7 @@ struct OnboardingAIStep: View {
     }
 
     private func move(_ step: Int) {
-        let options = AIProvider.tools + [.off]
+        let options = AIProvider.tools.filter { $0 != .groq } + [.off]
         let index = choice.flatMap { options.firstIndex(of: $0) } ?? (step > 0 ? -1 : options.count)
         choose(options[min(max(index + step, 0), options.count - 1)])
     }
