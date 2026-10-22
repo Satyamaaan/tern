@@ -62,7 +62,10 @@ public struct ThreadRow: Hashable, Sendable, Identifiable, FetchableRecord {
         thread = try MailThread(row: row)
         if row.hasColumn("ledgerId"), let id: Int64 = row["ledgerId"] {
             ledger = CommitmentBrief(id: id, counterpartyEmail: row["ledgerEmail"], counterpartyName: row["ledgerName"],
-                sourceDate: Date(timeIntervalSince1970: row["ledgerDate"]), extraCount: row["ledgerExtra"], surfaceAt: Date(timeIntervalSince1970: row["ledgerSurface"]))
+                sourceDate: Date(timeIntervalSince1970: row["ledgerDate"]), extraCount: row["ledgerExtra"], surfaceAt: Date(timeIntervalSince1970: row["ledgerSurface"]),
+                deliverable: row.hasColumn("ledgerDeliverable") ? row["ledgerDeliverable"] : nil,
+                dueAt: (row.hasColumn("ledgerDue") ? row["ledgerDue"] as Double? : nil).map(Date.init(timeIntervalSince1970:)),
+                hasHint: row.hasColumn("ledgerHint") ? row["ledgerHint"] : false)
         } else { ledger = nil }
         category = row["aiCategory"]
         needsReply = row["aiNeedsReply"] ?? false

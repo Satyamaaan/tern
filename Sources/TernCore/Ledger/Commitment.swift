@@ -58,6 +58,22 @@ public struct CommitmentBrief: Hashable, Sendable {
     public var sourceDate: Date
     public var extraCount: Int
     public var surfaceAt: Date
+    public var deliverable: String? = nil
+    public var dueAt: Date? = nil
+    public var hasHint: Bool = false
+
+    public func timeText(now: Date = Date()) -> String {
+        guard let dueAt else { return ageText(now: now) }
+        let calendar = Calendar.current
+        if calendar.isDate(dueAt, inSameDayAs: now) { return "Today" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = abs(dueAt.timeIntervalSince(now)) < 7 * 86_400 ? "EEE" : "MMM d"
+        return formatter.string(from: dueAt)
+    }
+    public func isOverdue(now: Date = Date()) -> Bool {
+        dueAt.map { $0 < Calendar.current.startOfDay(for: now) } ?? false
+    }
     /// Compact age for the list's single time slot.
     public func ageText(now: Date = Date()) -> String {
         "\(max(0, Int(now.timeIntervalSince(sourceDate) / 86_400)))d"
@@ -76,6 +92,8 @@ public struct LedgerSettings: Hashable, Sendable {
     public var waitingDays = 3
     public var ai = true
     public var showMaybe = false
+    public var aiDailyCalls = 40
+    public var backfillDays = 14
 
     /// Reads defaults and validated values from the shared setting table.
     public static func load(_ db: Database) throws -> LedgerSettings {
@@ -88,6 +106,8 @@ public struct LedgerSettings: Hashable, Sendable {
         result.waitingDays = Int(settings["ledger.waitingDays"] ?? "3").flatMap { [2, 3, 5, 7].contains($0) ? $0 : nil } ?? 3
         result.ai = settings["ledger.ai"] != "false"
         result.showMaybe = settings["ledger.showMaybe"] == "true"
+        result.aiDailyCalls = max(0, Int(settings["ledger.aiDailyCalls"] ?? "40") ?? 40)
+        result.backfillDays = min(30, max(1, Int(settings["ledger.backfillDays"] ?? "14") ?? 14))
         return result
     }
 }

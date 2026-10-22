@@ -61,6 +61,7 @@ public enum Ledger {
     /// Reads metadata first; bodies are fetched only for potential asks in the trailing sent run.
     public static func refresh(_ db: Database, keys: some Collection<ThreadKey>, now: Date = Date()) throws {
         guard !keys.isEmpty else { return }
+        try refreshHints(db, keys: keys, now: now)
         let preferences = try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value }
         let settings = LedgerSettings.load(preferences)
         guard settings.enabled else { return }
@@ -74,7 +75,7 @@ public enum Ledger {
             FROM thread t LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
             WHERE t.accountId=? AND t.id=?
             """)
-        let existingQuery = try db.cachedStatement(sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND origin='rule' AND state='open'")
+        let existingQuery = try db.cachedStatement(sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=?")
         let bodyQuery = try db.cachedStatement(sql: "SELECT bodyText FROM message WHERE accountId=? AND id=?")
         let insert = try db.cachedStatement(sql: """
             INSERT INTO commitment (accountId,threadId,direction,kind,counterpartyEmail,counterpartyName,deliverable,
@@ -84,7 +85,9 @@ public enum Ledger {
             """)
         for key in keys {
             guard let thread = try Row.fetchOne(threadQuery, arguments: [key.accountId, key.threadId]) else { continue }
-            let existing = try Commitment.fetchAll(existingQuery, arguments: [key.accountId, key.threadId])
+            let allItems = try Commitment.fetchAll(existingQuery, arguments: [key.accountId, key.threadId])
+            let existing = allItems.filter { $0.origin == "rule" && $0.state == .open }
+            let concreteSources = Set(allItems.filter { $0.kind == "deliverable" }.map(\.sourceMessageId))
             let labels = (try? JSONDecoder().decode([String].self, from: Data((thread["labelIds"] as String).utf8))) ?? []
             let mutedLabels: [String] = [SystemLabel.trash, SystemLabel.spam, MailStore.pendingMuteLabel] + (preferences[MailStore.muteLabelKey(key.accountId)].map { [$0] } ?? [])
             let category: String? = thread["category"]
@@ -123,6 +126,8 @@ public enum Ledger {
                 guard mayContainAsk(rawText) else { continue }
                 let text = askText(rawText)
                 guard isAskText(text) else { continue }
+                // An AI deliverable on this ask replaces the coarse reply tracker.
+                if concreteSources.contains(ask.id) { continue }
                 let directQuestion = isDirectQuestion(text)
                 var seen = Set<String>()
                 let recipients = ask.recipients().filter {

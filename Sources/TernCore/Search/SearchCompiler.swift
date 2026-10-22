@@ -176,7 +176,7 @@ final class SearchCompiler {
             if let id = try labelDriverId(name) { compiled.drivers.append(.label(id)) }
         case .snoozed:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM snooze")))
-        case .waiting, .due:
+        case .waiting, .owe, .due:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM commitment WHERE state='open' AND surfaced=1")))
         case .needsReply:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM thread_ai WHERE needsReply = 1")))
@@ -425,12 +425,13 @@ final class SearchCompiler {
         case .important: return hasLabel(t, SystemLabel.important)
         case .snoozed:
             return SQLFragment("EXISTS (SELECT 1 FROM snooze sn WHERE sn.accountId = \(t).accountId AND sn.threadId = \(t).id)")
-        case .waiting, .due:
+        case .waiting, .owe, .due:
             let settings = try LedgerSettings.load(db)
             guard settings.enabled else { return .never }
             var condition = "c.state='open' AND c.surfaced=1"
             if !settings.showMaybe { condition += " AND c.confidence=2" }
             var args: [any DatabaseValueConvertible] = []
+            if case .owe = filter { condition += " AND c.direction='iOwe'" }
             if case .waiting = filter { condition += " AND c.direction='waitingOn'" }
             if case .due(let value) = filter {
                 var calendar = Calendar(identifier: .gregorian)
