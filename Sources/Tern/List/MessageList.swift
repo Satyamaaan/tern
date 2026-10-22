@@ -98,6 +98,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     // MARK: ListPresenting
 
+    /// Crossfades from the list on screen to the next one (`Motion.listSwap`; Reduce Motion's 80 ms).
+    private func crossfade() {
+        scrollView.wantsLayer = true
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.08 : Motion.listSwap
+        fade.timingFunction = Motion.timing
+        scrollView.layer?.add(fade, forKey: "listSwap")
+    }
+
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation) {
         defer { reportRowsInView() }
         // Clear hover while the old snapshot still matches the rows on screen.
@@ -107,6 +117,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         self.snapshot = snapshot
 
         if animation == .reset || old.isEmpty {
+            // A different list crossfades in quickly; not at launch or per search keystroke.
+            if !old.isEmpty, !model.isSearching { crossfade() }
             items = new
             resetting = true
             table.reloadData()

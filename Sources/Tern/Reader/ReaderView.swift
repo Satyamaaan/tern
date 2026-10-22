@@ -33,6 +33,7 @@ struct ReaderView: View {
 
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = ReaderModel()
 
     /// The page's reading column (720 pt of content plus 32 pt each side); the bars below match it.
@@ -80,23 +81,27 @@ struct ReaderView: View {
                 }
             }
             if key != nil {
-                if let request = model.composing {
-                    // The card takes the reply pill's place and grows with its text.
-                    InlineComposerView(request: request, onClose: { model.composing = nil })
-                        .fixedSize(horizontal: false, vertical: true)
-                        .readerColumn(panel: panel != nil)
-                        .padding(.top, 10)
-                        .padding(.bottom, 18)
-                } else if panel != nil {
-                    ReaderPanelActions(model: model)
-                        .readerColumn(panel: true)
-                        .padding(.top, 10)
-                        .padding(.bottom, 35)
-                } else {
-                    ReaderReplyBar(model: model)
-                        .readerColumn()
-                        .padding(.top, 10)
-                        .padding(.bottom, 18)
+                // Stacked, so a closing card sinks back into the reply field fading in under it.
+                ZStack(alignment: .bottom) {
+                    if let request = model.composing {
+                        // The card takes the reply pill's place and grows with its text.
+                        InlineComposerView(request: request, onClose: closeComposer)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .readerColumn(panel: panel != nil)
+                            .padding(.top, 10)
+                            .padding(.bottom, 18)
+                            .transition(.asymmetric(insertion: .identity, removal: reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom))))
+                    } else if panel != nil {
+                        ReaderPanelActions(model: model)
+                            .readerColumn(panel: true)
+                            .padding(.top, 10)
+                            .padding(.bottom, 35)
+                    } else {
+                        ReaderReplyBar(model: model)
+                            .readerColumn()
+                            .padding(.top, 10)
+                            .padding(.bottom, 18)
+                    }
                 }
             }
         }
@@ -107,6 +112,11 @@ struct ReaderView: View {
         .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
         .onChange(of: panel != nil, initial: true) { model.setLayout(panel: panel != nil) }
+    }
+
+    /// Closes the inline card: it sinks back into the reply field over `Motion.exit`.
+    private func closeComposer() {
+        withAnimation(Motion.or(reduced: reduceMotion, Motion.ease(Motion.exit))) { model.composing = nil }
     }
 
     /// What the reader should be doing: one change when the key and the visibility change together.

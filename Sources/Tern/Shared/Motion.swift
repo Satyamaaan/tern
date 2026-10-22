@@ -36,6 +36,8 @@ enum Motion {
     static let exit: Double = 0.12
     /// Rows leaving after triage, coming back on undo or arriving at the top, and the list closing up around them.
     static let list: Double = 0.16
+    /// A different list (tab, mailbox, scope) crossfading in.
+    static let listSwap: Double = 0.1
     /// How long a pending key chord waits before its hint shows, so fluent typing never flashes it.
     static let hesitation: Double = 0.4
     /// How long the chord's hint stays up before the chord gives up.

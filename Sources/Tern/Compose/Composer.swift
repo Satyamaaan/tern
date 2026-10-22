@@ -221,7 +221,7 @@ struct InlineComposerView: View {
 ///
 /// It rises out of the reply field it replaces: opacity, 98 % scale from the bottom and 6 pt, over 150 ms on
 /// the house curve (an 80 ms fade under Reduce Motion). Render-only, so the web view above takes its new
-/// height once; focus is in the card from the first frame, and it leaves at once.
+/// height once; focus is in the card from the first frame. Closing, it sinks back the same way over 120 ms (`ReaderView`).
 struct InlineComposerCard: View {
     let model: ComposerModel
     static let minBody: CGFloat = 96

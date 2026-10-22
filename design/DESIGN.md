@@ -276,7 +276,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
   (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
-  already in it; only the card moves, never the web view, and it closes at once.
+  already in it; only the card moves, never the web view. Closing, it sinks back into the field (opacity and 98 %, 120 ms).
 
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
@@ -369,7 +369,8 @@ Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 
 - Cursor fill slides from row to row on j/k and ↑↓ (130 ms; a held key retargets it mid-slide). A click, jumps of
   more than 12 rows, new lists and Reduce Motion place it at once. It is one view under the rows (`CursorFillView`),
   used while only the cursor is selected.
-- Row exit and list collapse 160 ms, house curve. Undo and new mail at the top: rows fade and slide down 160 ms, the
+- A different list (tab, mailbox, scope, leaving search) crossfades in 100 ms; never at launch or per search
+  keystroke. Row exit and list collapse 160 ms, house curve. Undo and new mail at the top: rows fade and slide down 160 ms, the
   cursor fill moving in the same animation.
 - Active tab fill slides between tabs (130 ms); tabs coming and going fade and scale from 0.96.
 - Toasts rise in 160 ms (house curve) and fade out where they are with a scale to 0.97 (120 ms ease-out).
@@ -385,7 +386,7 @@ Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 
 - Inbox zero after triage: fade 200 ms from 120 ms, stroke 900 ms, text 300 ms from 500 ms.
 - Reader page: click reveals 140 ms (`tern-reveal`: opacity + 3–4 px), never in `render()` or on keys; remote
   images fade in 160 ms when they load (not when cached); a late sender logo 120 ms. `--ease` in reader.css.
-- Composer: the inline reply card rises out of the reply field (150 ms); the formatting bar appears toward the
+- Composer: the inline reply card rises out of the reply field (150 ms) and sinks back (120 ms); the formatting bar appears toward the
   selection (120 ms); an AI draft crossfades (180 ms).
 - AI waiting shimmer on a 1.4 s loop (still with Reduce Motion); summary lines rise 40 ms apart, at most four.
 - Settings: segmented thumb slides 180 ms; account rows arrive and leave (180 ms); the shortcut recorder shakes on
