@@ -22,17 +22,17 @@ struct LedgerActionTests {
 
 
 extension LedgerActionTests {
-    @Test func reopenedStateSurvivesRealReply() throws {
+    @Test func replyAfterReopenResolves() throws {
         let (database, store, _) = try ledgerFixture()
         let key = ThreadKey(accountId: "a", threadId: "t")
         let id = try #require(store.commitments(on: [key]).first?.id)
         _ = try store.setCommitmentState([id], to: .done)
-        _ = try store.setCommitmentState([id], to: .open)
         try database.writer.write { db in
+            _ = try MailStore.setCommitmentState(db, [id], to: .open, now: ledgerNow.addingTimeInterval(-1))
             let keys = try MailStore.upsertMessages(db, [MailMessage(accountId: "a", id: "reply", threadId: "t", date: ledgerNow,
                 fromEmail: "maya@example.com", subject: "Proposal", snippet: "Here's my review", labelIds: [SystemLabel.inbox])])
             try Ledger.refresh(db, keys: keys, now: ledgerNow)
         }
-        #expect(try store.commitments(on: [key]).first?.state == .open)
+        #expect(try store.commitments(on: [key]).first?.state == .done)
     }
 }

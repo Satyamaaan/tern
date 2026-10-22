@@ -14,7 +14,7 @@ struct RowHoverBar: View {
                 HoverButton(icon: .trash, help: hint("Discard draft", "trash")) { model.discardDrafts(keys) }
             } else {
                 if model.inLedger {
-                    HoverButton(icon: .done, help: hint("Mark done", "commitmentDone")) { model.toggleCommitmentDone(on: keys) }
+                    HoverButton(icon: .done, help: hint("Mark done", "commitmentDone")) { model.markCommitmentsDone(on: keys) }
                 } else if model.inArchive {
                     HoverButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox, on: keys) }
                 } else {

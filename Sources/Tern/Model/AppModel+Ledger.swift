@@ -4,15 +4,14 @@ import TernCore
 extension AppModel {
     var inLedger: Bool { !isSearching && (kind == .waitingOn || kind == .iOwe) }
 
-    var canChangeCommitments: Bool { (try? store.hasCommitments(on: targets)) ?? false }
-    var hasOpenCommitments: Bool { (try? store.hasCommitments(on: targets, state: .open)) ?? false }
-    var commitmentsAreDone: Bool { canChangeCommitments && !hasOpenCommitments }
+    var canChangeCommitments: Bool { hasOpenCommitments }
+    var hasOpenCommitments: Bool { inLedger && ((try? store.hasCommitments(on: targets, state: .open)) ?? false) }
 
-    func toggleCommitmentDone(on keys: [ThreadKey]? = nil) {
+    func markCommitmentsDone(on keys: [ThreadKey]? = nil) {
+        guard inLedger else { return }
         let keys = keys ?? targets
-        guard (try? store.hasCommitments(on: keys)) == true else { return }
-        let reopen = (try? store.hasCommitments(on: keys, state: .open)) == false
-        changeCommitments(on: keys, to: reopen ? .open : .done)
+        guard (try? store.hasCommitments(on: keys, state: .open)) == true else { return }
+        changeCommitments(on: keys, to: .done)
     }
 
     func dismissCommitment() {
@@ -29,7 +28,7 @@ extension AppModel {
         showToast(title, undo: entry)
         writes.async {
             do {
-                let ids = try store.commitments(on: keys).filter { state == .open || $0.state == .open }.compactMap(\.id)
+                let ids = try store.commitments(on: keys).filter { $0.state == .open }.compactMap(\.id)
                 result.value = try store.setCommitmentState(ids, to: state)
             } catch {
                 DispatchQueue.main.async {

@@ -16,6 +16,15 @@ struct LedgerPerformanceTests {
         let started = Date()
         try Ledger.rebuildWaiting(in: database, now: now)
         let rebuildMs = Date().timeIntervalSince(started) * 1000
+        let refreshKeys = try database.reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT accountId,id FROM thread ORDER BY lastDate DESC LIMIT 100").map {
+                ThreadKey(accountId: $0[0], threadId: $0[1])
+            }
+        }
+        let refreshStart = Date()
+        try database.writer.write { try Ledger.refresh($0, keys: refreshKeys, now: now) }
+        let refreshMs = Date().timeIntervalSince(refreshStart) * 1000
+        print(String(format: "Ledger 50k sync refresh: %d touched threads in %.2f ms", refreshKeys.count, refreshMs))
         let countsStart = Date()
         let count = try database.reader.read { try MailStore.fetchLedgerCount($0, accountId: nil) }
         let countsMs = Date().timeIntervalSince(countsStart) * 1000

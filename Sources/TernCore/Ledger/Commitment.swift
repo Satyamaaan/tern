@@ -3,7 +3,7 @@ import GRDB
 
 /// Who owes the next action.
 public enum LedgerDirection: String, Codable, Sendable, DatabaseValueConvertible { case waitingOn, iOwe }
-/// A user's decision locks a commitment against automatic state changes.
+/// Done and dismissed decisions stay sticky; reopened requests can resolve on later replies.
 public enum CommitmentState: String, Codable, Sendable, DatabaseValueConvertible { case open, done, dismissed, stale }
 
 /// A local promise or unanswered request, with evidence and room for later semantic resolution.
@@ -58,6 +58,10 @@ public struct CommitmentBrief: Hashable, Sendable {
     public var sourceDate: Date
     public var extraCount: Int
     public var surfaceAt: Date
+    /// Compact age for the list's single time slot.
+    public func ageText(now: Date = Date()) -> String {
+        "\(max(0, Int(now.timeIntervalSince(sourceDate) / 86_400)))d"
+    }
     public var displayName: String { counterpartyName.isEmpty ? counterpartyEmail : counterpartyName }
 }
 
@@ -75,8 +79,11 @@ public struct LedgerSettings: Hashable, Sendable {
 
     /// Reads defaults and validated values from the shared setting table.
     public static func load(_ db: Database) throws -> LedgerSettings {
+        load(try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value })
+    }
+
+    static func load(_ settings: [String: String]) -> LedgerSettings {
         var result = LedgerSettings()
-        let settings = try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value }
         result.enabled = settings["ledger.enabled"] != "false"
         result.waitingDays = Int(settings["ledger.waitingDays"] ?? "3").flatMap { [2, 3, 5, 7].contains($0) ? $0 : nil } ?? 3
         result.ai = settings["ledger.ai"] != "false"

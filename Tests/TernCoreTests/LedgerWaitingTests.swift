@@ -23,7 +23,7 @@ struct LedgerWaitingTests {
         #expect(try crowd.commitments(on: [ThreadKey(accountId: other.accountId, threadId: other.threadId)]).isEmpty)
     }
 
-    @Test func nudgeAndThreshold() throws {
+    @Test func nudgePreservesAskDate() throws {
         let (database, store, ask) = try ledgerFixture()
         var nudge = ask
         nudge.id = "nudge"; nudge.date = ledgerNow.addingTimeInterval(-86_400)
@@ -35,8 +35,18 @@ struct LedgerWaitingTests {
         let item = try #require(store.commitments(on: [ThreadKey(accountId: ask.accountId, threadId: ask.threadId)]).first)
         #expect(item.sourceMessageId == "ask")
         #expect(item.surfaced)
+    }
+
+    @Test func thresholdChangesAndSettingsRoundTrip() throws {
+        let (database, store, _) = try ledgerFixture()
         try store.setLedgerSettings(enabled: true, waitingDays: 7, now: ledgerNow)
         #expect(try store.threadRows(in: Mailbox(.waitingOn)).isEmpty)
+        let settings = try database.reader.read { try LedgerSettings.load($0) }
+        #expect(settings.enabled && settings.waitingDays == 7)
+        try store.setLedgerSettings(enabled: false, waitingDays: 2, now: ledgerNow)
+        let disabled = try database.reader.read { try LedgerSettings.load($0) }
+        #expect(!disabled.enabled && disabled.waitingDays == 2)
+        try store.setLedgerSettings(enabled: true, waitingDays: 7, now: ledgerNow)
         try database.writer.write { try Ledger.sweep($0, now: ledgerNow.addingTimeInterval(3 * 86_400)) }
         #expect(try store.threadRows(in: Mailbox(.waitingOn)).count == 1)
     }

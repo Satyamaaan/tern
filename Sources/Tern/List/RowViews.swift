@@ -326,7 +326,7 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
-        if model.row.ledger == nil, model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
+        if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
             Icon.sparkles.draw(in: CGRect(x: rect.minX, y: rect.midY - 6, width: 12, height: 12), color: quiet)
             let x = rect.minX + 17
             let width = min(Self.width(summary, subjectAttrs), max(0, (rect.width - 17) * 0.7))
@@ -348,11 +348,7 @@ private struct RowPainter {
         var x = rect.minX + subjectWidth + 6
         guard rect.maxX - x > 24 else { return }
         let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
-        if let ledger = model.row.ledger {
-            let days = max(0, Int(Date().timeIntervalSince(ledger.sourceDate) / 86_400))
-            Self.drawText("— asked \(days)d ago", preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
-            return
-        } else if let highlight = model.highlight {
+        if let highlight = model.highlight {
             // While searching, the excerpt around the match replaces the preview and the summary.
             let prefix = "— "
             let text = NSMutableAttributedString(string: prefix + highlight.snippet.replacingOccurrences(of: "\n", with: " "), attributes: preview)

@@ -274,13 +274,9 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard let row = snapshot.row(at: index) else { return nil }
         let key = row.id
         var result = RowModel(row: row, style: style)
-        result.summaryHeadline = row.ledger == nil && model.prefs.summaryHeadline
+        result.summaryHeadline = model.prefs.summaryHeadline
         if let ledger = row.ledger {
-            let days = max(0, Int(Date().timeIntervalSince(ledger.sourceDate) / 86_400))
-            result.timeOverride = "asked \(days)d"
-            if Date().timeIntervalSince(ledger.sourceDate) > 2 * ledger.surfaceAt.timeIntervalSince(ledger.sourceDate) {
-                result.chips.append(RowChip(text: "Follow up", icon: .waitingOn, tint: .ink))
-            }
+            result.timeOverride = ledger.ageText()
         }
         result.isSelected = model.isSelected(key)
         result.fillBelow = key == cursorFillKey

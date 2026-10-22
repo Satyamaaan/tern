@@ -1,6 +1,12 @@
 import GRDB
 
 extension MailStore {
+    // Correlated indexed label probes also hide user-reopened items without changing their state.
+    private static let ledgerVisible = """
+        NOT EXISTS (SELECT 1 FROM thread_label x INDEXED BY thread_label_by_thread WHERE x.accountId=commitment.accountId AND x.threadId=commitment.threadId
+          AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || commitment.accountId)))
+        """
+
     static func fetchLedgerRows(_ db: Database, in mailbox: Mailbox, limit: Int) throws -> [ThreadRow] {
         let settings = try LedgerSettings.load(db)
         guard settings.enabled else { return [] }
@@ -13,7 +19,7 @@ extension MailStore {
             WITH ranked AS (
               SELECT *, row_number() OVER (PARTITION BY accountId,threadId ORDER BY dueAt IS NULL,dueAt,sourceDate,id) AS rank,
                 count(*) OVER (PARTITION BY accountId,threadId)-1 AS extra
-              FROM commitment WHERE state='open' AND surfaced=1 AND direction=?\(confidence)\(scope)
+              FROM commitment WHERE \(ledgerVisible) AND state='open' AND surfaced=1 AND direction=?\(confidence)\(scope)
             )
             SELECT \(rowColumns), c.id AS ledgerId,c.counterpartyEmail AS ledgerEmail,c.counterpartyName AS ledgerName,
               c.sourceDate AS ledgerDate,c.extra AS ledgerExtra,c.surfaceAt AS ledgerSurface
@@ -29,7 +35,7 @@ extension MailStore {
         let confidence = settings.showMaybe ? "" : " AND confidence=2"
         return try Int.fetchOne(db, sql: """
             SELECT count(*) FROM (SELECT accountId,threadId FROM commitment
-              WHERE state='open' AND surfaced=1 AND direction='waitingOn'\(scope)\(confidence) GROUP BY accountId,threadId)
+              WHERE \(ledgerVisible) AND state='open' AND surfaced=1 AND direction='waitingOn'\(scope)\(confidence) GROUP BY accountId,threadId)
             """, arguments: accountId.map { [$0] } ?? []) ?? 0
     }
 }

@@ -21,5 +21,12 @@ extension SelfCheck {
         check("undo reopens the waiting request", (try? model.store.commitments(on: [key]).contains { $0.state == .open }) == true)
         check("undo restores the waiting row", model.snapshot.rows[key] != nil)
         model.showInboxTab(.primary)
+        model.setCursor(key, open: false)
+        check("d disabled outside ledger lists", registry["commitmentDone"]?.isEnabled() == false)
+        check("D disabled outside ledger lists", registry["commitmentDismiss"]?.isEnabled() == false)
+        send("d")
+        send("D")
+        poll(0.1) {}
+        check("ledger keys leave Inbox commitments open", (try? model.store.commitments(on: [key]).contains { $0.state == .open }) == true)
     }
 }

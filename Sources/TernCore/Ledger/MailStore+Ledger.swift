@@ -45,14 +45,12 @@ extension MailStore {
 
     /// Bounded probes for menu availability, without decoding every commitment on the main thread.
     public func hasCommitments(on keys: [ThreadKey], state: CommitmentState? = nil) throws -> Bool {
-        try database.reader.read { db in
-            let query = try db.cachedStatement(sql: "SELECT EXISTS(SELECT 1 FROM commitment WHERE accountId=? AND threadId=?" + (state == nil ? "" : " AND state=?") + ")")
-            for key in keys {
-                var args: StatementArguments = [key.accountId, key.threadId]
-                if let state { args += [state.rawValue] }
-                if try Bool.fetchOne(query, arguments: args) == true { return true }
-            }
-            return false
+        guard !keys.isEmpty, keys.count <= 50 else { return false }
+        return try database.reader.read { db in
+            let pairs = keys.map { _ in "(?,?)" }.joined(separator: ",")
+            var arguments = StatementArguments(keys.flatMap { [$0.accountId, $0.threadId] })
+            if let state { arguments += [state.rawValue] }
+            return try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM commitment WHERE (accountId,threadId) IN (\(pairs))" + (state == nil ? "" : " AND state=?") + " LIMIT 1)", arguments: arguments) ?? false
         }
     }
 
@@ -64,7 +62,7 @@ extension MailStore {
         try database.writer.write { db in
             try Setting(key: "ledger.enabled", value: enabled ? "true" : "false").upsert(db)
             try Setting(key: "ledger.waitingDays", value: String(waitingDays)).upsert(db)
-            try db.execute(sql: "UPDATE commitment SET surfaceAt=sourceDate+?, surfaced=(sourceDate+?<=?), updatedAt=? WHERE origin='rule' AND state='open'",
+            try db.execute(sql: "UPDATE commitment SET surfaceAt=sourceDate+?, surfaced=CASE WHEN stateSource='user' THEN surfaced ELSE (sourceDate+?<=?) END, updatedAt=CASE WHEN stateSource='user' THEN updatedAt ELSE ? END WHERE origin='rule' AND state='open'",
                            arguments: [Double(waitingDays) * 86_400, Double(waitingDays) * 86_400, now.timeIntervalSince1970, now.timeIntervalSince1970])
             try Ledger.sweep(db, now: now)
         }

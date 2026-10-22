@@ -17,92 +17,131 @@ public enum Ledger {
         init(_ row: Row) {
             id = row["id"]; date = Date(timeIntervalSince1970: row["date"])
             fromEmail = row["fromEmail"]; subject = row["subject"]
-            let body: String? = row["bodyText"]
-            text = body.flatMap { $0.isEmpty ? nil : $0 } ?? row["snippet"]
+            text = row["snippet"]
             isFromMe = row["isFromMe"]; hasList = row["hasList"]
             to = row["toList"]; cc = row["ccList"]
         }
 
-        func recipients() throws -> [Participant] {
-            let decoder = JSONDecoder()
-            return try decoder.decode([Participant].self, from: Data(to.utf8)) + decoder.decode([Participant].self, from: Data(cc.utf8))
+        func recipients() -> [Participant] {
+            [to, cc].flatMap { (try? JSONDecoder().decode([Participant].self, from: Data($0.utf8))) ?? [] }
         }
     }
     private static let day = 86_400.0
-    private static let askPatterns = [#"\blooking forward to\b"#, #"\battached\b.{0,100}\bfor your review\b"#].map {
-        try! NSRegularExpression(pattern: $0, options: [.caseInsensitive, .dotMatchesLineSeparators])
-    }
-    private static let closer = try! NSRegularExpression(
-        pattern: #"^(thanks[!. ]*|thank you[!. ]*|ok(ay)?[!. ]*|sounds good[!. ]*|great[!. ]*|got it[!. ]*)$"#,
-        options: [.caseInsensitive])
+    private static let links = try! NSRegularExpression(pattern: #"https?://\S+|www\.\S+|[A-Z0-9._%+?\-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, options: [.caseInsensitive])
+    private static let question = try! NSRegularExpression(pattern: #"\?(\s|$)"#)
+    private static let requests = try! NSRegularExpression(pattern: #"\b(?:(?:can|could|would|will) you\s+(?:please\s+)?(?:let me know|confirm|send|review|reply|sign|share|approve)|please\s+(?:let me know|confirm|send|review|reply|sign|share)|let me know|attached\b.{0,100}\bfor your review)\b"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
 
-    /// Inspects one indexed message range per touched thread. A nudge preserves the original ask date.
+    private static func askText(_ text: String) -> String {
+        let stripped = MailText.stripQuoted(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return links.stringByReplacingMatches(in: stripped, range: NSRange(stripped.startIndex..., in: stripped), withTemplate: "")
+    }
+
+    private static func isDirectQuestion(_ text: String) -> Bool {
+        return question.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    static func isAsk(_ text: String) -> Bool {
+        guard mayContainAsk(text) else { return false }
+        return isAskText(askText(text))
+    }
+
+    private static func mayContainAsk(_ text: String) -> Bool {
+        text.contains("?") || requests.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    private static func isAskText(_ text: String) -> Bool {
+        isDirectQuestion(text) || requests.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    private static func isAutomation(_ email: String) -> Bool {
+        let local = email.lowercased().split(separator: "@").first.map(String.init) ?? ""
+        return ["noreply", "no-reply", "no_reply", "do-not-reply", "do_not_reply", "donotreply", "mailer-daemon", "postmaster", "bounce"].contains { local.contains($0) }
+    }
+
+    /// Reads metadata first; bodies are fetched only for potential asks in the trailing sent run.
     public static func refresh(_ db: Database, keys: some Collection<ThreadKey>, now: Date = Date()) throws {
         guard !keys.isEmpty else { return }
-        let settings = try LedgerSettings.load(db)
+        let preferences = try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value }
+        let settings = LedgerSettings.load(preferences)
         guard settings.enabled else { return }
         let own = Set(try String.fetchAll(db, sql: "SELECT lower(email) FROM account"))
-        let preferences = try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value }
         let messageQuery = try db.cachedStatement(sql: """
-            SELECT id,date,fromEmail,subject,bodyText,snippet,isFromMe,listUnsubscribe IS NOT NULL AS hasList,toList,ccList
+            SELECT id,date,fromEmail,subject,snippet,isFromMe,listUnsubscribe IS NOT NULL AS hasList,toList,ccList
             FROM message WHERE accountId=? AND threadId=? AND isDraft=0 ORDER BY date,id
             """)
         let threadQuery = try db.cachedStatement(sql: """
-            SELECT t.labelIds,ai.category FROM thread t LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
+            SELECT t.labelIds,t.lastDate,t.lastInboundDate,ai.category
+            FROM thread t LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
             WHERE t.accountId=? AND t.id=?
             """)
+        let existingQuery = try db.cachedStatement(sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND origin='rule' AND state='open'")
+        let bodyQuery = try db.cachedStatement(sql: "SELECT bodyText FROM message WHERE accountId=? AND id=?")
+        let insert = try db.cachedStatement(sql: """
+            INSERT INTO commitment (accountId,threadId,direction,kind,counterpartyEmail,counterpartyName,deliverable,
+              sourceMessageId,sourceDate,origin,surfaceAt,surfaced,fingerprint,createdAt,updatedAt)
+            VALUES (?,?,'waitingOn','reply',?,?,'Reply',?,?,'rule',?,?,?,?,?)
+            ON CONFLICT(accountId,threadId,fingerprint) DO NOTHING
+            """)
         for key in keys {
-            let muteLabel = preferences[MailStore.muteLabelKey(key.accountId)]
-            let mutedLabels: [String] = [SystemLabel.trash, SystemLabel.spam, MailStore.pendingMuteLabel] + (muteLabel.map { [$0] } ?? [])
+            guard let thread = try Row.fetchOne(threadQuery, arguments: [key.accountId, key.threadId]) else { continue }
+            let existing = try Commitment.fetchAll(existingQuery, arguments: [key.accountId, key.threadId])
+            let labels = (try? JSONDecoder().decode([String].self, from: Data((thread["labelIds"] as String).utf8))) ?? []
+            let mutedLabels: [String] = [SystemLabel.trash, SystemLabel.spam, MailStore.pendingMuteLabel] + (preferences[MailStore.muteLabelKey(key.accountId)].map { [$0] } ?? [])
+            let category: String? = thread["category"]
+            let eligible = !labels.contains(where: mutedLabels.contains)
+                && (category == nil || category == "people" || category == "other")
+            if !eligible {
+                try db.execute(sql: "UPDATE commitment SET state='stale',updatedAt=? WHERE accountId=? AND threadId=? AND origin='rule' AND state='open'",
+                               arguments: [now.timeIntervalSince1970, key.accountId, key.threadId])
+                continue
+            }
+            let inbound: Double? = thread["lastInboundDate"]
+            let lastDate: Double = thread["lastDate"]
+            guard labels.contains(SystemLabel.sent), (inbound.map { $0 < lastDate } ?? true) || !existing.isEmpty else { continue }
             let messages = try Row.fetchAll(messageQuery, arguments: [key.accountId, key.threadId]).map(Message.init)
-            let existingQuery = try db.cachedStatement(sql: "SELECT id,sourceDate FROM commitment WHERE accountId=? AND threadId=? AND origin='rule' AND state='open' AND stateSource!='user'")
-            let existing = try Row.fetchAll(existingQuery, arguments: [key.accountId, key.threadId])
+            if messages.contains(where: { $0.hasList }) {
+                try db.execute(sql: "UPDATE commitment SET state='stale',updatedAt=? WHERE accountId=? AND threadId=? AND origin='rule' AND state='open'",
+                               arguments: [now.timeIntervalSince1970, key.accountId, key.threadId])
+                continue
+            }
             for item in existing {
-                let source = Date(timeIntervalSince1970: item["sourceDate"])
-                let id: Int64 = item["id"]
-                if let reply = messages.first(where: { $0.date > source && isRealReply($0, own: own) }) {
-                    try db.execute(sql: "UPDATE commitment SET state='done', stateSource='rule', resolvedMessageId=?, resolvedAt=?, updatedAt=? WHERE id=?",
-                                   arguments: [reply.id, reply.date.timeIntervalSince1970, now.timeIntervalSince1970, id])
+                guard let source = messages.first(where: { $0.id == item.sourceMessageId }) else { continue }
+                let recipients = Set(source.recipients().map { $0.email.lowercased() }).union([item.counterpartyEmail.lowercased()])
+                let after = item.stateSource == "user" ? max(item.sourceDate, item.updatedAt) : item.sourceDate
+                if let reply = messages.first(where: { $0.date > after && recipients.contains($0.fromEmail.lowercased()) && isRealReply($0, own: own) }) {
+                    try db.execute(sql: "UPDATE commitment SET state='done',stateSource='rule',resolvedMessageId=?,resolvedAt=?,updatedAt=? WHERE id=?",
+                                   arguments: [reply.id, reply.date.timeIntervalSince1970, now.timeIntervalSince1970, item.id])
                 }
             }
             let conversation = messages.filter { $0.isFromMe || isRealReply($0, own: own) }
-            guard let last = conversation.last, last.isFromMe,
-                  last.date <= now, last.date >= now.addingTimeInterval(-45 * day),
-                  !messages.contains(where: { $0.hasList }),
-                  let thread = try Row.fetchOne(threadQuery, arguments: [key.accountId, key.threadId])
-            else { continue }
-            let labels = try JSONDecoder().decode([String].self, from: Data((thread["labelIds"] as String).utf8))
-            guard !labels.contains(where: { mutedLabels.contains($0) }), labels.contains(SystemLabel.sent) else { continue }
-            let category: String? = thread["category"]
-            guard category == nil || category == "people" || category == "other" else { continue }
+            guard let last = conversation.last, last.isFromMe, last.date <= now,
+                  last.date >= now.addingTimeInterval(-45 * day) else { continue }
             let run = conversation.suffix(from: conversation.lastIndex(where: { !$0.isFromMe }).map { $0 + 1 } ?? 0)
-            guard let ask = run.first, ask.date >= now.addingTimeInterval(-45 * day) else { continue }
-            var seen = Set<String>()
-            let recipients = try ask.recipients().filter {
-                let email = $0.email.lowercased()
-                return !own.contains(email) && !email.isEmpty && !RuleClassifier.isAutomated(email) && seen.insert(email).inserted
+            for ask in run where ask.date >= now.addingTimeInterval(-45 * day) {
+                let body = try String.fetchOne(bodyQuery, arguments: [key.accountId, ask.id])
+                let rawText = body.flatMap { $0.isEmpty ? nil : $0 } ?? ask.text
+                guard mayContainAsk(rawText) else { continue }
+                let text = askText(rawText)
+                guard isAskText(text) else { continue }
+                let directQuestion = isDirectQuestion(text)
+                var seen = Set<String>()
+                let recipients = ask.recipients().filter {
+                    let email = $0.email.lowercased()
+                    return !own.contains(email) && !email.isEmpty && !isAutomation(email)
+                        && (!RuleClassifier.isAutomated(email) || (RuleClassifier.roleLocalParts.contains(MailText.localPart(of: email)) && directQuestion)) && seen.insert(email).inserted
+                }
+                guard let person = recipients.first, recipients.count <= 6 else { continue }
+                let surface = ask.date.addingTimeInterval(Double(settings.waitingDays) * day)
+                let name = person.name.isEmpty ? (try String.fetchOne(db, sql: "SELECT name FROM contact WHERE id=?", arguments: [person.email.lowercased()]) ?? "") : person.name
+                try insert.execute(arguments: [key.accountId, key.threadId, person.email, name, ask.id, ask.date.timeIntervalSince1970,
+                                      surface.timeIntervalSince1970, surface <= now, "rule|" + ask.id, now.timeIntervalSince1970, now.timeIntervalSince1970])
+                break
             }
-            guard let person = recipients.first, recipients.count <= 6 else { continue }
-            let text = MailText.stripQuoted(ask.text).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard text.contains("?") || text.count >= 25,
-                  closer.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) == nil,
-                  text.contains("?") || RuleClassifier.matches(RuleClassifier.requestPatterns, text) || RuleClassifier.matches(askPatterns, text)
-            else { continue }
-            let surface = ask.date.addingTimeInterval(Double(settings.waitingDays) * day)
-            let name = person.name.isEmpty ? (try String.fetchOne(db, sql: "SELECT name FROM contact WHERE id=?", arguments: [person.email.lowercased()]) ?? "") : person.name
-            let insert = try db.cachedStatement(sql: """
-                INSERT INTO commitment (accountId,threadId,direction,kind,counterpartyEmail,counterpartyName,deliverable,
-                  sourceMessageId,sourceDate,origin,surfaceAt,surfaced,fingerprint,createdAt,updatedAt)
-                VALUES (?,?,'waitingOn','reply',?,?,'Reply',?,?,'rule',?,?,?,?,?)
-                ON CONFLICT(accountId,threadId,fingerprint) DO NOTHING
-                """)
-            try insert.execute(arguments: [key.accountId, key.threadId, person.email, name, ask.id, ask.date.timeIntervalSince1970,
-                                  surface.timeIntervalSince1970, surface <= now, "rule|" + ask.id, now.timeIntervalSince1970, now.timeIntervalSince1970])
         }
     }
 
     private static func isRealReply(_ message: Message, own: Set<String>) -> Bool {
-        guard !message.isFromMe, !own.contains(message.fromEmail.lowercased()), !RuleClassifier.isAutomated(message.fromEmail.lowercased()) else { return false }
+        guard !message.isFromMe, !own.contains(message.fromEmail.lowercased()), !isAutomation(message.fromEmail) else { return false }
         let subject = message.subject.lowercased()
         return !["automatic reply", "out of office", "out-of-office", "autoreply", "auto-reply"].contains(where: { subject.contains($0) })
     }
@@ -111,10 +150,14 @@ public enum Ledger {
     public static func sweep(_ db: Database, now: Date = Date()) throws {
         let stamp = now.timeIntervalSince1970
         try db.execute(sql: """
-            UPDATE commitment SET state='stale', updatedAt=? WHERE state='open' AND stateSource!='user' AND (
-              (dueAt IS NULL AND sourceDate<?) OR
-              NOT EXISTS (SELECT 1 FROM message m WHERE m.accountId=commitment.accountId AND m.id=commitment.sourceMessageId) OR
-              EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId=commitment.accountId AND x.threadId=commitment.threadId AND x.labelId IN ('TRASH','SPAM')))
+            UPDATE commitment SET state='stale', updatedAt=? WHERE state='open' AND (
+              (stateSource!='user' AND (
+                (dueAt IS NULL AND sourceDate<?) OR
+                NOT EXISTS (SELECT 1 FROM message m WHERE m.accountId=commitment.accountId AND m.id=commitment.sourceMessageId))) OR
+              (origin='rule' AND (
+                EXISTS (SELECT 1 FROM thread_label x INDEXED BY thread_label_by_thread WHERE x.accountId=commitment.accountId AND x.threadId=commitment.threadId AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || commitment.accountId))) OR
+                EXISTS (SELECT 1 FROM thread_ai ai WHERE ai.accountId=commitment.accountId AND ai.threadId=commitment.threadId AND ai.category NOT IN ('people','other')) OR
+                EXISTS (SELECT 1 FROM message m INDEXED BY message_by_thread WHERE m.accountId=commitment.accountId AND m.threadId=commitment.threadId AND m.listUnsubscribe IS NOT NULL))))
             """, arguments: [stamp, stamp - 45 * day])
         try db.execute(sql: "UPDATE commitment SET surfaced=1, updatedAt=? WHERE state='open' AND surfaced=0 AND surfaceAt<=?", arguments: [stamp, stamp])
     }
@@ -125,10 +168,10 @@ public enum Ledger {
             SELECT t.accountId,t.id FROM thread t
             LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
             WHERE t.lastDate BETWEEN ? AND ? AND (t.lastInboundDate IS NULL OR t.lastInboundDate<t.lastDate)
-              AND EXISTS (SELECT 1 FROM thread_label s WHERE s.accountId=t.accountId AND s.threadId=t.id AND s.labelId='SENT')
+              AND EXISTS (SELECT 1 FROM thread_label s INDEXED BY thread_label_by_thread WHERE s.accountId=t.accountId AND s.threadId=t.id AND s.labelId='SENT')
               AND (ai.category IS NULL OR ai.category IN ('people','other'))
-              AND NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId=t.accountId AND x.threadId=t.id AND x.labelId IN ('TRASH','SPAM'))
-            UNION SELECT accountId,threadId FROM commitment WHERE origin='rule' AND state='open' AND stateSource!='user'
+              AND NOT EXISTS (SELECT 1 FROM thread_label x INDEXED BY thread_label_by_thread WHERE x.accountId=t.accountId AND x.threadId=t.id AND x.labelId IN ('TRASH','SPAM'))
+            UNION SELECT accountId,threadId FROM commitment WHERE origin='rule' AND state='open'
             """, arguments: [now.timeIntervalSince1970 - 45 * day, now.timeIntervalSince1970]).map {
                 ThreadKey(accountId: $0[0], threadId: $0[1])
             }
