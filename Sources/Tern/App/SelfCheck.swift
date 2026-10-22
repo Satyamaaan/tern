@@ -206,17 +206,16 @@ final class SelfCheck {
             wait(0.2)
         }
 
-        // Search results refresh after a write.
+        // Search results refresh after a write. Wait for results before selecting a target.
         model.searchText = "invoice"
-        poll(0.5) {}
+        _ = waitUntil { model.isSearching && !model.searchRows.isEmpty }
         if let first = model.snapshot.order.first, let row = model.row(first) {
             let starred = row.thread.isStarred
-            model.setCursor(first, open: false)
+            model.select(first)
             model.toggleStar()
-            poll(0.6) {}
-            check("search results show a star change", model.row(first)?.thread.isStarred == !starred)
+            check("search results show a star change", waitUntil { model.row(first)?.thread.isStarred == !starred })
             model.toggleStar()
-            poll(0.6) {}
+            _ = waitUntil { model.row(first)?.thread.isStarred == starred }
         }
         model.endSearch(restoreFocus: true)
 
