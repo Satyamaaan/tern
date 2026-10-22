@@ -13,6 +13,7 @@ extension MailStore {
         for var item in previous {
             item.state = state
             item.stateSource = "user"
+            if state == .done { item.resolvedAt = now; item.resolutionNote = "Marked done by you" }
             item.updatedAt = now
             if state == .open {
                 item.resolvedMessageId = nil; item.resolvedAt = nil; item.resolutionNote = nil
@@ -31,6 +32,7 @@ extension MailStore {
 
     /// Restores rows inside an existing writer transaction.
     public static func restoreCommitments(_ db: Database, _ undo: LedgerUndo) throws {
+        _ = try Commitment.filter(undo.created.contains(Column("id"))).deleteAll(db)
         for item in undo.previous { try item.update(db) }
     }
 

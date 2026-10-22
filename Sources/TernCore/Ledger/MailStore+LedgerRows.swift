@@ -22,7 +22,7 @@ extension MailStore {
               FROM commitment WHERE \(ledgerVisible) AND state='open' AND surfaced=1 AND direction=?\(confidence)\(scope)
             )
             SELECT \(rowColumns), c.id AS ledgerId,c.counterpartyEmail AS ledgerEmail,c.counterpartyName AS ledgerName,
-              c.sourceDate AS ledgerDate,c.extra AS ledgerExtra,c.surfaceAt AS ledgerSurface,CASE WHEN c.kind='deliverable' THEN c.deliverable END AS ledgerDeliverable,c.dueAt AS ledgerDue,c.hintAt IS NOT NULL AS ledgerHint
+              c.sourceDate AS ledgerDate,c.extra AS ledgerExtra,c.surfaceAt AS ledgerSurface,CASE WHEN c.kind='deliverable' THEN c.deliverable END AS ledgerDeliverable,c.dueAt AS ledgerDue,c.hintAt IS NOT NULL AS ledgerHint,c.confidence=1 AS ledgerMaybe
             FROM ranked c JOIN thread t ON t.accountId=c.accountId AND t.id=c.threadId \(rowJoins)
             WHERE c.rank=1 ORDER BY c.hintAt IS NOT NULL,c.dueAt IS NULL,c.dueAt,c.sourceDate,c.id LIMIT ?
             """, arguments: arguments)

@@ -176,6 +176,8 @@ final class SearchCompiler {
             if let id = try labelDriverId(name) { compiled.drivers.append(.label(id)) }
         case .snoozed:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM snooze")))
+        case .done:
+            compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM commitment WHERE state='done' AND updatedAt>=?", [options.now.addingTimeInterval(-14 * 86_400).timeIntervalSince1970])))
         case .waiting, .owe, .due:
             compiled.drivers.append(.set(SQLFragment("SELECT accountId AS a, threadId AS i FROM commitment WHERE state='open' AND surfaced=1")))
         case .needsReply:
@@ -425,6 +427,8 @@ final class SearchCompiler {
         case .important: return hasLabel(t, SystemLabel.important)
         case .snoozed:
             return SQLFragment("EXISTS (SELECT 1 FROM snooze sn WHERE sn.accountId = \(t).accountId AND sn.threadId = \(t).id)")
+        case .done:
+            return SQLFragment("EXISTS (SELECT 1 FROM commitment c WHERE c.accountId=\(t).accountId AND c.threadId=\(t).id AND c.state='done' AND c.updatedAt>=?)", [options.now.addingTimeInterval(-14 * 86_400).timeIntervalSince1970])
         case .waiting, .owe, .due:
             let settings = try LedgerSettings.load(db)
             guard settings.enabled else { return .never }

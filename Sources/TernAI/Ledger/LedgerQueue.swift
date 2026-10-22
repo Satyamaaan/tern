@@ -136,7 +136,8 @@ public actor LedgerQueue {
         let visible = screen.isEmpty ? "(NULL,NULL)" : screen.map { _ in "(?,?)" }.joined(separator: ",")
         var queryArguments = StatementArguments(screen.flatMap { [$0.accountId, $0.threadId] })
         _ = queryArguments.append(contentsOf: [stamp.addingTimeInterval(-Double(preferences.backfillDays) * 86_400).timeIntervalSince1970, Prompts.ledgerVersion])
-        let threads = try await database.reader.read { db -> [PromptThread] in
+        let candidateArguments = queryArguments
+        var threads = try await database.reader.read { db -> [PromptThread] in
             let rows = try Row.fetchAll(db, sql: """
                 WITH visible(accountId,threadId) AS (VALUES \(visible))
                 SELECT t.accountId,t.id,t.messageCount FROM thread t
@@ -149,25 +150,53 @@ public actor LedgerQueue {
                     AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || t.accountId)))
                 ORDER BY v.threadId IS NOT NULL DESC,
                   t.lastDate DESC,t.id,t.accountId LIMIT 2000
-                """, arguments: queryArguments)
+                """, arguments: candidateArguments)
             var keys = rows.filter { blocked[ThreadKey(accountId: $0[0], threadId: $0[1])] != ($0[2] as Int) }.map { ThreadKey(accountId: $0[0], threadId: $0[1]) }
             if let retryKeys { keys = retryKeys.filter { keys.contains($0) } }
             return try PromptData.threads(db, keys: Array(keys.prefix(size)), messages: 4, characters: 700)
         }
+        var resolving: [Commitment] = []
+        if threads.isEmpty {
+            resolving = try await database.reader.read { db in
+                try Commitment.fetchAll(db, sql: """
+                    SELECT c.* FROM commitment c JOIN thread t ON t.accountId=c.accountId AND t.id=c.threadId
+                    WHERE c.state='open' AND c.stateSource!='user' AND c.kind!='reply'
+                      AND c.hintMessageId IS NOT NULL AND c.checkedCount<t.messageCount
+                      AND NOT EXISTS (SELECT 1 FROM message m WHERE m.accountId=c.accountId AND m.threadId=c.threadId AND m.listUnsubscribe IS NOT NULL)
+                      AND NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId=c.accountId AND x.threadId=c.threadId
+                        AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || c.accountId)))
+                    ORDER BY c.updatedAt LIMIT 6
+                    """)
+            }
+            let keys = Array(Set(resolving.map { ThreadKey(accountId: $0.accountId, threadId: $0.threadId) }))
+            threads = try await database.reader.read { db in
+                var values = try PromptData.threads(db, keys: keys, messages: 12, characters: 2000)
+                for i in values.indices {
+                    for j in values[i].messages.indices {
+                        let names = try String.fetchAll(db, sql: "SELECT filename FROM attachment WHERE accountId=? AND messageId=? AND isInline=0", arguments: [values[i].key.accountId, values[i].messages[j].id])
+                        if !names.isEmpty { values[i].messages[j].text += "\nAttachments: " + names.joined(separator: ", ") }
+                    }
+                }
+                return values
+            }
+        }
         guard !threads.isEmpty else { return BatchResult(sent: 0, extracted: 0) }
+        let inspectedThreads = threads
         let open = try await database.reader.read { db in
-            try Dictionary(uniqueKeysWithValues: threads.map { thread in
+            try Dictionary(uniqueKeysWithValues: inspectedThreads.map { thread in
                 (thread.key, try Commitment.filter(Column("accountId") == thread.key.accountId && Column("threadId") == thread.key.threadId && Column("state") == "open").fetchAll(db))
             })
         }
+        let resolutionItems = resolving
+        let candidateThreads = threads
         let picked = try await database.writer.write { db -> [PromptThread] in
             guard try AISettings.read(db) == settings, Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) else { throw CancellationError() }
             var picked: [PromptThread] = []
-            for thread in threads {
+            for thread in candidateThreads {
                 let cue = thread.messages.contains { CommitmentCues.contains($0.text) }
                 let hasList = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE accountId=? AND threadId=? AND listUnsubscribe IS NOT NULL LIMIT 1)", arguments: [thread.key.accountId, thread.key.threadId]) ?? false
                 let hasOpen = (open[thread.key] ?? []).contains { $0.origin != "rule" }
-                if !hasList && (cue || hasOpen) { picked.append(thread) }
+                if !hasList && (cue || hasOpen || !resolutionItems.isEmpty) { picked.append(thread) }
                 else { try Ledger.recordScan(db, key: thread.key, messageCount: thread.messageCount, promptVersion: Prompts.ledgerVersion, origin: "cue-skip", now: stamp) }
             }
             return picked
@@ -193,13 +222,21 @@ public actor LedgerQueue {
             return BatchResult(sent: 0, extracted: 0)
         }
         let owner = try await database.reader.read { try String.fetchAll($0, sql: "SELECT email FROM account") }
-        var request = Prompts.ledger(picked, open: open, owner: owner, today: stamp)
+        var request = resolutionItems.isEmpty ? Prompts.ledger(picked, open: open, owner: owner, today: stamp) : LedgerResolution.request(picked, items: resolutionItems)
         request.model = settings.model(for: provider)
         let task = Task { try await provider.complete(request) }
         call = task
         do {
             let text = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
             guard generation == self.generation, !Task.isCancelled else { throw CancellationError() }
+            if !resolutionItems.isEmpty {
+                let count = try await database.writer.write { db in
+                    guard try AISettings.read(db) == settings, Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) else { throw CancellationError() }
+                    guard let count = try LedgerResolution.apply(text, db: db, threads: picked, items: resolutionItems, now: stamp) else { throw AIError.invalidOutput("Invalid resolution answer") }
+                    return count
+                }
+                return BatchResult(sent: picked.count, extracted: count)
+            }
             guard let verdicts = try await database.reader.read({ db in
                 try LedgerVerdict.parse(text, db: db, threads: picked, open: open)
             }) else { throw AIError.invalidOutput("Invalid ledger answer") }

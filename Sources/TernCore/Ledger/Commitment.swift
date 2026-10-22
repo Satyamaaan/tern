@@ -61,6 +61,8 @@ public struct CommitmentBrief: Hashable, Sendable {
     public var deliverable: String? = nil
     public var dueAt: Date? = nil
     public var hasHint: Bool = false
+    public var isMaybe: Bool = false
+    public var completion: String? = nil
 
     public func timeText(now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let dueAt else { return ageText(now: now) }
@@ -92,6 +94,8 @@ public struct CommitmentBrief: Hashable, Sendable {
 /// Exact previous rows for a local undo. No Gmail operation is queued.
 public struct LedgerUndo: Hashable, Sendable {
     public var previous: [Commitment]
+    /// Rows inserted by manual tracking, removed by undo.
+    public var created: [Int64] = []
 }
 
 /// Mail preferences shared by detection, list reads and the settings page.

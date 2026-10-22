@@ -113,6 +113,22 @@ extension Ledger {
         try refreshHints(db, keys: [key], now: now)
     }
 
+    /// Applies a validated confirmation, or remembers an inconclusive inspection, without changing user decisions.
+    @discardableResult
+    public static func applyResolution(_ db: Database, id: Int64, sourceMessageId: String, messageCount: Int,
+                                       confirmedBy messageId: String?, at date: Date?, note: String?, now: Date) throws -> Bool {
+        guard var item = try Commitment.fetchOne(db, key: id), item.state == .open, item.stateSource != "user",
+              item.kind != "reply", item.sourceMessageId == sourceMessageId else { return false }
+        item.checkedCount = messageCount
+        if let messageId, let date {
+            item.state = .done; item.stateSource = "ai"
+            item.resolvedMessageId = messageId; item.resolvedAt = date; item.resolutionNote = note
+        }
+        item.updatedAt = now
+        try item.update(db)
+        return item.state == .done
+    }
+
     /// Stores validated resolution evidence for later confirmation. It never changes the item's state.
     public static func applyResolutionHint(_ db: Database, id: Int64, messageId: String?, at date: Date?,
                                            note: String?, newDueAt: Date?, now: Date) throws {

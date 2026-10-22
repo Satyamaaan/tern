@@ -35,7 +35,8 @@ struct LedgerEvalTests {
         })
         let queue = LedgerQueue(database: database, providers: AIProviders([LedgerEvalRecorder(base: provider, directory: directory)]), now: { now })
         let started = Date()
-        for _ in 0..<40 {
+        let resolutionOnly = ProcessInfo.processInfo.environment["TERN_EVAL_RESOLUTION_ONLY"] == "1"
+        for _ in 0..<(resolutionOnly ? 0 : 40) {
             if try await queue.processBatch().sent == 0 { break }
         }
         let items = try await database.reader.read { try Commitment.filter(Column("origin") != "rule" && Column("confidence") == 2 && Column("surfaced") == true).fetchAll($0) }
@@ -55,15 +56,46 @@ struct LedgerEvalTests {
         let recalled = Set(matched.map { ThreadKey(accountId: $0.accountId, threadId: $0.threadId) }).count
         let precision = Double(matched.count) / Double(max(1, items.count))
         let recall = Double(recalled) / Double(expected.count)
+        if !resolutionOnly {
+            for target in expected where !matched.contains(where: { $0.threadId == target.thread.threadId && $0.accountId == target.thread.accountId }) {
+                print("LEDGER MISS id=\(target.thread.threadId) category=\(target.thread.threadId.split(separator: "-").last.flatMap { Int($0) }.map { $0 % 24 } ?? -1)")
+            }
+        }
         let scans = try await database.reader.read { try LedgerScan.fetchAll($0) }
         let skipped = Set(scans.filter { $0.origin == "cue-skip" }.map { ThreadKey(accountId: $0.accountId, threadId: $0.threadId) })
         let prefilter = Double(expected.filter { !skipped.contains($0.thread) }.count) / Double(expected.count)
         let calls = try await database.reader.read { try Setting.fetchOne($0, key: "ledger.ai.day")?.value ?? "" }
         try JSONEncoder().encode(gold).write(to: directory.appendingPathComponent("gold.json"))
-        print("LEDGER EVAL precision=\(precision) recall=\(recall) prefilterRecall=\(prefilter) calls=\(calls) latency=\(Date().timeIntervalSince(started))s surfaced=\(items.count) matched=\(matched.count) expected=\(expected.count)")
-        #expect(precision >= 0.95)
-        #expect(recall >= 0.7)
-        #expect(prefilter >= 0.9)
+        if !resolutionOnly { print("LEDGER EVAL precision=\(precision) recall=\(recall) prefilterRecall=\(prefilter) calls=\(calls) latency=\(Date().timeIntervalSince(started))s surfaced=\(items.count) matched=\(matched.count) expected=\(expected.count)") }
+        var resolutionClosed = 0
+        var resolutionCorrect = 0
+        var resolutionExpected = 0
+        let resolutionStart = Date()
+        for index in LedgerResolutionTests.cases.indices {
+            let (body, _, mine, attachment, expectedDone) = LedgerResolutionTests.cases[index]
+            let (sample, threads, items) = try LedgerResolutionTests.fixture(body, mine: mine, attachment: attachment)
+            let request = LedgerResolution.request(threads, items: items)
+            let response = try await provider.complete(request)
+            if let root = ModelJSON.parse(response) as? [String: Any], let values = root["items"] as? [[String: Any]] {
+                for value in values { print("RESOLUTION VERDICT category=\(index) ref=\(value["ref"] as? String ?? "nil") status=\(value["status"] as? String ?? "nil") messageRef=\(value["resolvedByRef"] as? String ?? "nil") quoteLength=\((value["quote"] as? String)?.count ?? 0)") }
+            }
+            let closed = try await sample.writer.write { db in
+                try LedgerResolution.apply(response, db: db, threads: threads, items: items, now: testNow) ?? 0
+            }
+            resolutionClosed += closed
+            if expectedDone { resolutionExpected += 1; resolutionCorrect += closed }
+            if expectedDone && closed == 0 { print("RESOLUTION MISS category=\(index)") }
+            if !expectedDone && closed > 0 { print("RESOLUTION FALSE CLOSE category=\(index)") }
+        }
+        let resolutionPrecision = resolutionClosed == 0 ? 1 : Double(resolutionCorrect) / Double(resolutionClosed)
+        let resolutionRecall = Double(resolutionCorrect) / Double(max(1, resolutionExpected))
+        print("RESOLUTION EVAL precision=\(resolutionPrecision) recall=\(resolutionRecall) calls=\(LedgerResolutionTests.cases.count) latency=\(Date().timeIntervalSince(resolutionStart))s")
+        #expect(resolutionPrecision >= 0.95)
+        if !resolutionOnly {
+            #expect(precision >= 0.95)
+            #expect(recall >= 0.7)
+            #expect(prefilter >= 0.9)
+        }
     }
 }
 

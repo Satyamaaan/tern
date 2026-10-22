@@ -65,7 +65,8 @@ public struct ThreadRow: Hashable, Sendable, Identifiable, FetchableRecord {
                 sourceDate: Date(timeIntervalSince1970: row["ledgerDate"]), extraCount: row["ledgerExtra"], surfaceAt: Date(timeIntervalSince1970: row["ledgerSurface"]),
                 deliverable: row.hasColumn("ledgerDeliverable") ? row["ledgerDeliverable"] : nil,
                 dueAt: (row.hasColumn("ledgerDue") ? row["ledgerDue"] as Double? : nil).map(Date.init(timeIntervalSince1970:)),
-                hasHint: row.hasColumn("ledgerHint") ? row["ledgerHint"] : false)
+                hasHint: row.hasColumn("ledgerHint") ? row["ledgerHint"] : false,
+                isMaybe: row.hasColumn("ledgerMaybe") ? row["ledgerMaybe"] : false)
         } else { ledger = nil }
         category = row["aiCategory"]
         needsReply = row["aiNeedsReply"] ?? false
@@ -87,6 +88,8 @@ public struct ThreadDetail: Hashable, Sendable {
     public var ai: ThreadAI?
     public var projects: [Project]
     public var snoozedUntil: Date?
+    /// Open and recently completed local commitments, observed with the thread.
+    public var commitments: [Commitment] = []
 }
 
 public struct SidebarCounts: Hashable, Sendable {
@@ -281,9 +284,17 @@ public struct MailStore: Sendable {
             WHERE tp.accountId = ? AND tp.threadId = ? ORDER BY project.sortOrder
             """, arguments: [key.accountId, key.threadId])
         let snooze = try Snooze.fetchOne(db, key: ["accountId": key.accountId, "threadId": key.threadId])
+        let ledgerSettings = try LedgerSettings.load(db)
+        var commitments = ledgerSettings.enabled ? try Commitment.fetchAll(db, sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND (confidence=2 OR ?) AND (state='open' OR (state='done' AND updatedAt>=?)) ORDER BY sourceDate,id", arguments: [key.accountId, key.threadId, ledgerSettings.showMaybe, Date().addingTimeInterval(-14 * 86_400).timeIntervalSince1970]) : []
+        for i in commitments.indices where commitments[i].sourceQuote.isEmpty {
+            if let source = messages.first(where: { $0.id == commitments[i].sourceMessageId }) {
+                commitments[i].sourceQuote = String(MailText.stripQuoted(source.bodyText ?? source.snippet).prefix(700))
+            }
+        }
         return ThreadDetail(
             thread: thread, messages: messages, attachments: Dictionary(grouping: attachments, by: \.messageId),
-            ai: ai, projects: projects, snoozedUntil: snooze?.until)
+            ai: ai, projects: projects, snoozedUntil: snooze?.until,
+            commitments: commitments)
     }
 
     public func observeThreadDetail(_ key: ThreadKey) -> ValueObservation<ValueReducers.RemoveDuplicates<ValueReducers.Fetch<ThreadDetail?>>> {
