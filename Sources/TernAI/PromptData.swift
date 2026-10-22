@@ -12,6 +12,7 @@ struct PromptThread: Hashable, Sendable {
         /// New text only (quotes cut), whitespace collapsed and truncated.
         var text: String
         var isFromMe: Bool
+        var id: String = ""
     }
 
     var key: ThreadKey
@@ -50,7 +51,7 @@ enum PromptData {
         var latest: [ThreadKey: [Row]] = [:]
         for row in try Row.fetchAll(db, sql: """
             WITH k(accountId, threadId) AS (VALUES \(unique.map { _ in "(?, ?)" }.joined(separator: ", ")))
-            SELECT m.accountId, m.threadId, m.date, m.fromName, m.fromEmail, m.toList, m.ccList, m.snippet,
+            SELECT m.id, m.accountId, m.threadId, m.date, m.fromName, m.fromEmail, m.toList, m.ccList, m.snippet,
               substr(m.bodyText, 1, 6000) AS bodyHead, m.isFromMe
             FROM k JOIN message m ON m.seq IN (
               SELECT seq FROM message
@@ -116,7 +117,7 @@ enum PromptData {
         return PromptThread.Message(
             from: Participant(name: row["fromName"], email: row["fromEmail"]), to: to, cc: cc,
             date: Date(timeIntervalSince1970: row["date"]), text: sampleText(row, characters: characters),
-            isFromMe: row["isFromMe"])
+            isFromMe: row["isFromMe"], id: row["id"])
     }
 
     private static func sampleText(_ row: Row, characters: Int) -> String {

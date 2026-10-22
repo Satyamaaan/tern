@@ -14,6 +14,7 @@ final class Integration {
     let providers: AIProviders
     let assistant: MailAssistant
     let triage: TriageQueue
+    let ledgerQueue: LedgerQueue
     private var google: GoogleAccounts? { didSet { googleBox.set(google) } }
     private var aiSettingsTask: Task<Void, Never>?
     private var effectiveAIState: String?
@@ -34,7 +35,13 @@ final class Integration {
         let providers = AIProviders([GroqProvider(key: { GroqCredential.read() }), CodexCLIProvider(), ClaudeCLIProvider()])
         self.providers = providers
         assistant = MailAssistant(database: database, providers: providers)
-        triage = TriageQueue(database: database, providers: providers)
+        let triage = TriageQueue(database: database, providers: providers)
+        self.triage = triage
+        ledgerQueue = LedgerQueue(database: database, providers: providers, triageIdle: {
+            let state = await triage.currentStatus.state
+            if case .working = state { return false }
+            return true
+        })
     }
 
     enum Failure: LocalizedError {
@@ -311,15 +318,18 @@ final class Integration {
             })
 
         let triage = self.triage
-        services.aiPrioritize = { keys in Task { await triage.prioritize(keys) } }
+        let ledgerQueue = self.ledgerQueue
+        services.aiPrioritize = { keys in Task { await triage.prioritize(keys); await ledgerQueue.prioritize(keys) } }
         Task { [weak self] in
             for await status in await triage.statusUpdates() {
                 guard let self else { return }
+                if case .working = status.state { await ledgerQueue.yieldToTriage() }
+                if case .idle = status.state { await ledgerQueue.poke() }
                 let sorting = AISorting(status: status)
                 if self.services.aiSorting != sorting { self.services.aiSorting = sorting }
             }
         }
-        Task.detached(priority: .utility) { await triage.start() }
+        Task.detached(priority: .utility) { await triage.start(); await ledgerQueue.start() }
     }
 
     // MARK: Projects
@@ -354,7 +364,8 @@ final class Integration {
 
     func stop() {
         let triage = self.triage
-        Task { await triage.stop() }
+        let ledgerQueue = self.ledgerQueue
+        Task { await triage.stop(); await ledgerQueue.stop() }
     }
 
     /// Quitting: lets sync put in-flight work back in its queue, for at most `timeout` seconds.
