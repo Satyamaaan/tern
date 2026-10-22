@@ -366,7 +366,8 @@ crossfades.
 ## Motion
 Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 0.9, 0.25, 1`.
 
-- Cursor fill slides from row to row on j/k and ↑↓ (130 ms; a held key retargets it mid-slide). A click, jumps of
+- Cursor fill slides from row to row on j/k and ↑↓ (130 ms), one press at a time in a still list. When the list
+  scrolls to follow it, or a key is held, it stays on its row and the rows move under it. A click, jumps of
   more than 12 rows, new lists and Reduce Motion place it at once. It is one view under the rows (`CursorFillView`),
   used while only the cursor is selected.
 - A different list (tab, mailbox, scope, leaving search) crossfades in 100 ms; never at launch or per search

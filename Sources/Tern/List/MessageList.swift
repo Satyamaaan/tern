@@ -193,10 +193,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     var window: NSWindow? { table.window }
 
     func selectionDidChange(scrollTo key: ThreadKey?) {
-        cursorMoved = true
+        let scrollY = key.flatMap { snapshot.itemIndex[$0] }.flatMap(revealOffset)
+        // The fill slides only within a still list, one key at a time. When the list scrolls, or a held key
+        // repeats, it stays on its row and the rows move under it.
+        cursorMoved = scrollY == nil && NSApp.currentEvent?.isARepeatKey != true
         refreshVisibleRows()
         cursorMoved = false
-        if let key, let index = snapshot.itemIndex[key] { reveal(index) }
+        if let scrollY {
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
         reportRowsInView()
     }
 
@@ -216,16 +222,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         }
     }
 
-    /// Scrolls just enough to show the row below the sticky header, without animation (j/k speed).
-    private func reveal(_ index: Int) {
+    /// Where to scroll, without animation (j/k speed), to just show the row below the sticky header; nil
+    /// when it is already in view.
+    private func revealOffset(_ index: Int) -> CGFloat? {
         let rect = table.rect(ofRow: index)
         let visible = scrollView.contentView.bounds
         let top = visible.minY + Self.headerHeight
         let bottom = visible.maxY - scrollView.contentInsets.bottom
-        var y = visible.minY
-        if rect.minY < top { y = rect.minY - Self.headerHeight } else if rect.maxY > bottom { y = rect.maxY - visible.height + scrollView.contentInsets.bottom } else { return }
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        if rect.minY < top { return max(0, rect.minY - Self.headerHeight) }
+        if rect.maxY > bottom { return max(0, rect.maxY - visible.height + scrollView.contentInsets.bottom) }
+        return nil
     }
 
     /// Re-applies models to every row view on screen (selection, hover, content).
@@ -730,4 +736,9 @@ enum DragBadge {
         image.unlockFocus()
         return image
     }
+}
+
+private extension NSEvent {
+    /// A key held down and repeating.
+    var isARepeatKey: Bool { type == .keyDown && isARepeat }
 }
