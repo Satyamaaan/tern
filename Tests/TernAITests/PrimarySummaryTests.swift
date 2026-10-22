@@ -75,6 +75,7 @@ struct PrimarySummaryTests {
         let latch = Latch()
         let provider = FakeProvider { _, _ in
             await latch.wait()
+            if Task.isCancelled { throw URLError(.cancelled) }
             return "{\"bullets\":[\"A synthetic summary\"]}"
         }
         let providers = AIProviders([provider])

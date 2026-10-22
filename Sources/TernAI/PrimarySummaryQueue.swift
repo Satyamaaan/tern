@@ -94,13 +94,15 @@ public actor PrimarySummaryQueue {
             _ = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
             self.retryAfter[key] = nil
         } catch {
-            if error is CancellationError {
+            let cancelled = error is CancellationError || task.isCancelled
+            if cancelled {
                 try await database.writer.write { db in
                     guard let value = try Setting.fetchOne(db, key: "ai.summary.day")?.value, value.hasPrefix(day + ":") else { return }
                     let count = Int(value.split(separator: ":").last ?? "0") ?? 0
                     try Setting(key: "ai.summary.day", value: "\(day):\(max(0, count - 1))").upsert(db)
                 }
             } else { self.retryAfter[key] = stamp.addingTimeInterval(300) }
+            if cancelled { throw CancellationError() }
             throw error
         }
         try await Task.sleep(for: .seconds(1))
