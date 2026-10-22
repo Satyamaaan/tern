@@ -35,6 +35,18 @@
     return baseSheet;
   }
 
+  /// Plays a one-off entrance class (reader.css: `tern-reveal`) and takes it off once it has run. Only clicks call
+  /// this: `render()`, j/k, Enter and the app's commands never animate.
+  function reveal(element, className, delay) {
+    if (!element) return;
+    if (delay) element.style.animationDelay = `${delay}ms`;
+    element.classList.add(className);
+    setTimeout(() => {
+      element.classList.remove(className);
+      if (delay) element.style.animationDelay = '';
+    }, 200 + (delay || 0));
+  }
+
   function afterPaint(callback) {
     if (document.visibilityState === 'hidden') { setTimeout(callback, 0); return; }
     requestAnimationFrame(() => requestAnimationFrame(callback));
@@ -257,11 +269,25 @@
     wrapper.innerHTML = body.html;
     outer.append(wrapper);
     shadow.append(outer);
-    shadow.addEventListener('load', () => queueFit(), true);
+    shadow.addEventListener('load', (event) => {
+      if (event.target.removeAttribute) event.target.removeAttribute('data-tern-loading');
+      queueFit();
+    }, true);
+    markLoadingImages(shadow);
     shadow.querySelectorAll('.tern-quote-toggle').forEach((toggle, index) => {
       if (state.openQuotes.has(`${id}#${index}`)) setQuote(toggle, true);
     });
     return true;
+  }
+
+  /// Remote images still on their way after the first frames (nothing painted yet) are hidden and fade in when they
+  /// load (mail.css). Cached images have painted by then, so revisits and j/k never fade.
+  function markLoadingImages(shadow) {
+    afterPaint(() => {
+      for (const image of shadow.querySelectorAll('img[src]:not([data-tern-blocked]):not([data-tern-missing]):not([data-tern-failed])')) {
+        if (!image.complete && image.naturalWidth === 0) image.setAttribute('data-tern-loading', '');
+      }
+    });
   }
 
   function fit(host) {
@@ -290,7 +316,8 @@
 
   // MARK: Messages
 
-  function setOpen(id, open) {
+  /// `animate` only from a click on the message's line: its header and body fade in.
+  function setOpen(id, open, animate) {
     const element = messageElement(id);
     if (!element) return;
     if (open) {
@@ -299,6 +326,7 @@
       element.classList.remove('hidden-run');
       mount(id);
       fit(element.querySelector('.mbody'));
+      if (animate) reveal(element, 'revealing');
     } else {
       state.expanded.delete(id);
       element.classList.remove('open', 'details-open');
@@ -342,10 +370,12 @@
     applyFocus(true);
   }
 
-  function setQuote(toggleElement, open) {
+  /// `animate` only when a click opens it; closing and quotes reopened by `mount()` are instant.
+  function setQuote(toggleElement, open, animate) {
     const quote = toggleElement.nextElementSibling;
     if (!quote || !quote.classList.contains('tern-quote')) return;
     quote.hidden = !open;
+    if (open && animate) reveal(quote, 'revealing');
     toggleElement.classList.toggle('open', open);
     toggleElement.setAttribute('aria-label', open ? 'Hide quoted text' : 'Show quoted text');
   }
@@ -385,7 +415,8 @@
       const toggles = Array.from(quoteToggle.getRootNode().querySelectorAll('.tern-quote-toggle'));
       const key = `${id}#${toggles.indexOf(quoteToggle)}`;
       const open = !quoteToggle.classList.contains('open');
-      setQuote(quoteToggle, open);
+      // A click from the keyboard (Open on a focused toggle) has no detail and doesn't animate.
+      setQuote(quoteToggle, open, event.detail > 0);
       if (open) state.openQuotes.add(key); else state.openQuotes.delete(key);
       queueFit();
       return;
@@ -404,7 +435,7 @@
     const id = message && message.dataset.id;
     switch (action.dataset.act) {
       case 'toggle':
-        setOpen(id, true);
+        setOpen(id, true, true);
         break;
       case 'collapse': {
         const selection = window.getSelection();
@@ -421,7 +452,10 @@
       }
       case 'more':
         state.showAll = true;
-        root().querySelectorAll('.msg.hidden-run').forEach((element) => element.classList.remove('hidden-run'));
+        root().querySelectorAll('.msg.hidden-run').forEach((element, index) => {
+          element.classList.remove('hidden-run');
+          reveal(element, 'arriving', Math.min(index * 20, 100));
+        });
         action.remove();
         break;
       case 'images':
@@ -525,9 +559,14 @@
     },
     setSummary(key, summary) {
       if (!state || state.key !== key) return;
+      const wasLoading = state.payload.summary && state.payload.summary.state === 'loading';
       state.payload.summary = summary;
       const element = root().querySelector('.summary');
-      if (element) element.outerHTML = summaryHTML(summary);
+      if (!element) return;
+      element.outerHTML = summaryHTML(summary);
+      if (wasLoading && summary && (summary.state === 'bullets' || summary.state === 'text')) {
+        reveal(root().querySelector('.summary'), 'landed');
+      }
     },
     /// Bodies sanitized after the first paint (collapsed messages), or on demand.
     setBodies(key, bodies) {
@@ -548,8 +587,17 @@
         if (state.logos[email] === logo) continue;
         state.logos[email] = logo;
         root().querySelectorAll(`.av[data-email="${CSS.escape(email)}"]`).forEach((element) => {
-          element.classList.add('logo');
-          element.innerHTML = `<img src="${esc(logo)}" alt="">`;
+          // The logo fades in over the initials, which go once it's in.
+          const image = document.createElement('img');
+          image.alt = '';
+          image.src = logo;
+          image.className = 'arriving';
+          element.append(image);
+          setTimeout(() => {
+            image.classList.remove('arriving');
+            element.classList.add('logo');
+            element.replaceChildren(image);
+          }, 160);
         });
       }
     },
@@ -561,6 +609,7 @@
         if (!host.shadowRoot) continue;
         for (const image of host.shadowRoot.querySelectorAll('img[src]')) {
           if (image.getAttribute('src') !== url || (image.complete && image.naturalWidth > 0)) continue;
+          image.removeAttribute('data-tern-loading');
           image.setAttribute('data-tern-failed', '');
         }
       }

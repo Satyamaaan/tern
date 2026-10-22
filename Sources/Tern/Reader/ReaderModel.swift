@@ -885,14 +885,20 @@ final class ReaderModel {
 
     func setTheme(dark: Bool) { engine.setTheme(dark: dark) }
 
+    /// Fades the toast in and, 3 s later, out. The animation is scoped to the toast so nothing else that
+    /// changes in the same update (the web view's frame) animates with it.
     func showToast(_ text: String) {
-        toast = text
+        withAnimation(Self.toastFade) { toast = text }
         toastTask?.cancel()
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            self?.toast = nil
+            withAnimation(Self.toastFade) { self?.toast = nil }
         }
+    }
+
+    private static var toastFade: Animation {
+        Motion.or(reduced: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, .easeOut(duration: Motion.exit))
     }
 }
 

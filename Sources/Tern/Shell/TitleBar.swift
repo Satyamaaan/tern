@@ -30,6 +30,9 @@ struct TitleBar: View {
 /// open mailbox or search that isn't a tab shows at the end while it is open.
 struct TabBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The active tab's fill slides between tabs under this id.
+    @Namespace private var fill
 
     /// `+` and `…` after the tabs.
     private static let trailingControls: CGFloat = 2 * (28 + 2)
@@ -41,12 +44,16 @@ struct TabBar: View {
             }
             HStack(spacing: 2) {
                 ForEach(fit.visible) { tab in
-                    TabButton(tab: tab)
+                    TabButton(tab: tab, fill: reduceMotion ? nil : fill)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
                 }
                 AddTabButton()
                 MoreTabsButton(hidden: fit.hidden)
             }
             .frame(height: geometry.size.height)
+            // The cursor's slide, so tabs and rows move alike; tabs coming and going fade. Reduce Motion: a crossfade.
+            .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.cursor), value: model.activeTab)
+            .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.cursor), value: fit.visible)
         }
         .frame(height: 28)
         .clipped()
@@ -86,7 +93,8 @@ struct TabFit {
 struct TabButton: View {
     @Environment(AppModel.self) private var model
     let tab: ListTab
-    @State private var hovering = false
+    /// Where the active fill slides; nil (Reduce Motion) crossfades it instead.
+    var fill: Namespace.ID?
 
     static let titleFont = Theme.ui(13, .medium)
     static let maxTitle: CGFloat = 160
@@ -105,12 +113,20 @@ struct TabButton: View {
         Button { model.select(tab) } label: {
             HStack(spacing: 6) {
                 IconView(icon: style.icon, size: 14, color: Color(style.color))
+                // Sized by a hidden Medium copy (how `width` measures), so a tab keeps its width as it turns
+                // active and its neighbours don't shift.
                 Text(model.title(for: tab))
-                    .font(.ui(13, active ? .medium : .regular))
-                    .foregroundStyle(Color(active ? Theme.text1 : Theme.text2))
+                    .font(.ui(13, .medium))
                     .lineLimit(1)
                     .frame(maxWidth: Self.maxTitle, alignment: .leading)
                     .fixedSize()
+                    .hidden()
+                    .overlay(alignment: .leading) {
+                        Text(model.title(for: tab))
+                            .font(.ui(13, active ? .medium : .regular))
+                            .foregroundStyle(Color(active ? Theme.text1 : Theme.text2))
+                            .lineLimit(1)
+                    }
                 if let count = model.count(for: tab) {
                     Text("\(count)")
                         .font(.numeric(12))
@@ -120,13 +136,10 @@ struct TabButton: View {
             .padding(.leading, 8)
             .padding(.trailing, 10)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                .fill(Color(active ? Theme.selected : Theme.hover).opacity(active || hovering ? 1 : 0)))
-            .contentShape(Rectangle())
+            .background { if active { activeFill } }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFillStyle(hover: active ? nil : Theme.hover))
         .fixedSize()
-        .onHover { hovering = $0 }
         .help(help)
         .contextMenu {
             if model.isPinned(tab) {
@@ -134,6 +147,16 @@ struct TabButton: View {
             } else if tab.isPinnable {
                 Button("Pin as Tab") { model.pin(tab) }
             }
+        }
+    }
+
+    /// The active tab's `selected` fill, under the label; it slides to the next active tab.
+    @ViewBuilder private var activeFill: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected))
+        if let fill {
+            shape.matchedGeometryEffect(id: "activeTab", in: fill)
+        } else {
+            shape
         }
     }
 
@@ -307,7 +330,6 @@ extension Icon {
 /// Overlapping account avatars and "3 accounts" (or the account in scope). Opens the scope menu.
 struct AccountStack: View {
     @Environment(AppModel.self) private var model
-    @State private var hovering = false
 
     var body: some View {
         let shown = model.scopedAccount.map { [$0] } ?? Array(model.accounts.prefix(3))
@@ -329,12 +351,8 @@ struct AccountStack: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                .fill(Color(Theme.hover).opacity(hovering ? 1 : 0)))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(PressFillStyle())
         .help("Switch account  \(model.registry?["scope.all"]?.shortcutText.map { "\($0), " } ?? "")⌘1–⌘9")
         .accessibilityLabel("Switch account, \(title)")
         .opacity(model.accounts.isEmpty ? 0 : 1)

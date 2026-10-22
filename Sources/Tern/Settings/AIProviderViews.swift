@@ -66,8 +66,16 @@ struct AIStatusLine: View {
     var isChecking = false
     var recheck: (() -> Void)?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        if status != nil || isChecking { line }
+        // Checking… → Ready / Not signed in crossfades, and what comes under it fades in (150 ms; 80 ms with
+        // Reduce Motion).
+        if status != nil || isChecking {
+            line
+                .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: status)
+                .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: isChecking)
+        }
     }
 
     private var line: some View {
@@ -77,6 +85,7 @@ struct AIStatusLine: View {
                 Text(label)
                     .font(.ui(12, status == .ready ? .medium : .regular))
                     .foregroundStyle(Color(status == .ready ? Theme.text1 : status == nil ? Theme.text3 : Theme.text2))
+                    .contentTransition(.opacity)
                 if let recheck, status != nil, status != .ready {
                     Text("·").font(.ui(12)).foregroundStyle(Color(Theme.text3))
                     Button(isChecking ? "Checking…" : "Check again", action: recheck)
@@ -128,6 +137,7 @@ struct AIStatusLine: View {
 /// A Terminal command in a 22 pt chip, with a button that copies it.
 struct CommandChip: View {
     let command: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var copied = false
 
     var body: some View {
@@ -138,8 +148,14 @@ struct CommandChip: View {
                 .textSelection(.enabled)
                 .padding(.leading, 8)
             Button(action: copy) {
-                IconView(icon: copied ? .done : .copy, size: 13, color: Color(copied ? Theme.text1 : Theme.text2))
-                    .frame(width: 22, height: 22)
+                // Copy → check: the icons swap with a small scale and blur (150 ms; a plain fade with Reduce Motion).
+                ZStack {
+                    IconView(icon: copied ? .done : .copy, size: 13, color: Color(copied ? Theme.text1 : Theme.text2))
+                        .id(copied)
+                        .transition(reduceMotion ? .opacity : .iconSwap)
+                }
+                .frame(width: 22, height: 22)
+                .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: copied)
             }
             .buttonStyle(IconButtonStyle())
             .help("Copy")
@@ -163,27 +179,14 @@ struct AIProviderSegments: View {
     @Binding var selection: AIProvider
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(AIProvider.allCases) { option in
-                let chosen = selection == option
-                let shape = RoundedRectangle(cornerRadius: Theme.Radius.control - 2, style: .continuous)
-                HStack(spacing: 6) {
-                    if let logo = option.logo { BrandLogoView(logo: logo, size: 14) }
-                    Text(option.title)
-                        .font(.ui(12, .medium))
-                        .foregroundStyle(Color(chosen ? Theme.text1 : Theme.text2))
-                }
-                .padding(.horizontal, 10)
-                .frame(height: Theme.Control.small)
-                .background(shape.fill(Color(Theme.raised).opacity(chosen ? 1 : 0))
-                    .overlay(shape.strokeBorder(Color(Theme.hairlineStrong).opacity(chosen ? 1 : 0), lineWidth: 1)))
-                .contentShape(Rectangle())
-                .onTapGesture { selection = option }
-                .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+        SegmentedTrack(options: AIProvider.allCases, selection: $selection) { option, chosen in
+            HStack(spacing: 6) {
+                if let logo = option.logo { BrandLogoView(logo: logo, size: 14) }
+                Text(option.title)
+                    .font(.ui(12, .medium))
+                    .foregroundStyle(Color(chosen ? Theme.text1 : Theme.text2))
             }
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected)))
     }
 }
 
@@ -214,4 +217,16 @@ struct AIProviderRow: View {
             Hairline()
         }
     }
+}
+
+extension AnyTransition {
+    /// One icon giving way to another: 80 % scale, opacity and a 2 pt blur.
+    static var iconSwap: AnyTransition {
+        .scale(scale: 0.8).combined(with: .opacity).combined(with: .modifier(active: IconBlur(radius: 2), identity: IconBlur(radius: 0)))
+    }
+}
+
+private struct IconBlur: ViewModifier {
+    let radius: CGFloat
+    func body(content: Content) -> some View { content.blur(radius: radius) }
 }

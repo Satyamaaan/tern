@@ -10,7 +10,10 @@ struct OnboardingView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(AppServices.self) private var services
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step: Int
+    /// Which way the last step change went, so the next step comes in from that side.
+    @State private var forward = true
     @State private var clientId = ""
     @State private var clientSecret = ""
     @State private var showWhy = false
@@ -40,28 +43,37 @@ struct OnboardingView: View {
             }
             .padding(.top, 36)
 
-            Text(headline)
-                .font(.display(30))
-                .tracking(-0.5)
-                .foregroundStyle(Color(Theme.text1))
-                .padding(.top, 32)
-            Text(intro)
-                .font(.ui(13))
-                .foregroundStyle(Color(Theme.text2))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-                .padding(.bottom, 20)
+            // One keyed view per step, so the old and new steps pass each other instead of stacking.
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(headline)
+                        .font(.display(30))
+                        .tracking(-0.5)
+                        .foregroundStyle(Color(Theme.text1))
+                        .padding(.top, 32)
+                    Text(intro)
+                        .font(.ui(13))
+                        .foregroundStyle(Color(Theme.text2))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
 
-            Group {
-                switch step {
-                case 0: clientStep
-                case 1: accountsStep
-                case 2:
-                    OnboardingAIStep(board: board, choice: provider, choose: { picked = $0 }, recheck: { recheckAI() })
-                default: doneStep
+                    Group {
+                        switch step {
+                        case 0: clientStep
+                        case 1: accountsStep
+                        case 2:
+                            OnboardingAIStep(board: board, choice: provider, choose: { picked = $0 }, recheck: { recheckAI() })
+                        default: doneStep
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .id(step)
+                .transition(stepTransition)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(Motion.or(reduced: reduceMotion, Motion.spring), value: step)
 
             Spacer(minLength: 16)
 
@@ -70,12 +82,14 @@ struct OnboardingView: View {
                 Spacer()
                 if let message {
                     Text(message).font(.ui(12, .medium)).foregroundStyle(Color(Theme.ink)).lineLimit(2)
+                        .transition(.opacity)
                 }
                 if step > 0 && step < 3 {
-                    Button("Back") { message = nil; step -= 1 }.buttonStyle(TernButtonStyle(.secondary))
+                    Button("Back") { message = nil; go(to: step - 1) }.buttonStyle(TernButtonStyle(.secondary))
                 }
                 primaryButton
             }
+            .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: message)
             .padding(.bottom, 28)
         }
         .padding(.horizontal, 44)
@@ -90,6 +104,24 @@ struct OnboardingView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if step == 2 && board.needsAttention { recheckAI() }
         }
+    }
+
+    /// The new step comes in 16 pt from the side it lies on, the old one leaves the other way, quieter (8 pt); a
+    /// crossfade with Reduce Motion.
+    private var stepTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let distance: CGFloat = forward ? 16 : -16
+        return .asymmetric(insertion: .offset(x: distance).combined(with: .opacity),
+                           removal: .offset(x: -distance / 2).combined(with: .opacity))
+    }
+
+    /// Moves to `next`. When the direction turns, the step on screen learns it a frame before it leaves, so it
+    /// leaves the right way.
+    private func go(to next: Int) {
+        let ahead = next > step
+        guard ahead != forward else { step = next; return }
+        forward = ahead
+        DispatchQueue.main.async { step = next }
     }
 
     private var headline: String {
@@ -131,6 +163,7 @@ struct OnboardingView: View {
                 }
             }
         }
+        .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: step)
     }
 
     @ViewBuilder private var primaryButton: some View {
@@ -141,11 +174,11 @@ struct OnboardingView: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(working)
         case 1:
-            Button("Continue") { message = nil; step = 2 }
+            Button("Continue") { message = nil; go(to: 2) }
                 .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
         case 2:
-            Button("Continue") { saveAI(); step = 3 }
+            Button("Continue") { saveAI(); go(to: 3) }
                 .buttonStyle(TernButtonStyle(.primary))
                 .keyboardShortcut(.defaultAction)
                 .disabled(provider == nil)
@@ -170,7 +203,7 @@ struct OnboardingView: View {
                     .font(.ui(12))
                     .foregroundStyle(Color(Theme.text3))
                 Spacer()
-                Button(showWhy ? "Why your own client" : "Why?") { withAnimation(.easeOut(duration: 0.15)) { showWhy.toggle() } }
+                Button(showWhy ? "Why your own client" : "Why?") { withAnimation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15))) { showWhy.toggle() } }
                     .buttonStyle(LinkButtonStyle())
                     .font(.ui(12, .medium))
             }
@@ -190,12 +223,14 @@ struct OnboardingView: View {
             Hairline()
             ForEach(model.accounts) { account in
                 accountRow(account)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
             }
             Button(working ? "Opening Google…" : model.accounts.isEmpty ? "Add Gmail account" : "Add another account") { addAccount() }
                 .buttonStyle(TernButtonStyle(model.accounts.isEmpty ? .primary : .secondary))
                 .disabled(working)
                 .padding(.top, 16)
         }
+        .animation(Motion.or(reduced: reduceMotion, Motion.ease(0.18)), value: model.accounts.map(\.id))
     }
 
     private func accountRow(_ account: Account) -> some View {
@@ -207,6 +242,8 @@ struct OnboardingView: View {
                 Text(account.email).font(.ui(13)).foregroundStyle(Color(Theme.text1)).lineLimit(1)
                 Spacer()
                 Text(account.syncState == .live ? "Synced" : "Syncing…").font(.ui(12)).foregroundStyle(Color(Theme.text3))
+                    .contentTransition(.opacity)
+                    .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: account.syncState == .live)
             }
             .frame(height: 40)
             Hairline()
@@ -274,17 +311,17 @@ struct OnboardingView: View {
     private func saveClient() {
         let id = clientId.trimmingCharacters(in: .whitespacesAndNewlines)
         let secret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        if id.isEmpty && services.hasGoogleClient() { step = 1; return }
+        if id.isEmpty && services.hasGoogleClient() { go(to: 1); return }
         working = true
         Task {
             defer { working = false }
             do {
                 try await services.saveGoogleClient(id, secret)
                 message = nil
-                step = 1
+                go(to: 1)
             } catch ShellError.notAvailable {
                 message = ShellError.notAvailable.localizedDescription
-                step = 1
+                go(to: 1)
             } catch {
                 message = GoogleClientText.message(for: error)
             }
@@ -303,7 +340,7 @@ struct OnboardingView: View {
             do {
                 try await services.importGoogleClient(data)
                 message = nil
-                step = 1
+                go(to: 1)
             } catch {
                 message = GoogleClientText.message(for: error)
             }

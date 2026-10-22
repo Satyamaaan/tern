@@ -130,9 +130,12 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
 All radius 6. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+While held, text buttons also shrink to 97 % and icon buttons to 95 % (100 ms, house curve; the fill stays
+instant; no shrink with Reduce Motion).
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
 a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
-`hairlineStrong` border, radius 4 inside 6. Switches are tinted `ink`.
+`hairlineStrong` border, radius 4 inside 6; the segment slides to a new choice (180 ms, house curve; an 80 ms
+crossfade with Reduce Motion). Switches are tinted `ink`.
 
 ## Window
 
@@ -160,7 +163,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   unclassified mail → Primary). Each: 14 px icon (hue per the table), title, count in tabular `text3`: unread on
   Promotions, Social, Updates and Forums, waiting threads on Needs reply, none on All and Primary (their unread
   mail is the list itself; with inbox tabs off All counts its unread). 28 px tall, radius 6; active = `selected`
-  fill and Medium text; hover = `hover`.
+  fill and Medium text; hover = `hover`; pressed = `selected` at once. A tab is as wide as its Medium title, so
+  turning active never shifts its neighbours; the active fill slides to the next tab (130 ms, the cursor's curve).
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
   pinned shows as a temporary tab at the end while it is open.
 - `+` pins a project, a label or the current search. `⋯` holds tabs that don't fit (the active tab always
@@ -204,13 +208,17 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     date header's too) go, so a fill never sits between two lines. Hover: `hover` fill and three icon buttons
     replace tags and time: Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯`; on a draft row Discard
     and `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus` while the list has the keyboard in the
-    key window, so focus shows without a ring. Selected neighbours join into one block.
+    key window, so focus shows without a ring. Selected neighbours join into one block. The row's icon buttons: `selected` under the
+    pointer (the row already has `hover`), `selectedFocus` pressed.
 - A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
   selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label (every
   other category comes off, also one Gmail adds before the move lands), so Gmail files it there too, and like
   archive the row leaves a tab it no longer belongs to, with undo: each message goes back to the tab it was in
   when you moved it, also in Gmail.
-- Triage: `e` archives, the row collapses (160 ms ease-out) and the next row is selected in the same frame.
+- Triage: `e` archives, the row collapses (160 ms, quick ease-out) and the next row is selected in the same frame;
+  a row that slides under a still pointer gets its hover buttons at once. Undo (`z`) slides the row back down into
+  place (160 ms); a few new threads at the top of a list scrolled to the top slide in the same way.
+  Anything else (paging, search refreshes, mail arriving out of sight) appears at once.
   Toast bottom-centre (36 px, radius 8, `ink` fill): "Archived · Undo z" (4 s), above the bottom bar.
 - Archived mail is in the **Archive** mailbox (sidebar, `g e`): conversations someone else wrote in, and notes you
   sent yourself, that aren't in the inbox, snoozed, spam or trash, newest first, no count. There the archive buttons
@@ -221,8 +229,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   copy is deleted only after the undo window, and an undo too late for that says so. A selection of draft rows and
   conversations is discarded and trashed together ("Trash and Discard Drafts", one toast, one undo). A draft
   being sent is never discarded; the toast counts only the drafts that were.
-- Empty: inbox zero (All, Primary) is the tern drawn as one stroke, then "Nothing needs you." (Display 20) and a `text3` tally;
-  other lists one Display 17 line in `text2`.
+- Empty: inbox zero (All, Primary) is the tern, "Nothing needs you." (Display 20) and a `text3` tally; when triage
+  empties the list it arrives in sequence (fades in over the end of the collapse, the tern drawn as one stroke in
+  900 ms, then the text rises 4 pt), otherwise it is simply there. Other lists one Display 17 line in `text2`.
 
 ### Bottom bar
 A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
@@ -256,8 +265,18 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   it still allows no remote image). Mail that paints its own colours sits on a white card in dark mode and always
   sees a light colour scheme: its `prefers-color-scheme: dark` styles and `color-scheme` never apply. Attachments
   as chips. Quoted text behind a `•••` toggle.
+- Motion on the page is for clicks only; `render()` (every j/k), n/p, Enter and Expand All never animate. A
+  message, quoted text or the "N more" rows opened by a click fade in with a 4 px (quotes 3 px) drop, 140 ms on the
+  house curve (the rows 20 ms apart, at most 100 ms); collapsing is instant. Attachments, `+`, `···` and the
+  "N more" count shrink to 97 % while pressed (the `•••` toggle to 94 %). "Summarizing…" carries a slow shimmer;
+  the summary's lines then rise in 40 ms apart (four at most), only when it arrives. Remote images that haven't
+  painted after the first frames fade in as they land (160 ms; cached ones never fade), and a sender logo that
+  arrives late fades in over the initials (120 ms). Reduce Motion: 80 ms fades, all at once, no shimmer and no
+  press shrink.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
-  replies on hover; `r` or a click expands the inline reply card in place.
+  replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
+  (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
+  already in it; only the card moves, never the web view. Closing, it sinks back into the field (opacity and 98 %, 120 ms).
 
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
@@ -266,18 +285,23 @@ Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), 
 drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
 pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
 something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts
-tabular.
+tabular; `selected` the moment a row is pressed, opened on release. The sync line crossfades between states, never
+within one.
 
 ### ⌘K palette
 Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).
 Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
-its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Opens in 120 ms.
+its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Fades in over 120 ms; closes at once.
 
 ### Composer
 Inline in the reader, or a floating window for new mail (`c`), 640×560, `raised`, radius 10. Flat rows with
 hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Inter 15/600). Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
+The formatting bar fades in and grows from 97 % toward the selection on first show (120 ms); moving to a new
+selection and hiding are instant. "Writing…" shimmers while the AI works, and its draft crossfades in over the old
+text (180 ms). The × on the signature and attachment chips fades in on hover (90 ms) and hides at once. Under
+Reduce Motion: fades only, 80 ms, and no shimmer. Cc/Bcc, the AI bar, tokens and typing never animate.
 
 ### Update card and prompts
 Tern's own small floating card, never Sparkle's or a stock alert: 380 pt wide, `raised`, radius 10, 1 px
@@ -288,6 +312,9 @@ with a soft bottom edge past 168 pt). At most two buttons on the right, secondar
 Errors are one quiet `text2` line with OK. States: checking, available (auto-update off), downloading, preparing,
 ready ("Tern 0.2.1 is ready" · Later · Restart to update), installing, up to date (manual checks only), error. The
 move-to-Applications prompt is the same card: "Move Tern to Applications?" · Not now · Move to Applications.
+The card fades in and settles 6 pt into place (180 ms, house curve) and leaves with a fade and a 4 pt lift (120 ms);
+shown again while leaving, it turns back. The progress line fills linearly (250 ms per report); its waiting
+segment travels back and forth, or with Reduce Motion stays in the middle and breathes. Reduce Motion: 80 ms fades.
 
 ### Settings
 A page of the main window, not a window or a sheet: ⌘,, the bottom bar's gear, the scope menu and ⌘K open it
@@ -311,10 +338,14 @@ and the keyboard goes to the list when the thread it was in no longer shows. The
   5 px `text3` dot and a reset button on hover. While recording, the row sits on a `hover` fill, the keycap reads
   "Type a shortcut" inside a 1.5 px `ink` 55 % border, and one line under it says esc cancels and ⌫ removes the key,
   or why the key can't be used: reserved for macOS, a fixed menu item or text editing (⌃A ⌃E ⌃H ⌃K… with or
-  without ⇧ ⌥), or used by another command, with Replace. Only bare keys can be shared, by a list command and a
+  without ⇧ ⌥), or used by another command, with Replace. The row grows for that line (160 ms) and the reset and +
+  tools fade in on hover (90 ms). A key that can't be used shakes the keycap (240 ms); with Reduce Motion its
+  border flashes to full `ink` instead. Only bare keys can be shared, by a list command and a
   reader command (`p`); a ⌘ or ⌃ key is one menu item. The g chords and ⌘1–⌘9 show as read-only keycaps.
 - While the page is open, mail commands don't run (their menu items are disabled), bare keys never reach the
   mail, and ⌘K lists no threads, projects, labels or accounts; appearance, layout, ⌘K and new mail still work.
+- Accounts: a new or removed account's row fades with a 6 pt drop while the rows below slide (180 ms). AI
+  status lines (Checking… → Ready) crossfade, and a copy button turns into a check with a small scale and blur.
 - Accounts: each row starts with the account's dot (a 28 px icon button that lists the six hues) and its name,
   edited in place (a hairline on hover and focus; empty goes back to the address), then the address and sync
   state, Sign in again when needed, and Remove.
@@ -327,14 +358,43 @@ the speed you think."), one `text2` line under it, the stepper top right and Bac
 step shows Claude Code and Codex as two cards (mark, name, what pays for it, live status: Ready; Not signed
 in with the sign-in command and a copy button; Not installed with an install link); the chosen card gets a
 1.5 px `ink` border and a filled radio mark. "Skip, no AI" sits under them. Settings → AI uses the same marks in
-its segmented provider control and the same status line.
+its segmented provider control and the same status line. Steps change in one piece: the new one comes in 16 pt
+from the side it lies on (forward from the right, Back from the left) with a fade, on the pane spring; the
+stepper's dots and labels crossfade, errors fade in, account rows arrive as in Settings. Reduce Motion: 80 ms
+crossfades.
 
 ## Motion
-Cursor fill slides from row to row on j/k and ↑↓ (130 ms, quick ease-out `0.2, 0.9, 0.25, 1`; a held key retargets it
-mid-slide), jumps of more than 12 rows, new lists and Reduce Motion move it at once; it is one view under the rows
-(`CursorFillView`), used while only the cursor is selected · Row exit 160 ms ease-out + list collapse 180 ms · reader over the list, sidebar and pane changes spring
-(response 0.32, damping 0.86) · palette 120 ms · search field 120 ms · hover reveal 90 ms · nothing in the
-triage path over 200 ms. Reduce Motion: 80 ms crossfades only.
+Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 0.9, 0.25, 1`.
+
+- Cursor fill slides from row to row on j/k and ↑↓ (130 ms), one press at a time in a still list. When the list
+  scrolls to follow it, or a key is held, it stays on its row and the rows move under it. A click, jumps of
+  more than 12 rows, new lists and Reduce Motion place it at once. It is one view under the rows (`CursorFillView`),
+  used while only the cursor is selected.
+- A different list (tab, mailbox, scope, leaving search) crossfades in 100 ms; never at launch or per search
+  keystroke. Row exit and list collapse 160 ms, house curve. Undo and new mail at the top: rows fade and slide down 160 ms, the
+  cursor fill moving in the same animation.
+- Active tab fill slides between tabs (130 ms); tabs coming and going fade and scale from 0.96.
+- Toasts rise in 160 ms (house curve) and fade out where they are with a scale to 0.97 (120 ms ease-out).
+- Palette fades in over 120 ms and closes at once. The `g` chord hint shows only after a 0.4 s hesitation (fades
+  and rises 4 pt, 200 ms), stays 2 s, and fades out over 200 ms. Search field 120 ms.
+- Hover reveal 90 ms, fade in only, hidden at once: the Projects `+`, a project's `⋯`, the row hover buttons
+  when the pointer comes into the list (from row to row they move at once).
+- Pressed: rows, tabs and sidebar rows get a fill, instant on mouse-down, action on mouse-up, and never scale.
+  Buttons scale too while held: text buttons 97 %, icon buttons 95 %, the reader page's small controls 97 %
+  (100 ms, house curve).
+- Reader over the list, sidebar and pane changes spring (response 0.32, damping 0.86); the sidebar's More opens on
+  the house curve (140 ms), its rows fading down 4 pt.
+- Inbox zero after triage: fade 200 ms from 120 ms, stroke 900 ms, text 300 ms from 500 ms.
+- Reader page: click reveals 140 ms (`tern-reveal`: opacity + 3–4 px), never in `render()` or on keys; remote
+  images fade in 160 ms when they load (not when cached); a late sender logo 120 ms. `--ease` in reader.css.
+- Composer: the inline reply card rises out of the reply field (150 ms) and sinks back (120 ms); the formatting bar appears toward the
+  selection (120 ms); an AI draft crossfades (180 ms).
+- AI waiting shimmer on a 1.4 s loop (still with Reduce Motion); summary lines rise 40 ms apart, at most four.
+- Settings: segmented thumb slides 180 ms; account rows arrive and leave (180 ms); the shortcut recorder shakes on
+  a rejected key (240 ms). Onboarding steps on the pane spring. Cards (update, move) in 180 ms, out 120 ms.
+- Nothing in the triage path over 200 ms, and nothing ever delays an action.
+
+Reduce Motion: 80 ms crossfades only (no slides, offsets or scale; the tern is drawn already).
 
 ## Keyboard
 See `research.md` §E. Every shortcut can be changed in Settings → Shortcuts; the keys here are the built-in
@@ -344,7 +404,7 @@ mail unless a thread is on screen. Bare-letter keys are inactive while a text fi
 and ⌃ keys of commands that act on mail (only ⌘K, ⌘N, ⌘,, find, view and appearance keys and the like still work);
 the Control keys text fields edit with can't be assigned. The open conversation answers the current keys of Next and
 Previous Message, Open and Quick Look itself. After archive or delete with nothing left in the list, the reader
-closes whatever the preference. `g` chords time out after 1 s and show a small HUD.
+closes whatever the preference. `g` chords time out 2 s after their hint shows (2.4 s in all).
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern

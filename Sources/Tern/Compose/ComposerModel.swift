@@ -513,7 +513,7 @@ final class ComposerModel: Identifiable {
                 let looksLikeHTML = text.range(of: #"<(p|div|br|ul|ol)[\s>/]"#, options: [.regularExpression, .caseInsensitive]) != nil
                 // The same allow-list as pasted HTML, and no link the user can't see the destination of.
                 let body = looksLikeHTML ? RichText(html: text) : RichText(plainText: text)
-                editor.replaceBody(with: body.revealingLinks())
+                editor.replaceBody(with: body.revealingLinks(), crossfade: true)
                 aiBusy = false
                 aiInstruction = nil
                 editor.focus(atEnd: true)

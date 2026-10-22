@@ -11,6 +11,7 @@ struct AccountsItem: View {
     @Environment(AppModel.self) private var model
     @Environment(AppServices.self) private var services
     let state: SettingsState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var message: String?
     /// The stored Google clients, read from the Keychain when the page opens and when accounts change.
     @State private var clients: [GoogleClientInfo] = []
@@ -27,6 +28,7 @@ struct AccountsItem: View {
             ForEach(model.accounts) { account in
                 AccountRow(account: account, detail: "\(account.email) · \(syncText(account))",
                            reauth: { reauth(account) }, remove: { state.remove(account) })
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
             }
             HStack(spacing: 12) {
                 if clients.count > 1 {
@@ -34,11 +36,16 @@ struct AccountsItem: View {
                 } else {
                     Button("Add Gmail account") { add(nil) }.buttonStyle(TernButtonStyle(.primary))
                 }
-                if let message { Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)) }
+                if let message {
+                    Text(message).font(.ui(12)).foregroundStyle(Color(Theme.text3)).transition(.opacity)
+                }
             }
+            .animation(Motion.or(reduced: reduceMotion, .easeOut(duration: 0.15)), value: message)
             .padding(.top, 16)
             .padding(.bottom, 12)
         }
+        // A new account (back from Google) or a removed one: the rows below slide instead of jumping.
+        .animation(Motion.or(reduced: reduceMotion, Motion.ease(0.18)), value: model.accounts.map(\.id))
         .onAppear { clients = services.googleClients() }
         .onChange(of: services.accounts) { clients = services.googleClients() }
         .onChange(of: services.googleClientsChanged) { clients = services.googleClients() }

@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 /// the light/dark switch and Settings.
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,14 +49,17 @@ struct SidebarView: View {
         SidebarRow(title: "More", selected: false, titleColor: Theme.text2) {
             IconView(icon: model.prefs.moreExpanded ? .chevronDown : .ellipsis, size: 16)
         } action: {
-            withAnimation(.easeOut(duration: 0.15)) { model.prefs.moreExpanded.toggle() }
+            withAnimation(reduceMotion ? Motion.reduced : Motion.ease(Motion.reveal)) { model.prefs.moreExpanded.toggle() }
         }
         if model.prefs.moreExpanded {
-            row(.spam, "Spam", .spam)
-            row(.trash, "Trash", .trash)
-            ForEach(model.labels, id: \.id) { label in
-                LabelRow(label: label)
+            Group {
+                row(.spam, "Spam", .spam)
+                row(.trash, "Trash", .trash)
+                ForEach(model.labels, id: \.id) { label in
+                    LabelRow(label: label)
+                }
             }
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -4)))
         }
     }
 
@@ -132,32 +136,41 @@ struct SidebarRow<Leading: View>: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            leading()
-                .frame(width: 16, height: 16)
-            Text(title)
-                .font(.ui(13, selected ? .medium : .regular))
-                .foregroundStyle(Color(titleColor))
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if let trailing, hovering {
-                trailing
-            } else if let count {
-                Text(count.formatted())
-                    .font(.numeric(12, countWeight))
-                    .foregroundStyle(Color(countColor))
+        Button(action: action) {
+            HStack(spacing: 10) {
+                leading()
+                    .frame(width: 16, height: 16)
+                Text(title)
+                    .font(.ui(13, selected ? .medium : .regular))
+                    .foregroundStyle(Color(titleColor))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let count, trailing == nil || !hovering {
+                    Text(count.formatted())
+                        .font(.numeric(12, countWeight))
+                        .foregroundStyle(Color(countColor))
+                }
             }
+            .padding(.horizontal, 8)
+            .frame(height: 28)
         }
-        .padding(.horizontal, 8)
-        .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.row)
-                .fill(Color(selected || dropTargeted ? Theme.selected : Theme.hover).opacity(selected || dropTargeted || hovering ? 1 : 0))
-        )
-        .contentShape(Rectangle())
-        .onTapGesture(perform: action)
+        .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: filled ? Theme.selected : nil, hover: filled ? nil : Theme.hover))
+        // Beside the button rather than in it, so its clicks stay its own. It fades in on hover (90 ms) and
+        // goes at once, as the count comes back.
+        .overlay(alignment: .trailing) {
+            ZStack {
+                if let trailing, hovering {
+                    trailing
+                        .padding(.trailing, 8)
+                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
+                }
+            }
+            .animation(hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
+        }
         .onHover { hovering = $0 }
     }
+
+    private var filled: Bool { selected || dropTargeted }
 }
 
 private struct LabelRow: View {
@@ -191,6 +204,8 @@ private struct ProjectsHeader: View {
             Spacer()
             IconButton(icon: .plus, size: 20, iconSize: 14, help: "New project  ⇧⌘P") { model.newProject() }
                 .opacity(hovering ? 1 : 0)
+                // Fades in (90 ms), hides at once.
+                .animation(hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
         }
         .padding(.leading, 8)
         .padding(.trailing, 2)
@@ -275,10 +290,17 @@ private struct ProjectRow: View {
 struct SyncStatusLine: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 7) {
-            content
+            // One state crossfades into the next; the figures within a state (Syncing 1,204 of 8,330) just change.
+            ZStack(alignment: .leading) {
+                HStack(spacing: 7) { content }
+                    .id(state)
+                    .transition(.opacity)
+            }
+            .animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.reveal), value: state)
             Spacer(minLength: 0)
             Button { model.prefs.appearance = AppearanceMode.flipped } label: {
                 IconView(icon: colorScheme == .dark ? .sun : .moon, size: 15, color: Color(Theme.text2))
@@ -298,6 +320,20 @@ struct SyncStatusLine: View {
         .padding(.trailing, 10)
         .frame(height: 44)
         .overlay(alignment: .top) { Hairline() }
+    }
+
+    /// Which line shows, without its figures.
+    private var state: String {
+        let services = model.services
+        let accounts = model.accounts
+        if accounts.contains(where: { $0.syncState == .needsAuth }) { return "needsAuth" }
+        if services.isOffline { return "offline" }
+        if let line = services.syncLine { return "line:\(line.tone):" + line.text.filter { !$0.isNumber } }
+        if services.syncProgress != nil { return "progress" }
+        if accounts.isEmpty { return model.isSeeding ? "seeding" : "noAccounts" }
+        if accounts.contains(where: { $0.syncState == .error }) { return "error" }
+        if accounts.contains(where: { $0.syncState == .new || $0.syncState == .backfilling }) { return "syncing" }
+        return "upToDate"
     }
 
     @ViewBuilder private var content: some View {

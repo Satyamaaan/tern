@@ -6,6 +6,7 @@ import TernCore
 /// while searching, and the floating bottom bar.
 struct ListColumn: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
@@ -17,15 +18,18 @@ struct ListColumn: View {
                         .padding(.top, 4)
                         .padding(.bottom, 6)
                         .frame(maxWidth: .infinity)
-                        .transition(.opacity.combined(with: .offset(y: -6)))
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -6)))
                 }
                 ZStack {
                     MessageListView(model: model)
                     if model.listLoaded && model.snapshot.isEmpty {
+                        // Emptied by triage, it fades in over the end of the collapse; any other empty list is just there.
                         EmptyListView()
                             .background(Color(Theme.bg))
+                            .transition(model.emptiedByTriage ? .opacity : .identity)
                     }
                 }
+                .animation(emptyAnimation, value: model.snapshot.isEmpty)
             }
             .overlay(alignment: .top) {
                 if model.showsSuggestions {
@@ -45,7 +49,7 @@ struct ListColumn: View {
             }
         }
         .background(Color(Theme.bg))
-        .animation(.easeOut(duration: 0.12), value: model.searchShown)
+        .animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.overlay), value: model.searchShown)
         .animation(.easeOut(duration: 0.09), value: model.showsSuggestions)
     }
 }
@@ -66,6 +70,13 @@ enum ListLayout {
     static func column(in bounds: CGRect) -> CGRect {
         let column = column(width: bounds.width)
         return CGRect(x: bounds.minX + column.x, y: bounds.minY, width: column.width, height: bounds.height)
+    }
+}
+
+extension ListColumn {
+    private var emptyAnimation: Animation? {
+        guard model.emptiedByTriage, model.snapshot.isEmpty else { return nil }
+        return reduceMotion ? Motion.reduced : InboxZeroView.arrival
     }
 }
 
@@ -129,10 +140,13 @@ struct SearchSuggestions: View {
         let items = model.suggestionItems
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                SuggestionRow(item: item, highlighted: model.suggestionIndex == index, asking: model.askingAI)
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.choose(item) }
-                    .onHover { inside in if inside { model.suggestionIndex = index } }
+                // The highlight follows the pointer and ↑↓; pressing shows at once, choosing waits for mouse-up.
+                Button { model.choose(item) } label: {
+                    SuggestionRow(item: item, asking: model.askingAI)
+                }
+                .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: model.suggestionIndex == index ? Theme.selected : nil,
+                                            hover: nil, pressed: Theme.selectedFocus))
+                .onHover { inside in if inside { model.suggestionIndex = index } }
             }
         }
         .padding(6)
@@ -145,7 +159,6 @@ struct SearchSuggestions: View {
 
 private struct SuggestionRow: View {
     let item: AppModel.SuggestionItem
-    let highlighted: Bool
     let asking: Bool
 
     var body: some View {
@@ -181,7 +194,6 @@ private struct SuggestionRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(highlighted ? Color(Theme.selected) : .clear))
     }
 
     private static func icon(_ kind: SearchSuggestion.Kind) -> Icon {
@@ -198,18 +210,28 @@ private struct SuggestionRow: View {
 
 // MARK: - Toasts
 
+/// New toasts rise from the bottom; old ones fade where they are (the oldest is on top, so sliding it down
+/// would cross the newer ones). Reduce Motion: a short crossfade both ways.
 struct ToastStack: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(model.toasts) { toast in
                 ToastPill(toast: toast)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(transition)
             }
         }
         .padding(.bottom, 24)
-        .animation(.easeOut(duration: 0.16), value: model.toasts)
+        .animation(reduceMotion ? Motion.reduced : Motion.ease(Motion.enter), value: model.toasts)
+    }
+
+    private var transition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity.combined(with: .scale(scale: 0.97)).animation(.easeOut(duration: Motion.exit)))
     }
 }
 
