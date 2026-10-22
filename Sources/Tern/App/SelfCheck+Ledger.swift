@@ -4,7 +4,7 @@ import TernCore
 extension SelfCheck {
     /// Drives the registered bare key and local undo through the same router as the list.
     func ledger() {
-        model.show(.waitingOn)
+        model.show(.due)
         poll(0.3) {}
         guard let key = model.snapshot.order.first else {
             model.showInboxTab(.primary)
@@ -15,11 +15,11 @@ extension SelfCheck {
         window.makeFirstResponder(nil)
         send("d")
         poll(0.3) {}
-        check("d completes a waiting request", (try? model.store.commitments(on: [key]).allSatisfy { $0.state == .done }) == true)
+        check("d completes an item in Due", (try? model.store.commitments(on: [key]).allSatisfy { $0.state == .done }) == true)
         model.undoLast()
         poll(0.3) {}
-        check("undo reopens the waiting request", (try? model.store.commitments(on: [key]).contains { $0.state == .open }) == true)
-        check("undo restores the waiting row", model.snapshot.rows[key] != nil)
+        check("undo reopens the Due item", (try? model.store.commitments(on: [key]).contains { $0.state == .open }) == true)
+        check("undo restores the Due row", model.snapshot.rows[key] != nil)
         model.setCursor(key, open: true)
         model.focus = .list
         model.open()
