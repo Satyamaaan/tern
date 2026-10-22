@@ -168,10 +168,10 @@ final class KeyRouter {
     // MARK: Chords
 
     /// Starts a `g` chord. Its hint shows only if the second key doesn't follow within `Motion.hesitation`,
-    /// so fluent typing never flashes it.
+    /// so fluent typing never flashes it, and stays up for `Motion.chordHint` before the chord gives up.
     private func startChord() {
         model.chordPending = "g"
-        chordTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: false) { [weak self] _ in
+        chordTimer = Timer.scheduledTimer(withTimeInterval: Motion.hesitation + Motion.chordHint, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.cancelChord() }
         }
         hudTimer = Timer.scheduledTimer(withTimeInterval: Motion.hesitation, repeats: false) { [weak self] _ in

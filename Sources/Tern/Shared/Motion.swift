@@ -38,6 +38,10 @@ enum Motion {
     static let list: Double = 0.16
     /// How long a pending key chord waits before its hint shows, so fluent typing never flashes it.
     static let hesitation: Double = 0.4
+    /// How long the chord's hint stays up before the chord gives up.
+    static let chordHint: Double = 2
+    /// The chord hint's fade, in and out.
+    static let hintFade: Double = 0.2
 
     /// `animation`, or the Reduce Motion crossfade.
     static func or(reduced reduceMotion: Bool, _ animation: Animation) -> Animation {

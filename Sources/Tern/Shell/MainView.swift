@@ -37,7 +37,7 @@ struct MainView: View {
         .ignoresSafeArea()
         .overlay(alignment: .top) { overlays }
         .overlay(alignment: .bottom) {
-            chordHUD.animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.overlay), value: model.chordHUD)
+            chordHUD.animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.hintFade), value: model.chordHUD)
         }
         .animation(paneAnimation, value: model.prefs.sidebarOpen)
         .animation(paneAnimation, value: model.prefs.readingPane)
@@ -197,9 +197,11 @@ struct MainView: View {
             .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairline), lineWidth: 1))
             .overlayShadow()
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Go to: i, Inbox. r, Needs Reply. s, Starred. d, Drafts.")
             .padding(.bottom, 80)
-            // Rises in once the user hesitates; gone at once when the chord completes.
-            .transition(.asymmetric(insertion: reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)), removal: .identity))
+            // Rises in once the user hesitates; fades out when the chord completes or gives up.
+            .transition(.asymmetric(insertion: reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4)), removal: .opacity))
         }
     }
 

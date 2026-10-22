@@ -374,7 +374,7 @@ Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 
 - Active tab fill slides between tabs (130 ms); tabs coming and going fade and scale from 0.96.
 - Toasts rise in 160 ms (house curve) and fade out where they are with a scale to 0.97 (120 ms ease-out).
 - Palette fades in over 120 ms and closes at once. The `g` chord hint shows only after a 0.4 s hesitation (fades
-  and rises 4 pt, 120 ms) and goes at once. Search field 120 ms.
+  and rises 4 pt, 200 ms), stays 2 s, and fades out over 200 ms. Search field 120 ms.
 - Hover reveal 90 ms, fade in only, hidden at once: the Projects `+`, a project's `⋯`, the row hover buttons
   when the pointer comes into the list (from row to row they move at once).
 - Pressed: rows, tabs and sidebar rows get a fill, instant on mouse-down, action on mouse-up, and never scale.
@@ -402,7 +402,7 @@ mail unless a thread is on screen. Bare-letter keys are inactive while a text fi
 and ⌃ keys of commands that act on mail (only ⌘K, ⌘N, ⌘,, find, view and appearance keys and the like still work);
 the Control keys text fields edit with can't be assigned. The open conversation answers the current keys of Next and
 Previous Message, Open and Quick Look itself. After archive or delete with nothing left in the list, the reader
-closes whatever the preference. `g` chords time out after 1 s and show a small HUD.
+closes whatever the preference. `g` chords time out 2 s after their hint shows (2.4 s in all).
 
 ## Checking it
 Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
