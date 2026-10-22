@@ -17,6 +17,11 @@ struct Snapshotter {
         Self.installDemoAccountPhotos(model.accounts)
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
+        if ProcessInfo.processInfo.environment["TERN_LEDGER_SNAPSHOT_ONLY"] == "1" {
+            ledgerShots(window, directory)
+            print("Ledger snapshots written to \(directory.path)")
+            exit(0)
+        }
         // Launch time: first layout and a full render of the window with its rows.
         if let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
             view.layoutSubtreeIfNeeded()

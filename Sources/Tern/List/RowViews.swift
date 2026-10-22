@@ -332,14 +332,14 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
-        if model.highlight == nil, let deliverable = model.row.ledger?.displayDeliverable {
-            let attrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, .medium), .foregroundColor: primary]
+        if model.highlight == nil || model.row.ledger?.completion != nil, let deliverable = model.row.ledger?.displayDeliverable {
+            let attrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, .medium), .foregroundColor: model.row.ledger?.isMaybe == true ? quiet : primary]
             let width = min(Self.width(deliverable, attrs), rect.width * 0.7)
             Self.drawText(deliverable, attrs, in: CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height))
             let x = rect.minX + width + 8
             let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
             guard rect.maxX - x > 24 else { return }
-            Self.drawText("— " + subject, secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
+            Self.drawText("· " + (model.row.ledger?.completion ?? subject), secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
             return
         }
         if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
@@ -350,7 +350,7 @@ private struct RowPainter {
             let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
             let secondaryX = x + width + 6
             guard rect.maxX - secondaryX > 24 else { return }
-            Self.drawText("— " + subject, secondary, in: CGRect(x: secondaryX, y: rect.minY, width: max(0, rect.maxX - secondaryX), height: rect.height))
+            Self.drawText("· " + (model.row.ledger?.completion ?? subject), secondary, in: CGRect(x: secondaryX, y: rect.minY, width: max(0, rect.maxX - secondaryX), height: rect.height))
             return
         }
         let subjectWidth = min(Self.width(subject, subjectAttrs), rect.width * 0.7)

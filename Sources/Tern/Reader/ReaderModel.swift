@@ -32,6 +32,7 @@ final class ReaderModel {
     private(set) var key: ThreadKey?
     private(set) var detail: ThreadDetail?
     var composing: ComposeRequest?
+    var commitmentEvidence = false
     var findVisible = false
     var findText = ""
     private(set) var findFailed = false
@@ -99,6 +100,11 @@ final class ReaderModel {
         if Self.trustedSenders == nil { Self.trustedSenders = (try? services.store.imageAllowedSenders()) ?? [] }
     }
 
+    func reveal(messageId: String) {
+        guard detail?.messages.contains(where: { $0.id == messageId }) == true else { return }
+        engine.run("Tern.reveal(id)", ["id": messageId])
+    }
+
     // MARK: Opening
 
     func show(_ key: ThreadKey?, prefetch: [ThreadKey] = []) {
@@ -108,6 +114,7 @@ final class ReaderModel {
         isActive = true
         defer { self.prefetch(prefetch) }
         guard key != self.key else { return resume() }
+        commitmentEvidence = false
         logosPending = false
         observer?.cancel()
         observer = nil

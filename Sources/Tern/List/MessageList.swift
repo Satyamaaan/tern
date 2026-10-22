@@ -277,6 +277,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         result.summaryHeadline = model.prefs.summaryHeadline
         if let ledger = row.ledger {
             result.timeOverride = ledger.timeText()
+            if ledger.completion != nil { result.chips.append(RowChip(text: "Done", icon: .done, tint: .ink)) }
+            if ledger.isMaybe { result.chips.append(RowChip(text: "Maybe", icon: .sparkles, tint: .ink)) }
             if ledger.hasHint { result.chips.append(RowChip(text: "Replied", icon: .reply, tint: .ink)) }
         }
         result.isSelected = model.isSelected(key)

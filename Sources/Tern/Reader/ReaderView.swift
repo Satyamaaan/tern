@@ -34,6 +34,7 @@ struct ReaderView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
     @State private var model = ReaderModel()
+    @Environment(AppModel.self) private var app: AppModel?
 
     /// The page's reading column (720 pt of content plus 32 pt each side); the bars below match it.
     static let columnWidth: CGFloat = 784
@@ -54,6 +55,11 @@ struct ReaderView: View {
     var body: some View {
         VStack(spacing: 0) {
             ReaderTopBar(model: model, position: position, onBack: onBack, panel: panel)
+            if let detail = model.detail, detail.commitments.contains(where: { $0.state == .open }) || (!(detail.commitments.isEmpty) && app?.searchText == "is:done") {
+                ReaderCommitmentStrip(model: model)
+                    .readerColumn(panel: panel != nil)
+                    .padding(.vertical, 8)
+            }
             if model.findVisible, key != nil {
                 ReaderFindBar(model: model)
                     .readerColumn(panel: panel != nil)

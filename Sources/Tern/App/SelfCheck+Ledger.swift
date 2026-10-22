@@ -20,6 +20,18 @@ extension SelfCheck {
         poll(0.3) {}
         check("undo reopens the waiting request", (try? model.store.commitments(on: [key]).contains { $0.state == .open }) == true)
         check("undo restores the waiting row", model.snapshot.rows[key] != nil)
+        model.setCursor(key, open: true)
+        model.focus = .list
+        model.open()
+        _ = waitUntil { self.model.services.reader.shows(key) && self.model.services.reader.model?.detail?.commitments.contains { $0.state == .open } == true }
+        model.focus = .reader
+        window.makeFirstResponder(nil)
+        check("reader evidence command has items", registry["commitmentEvidence"]?.isEnabled() == true)
+        send("d")
+        check("reader d completes its commitment", waitUntil { (try? self.model.store.commitments(on: [key]).contains { $0.state == .done }) == true })
+        model.undoLast()
+        check("reader done is undoable", waitUntil { (try? self.model.store.commitments(on: [key]).contains { $0.state == .open }) == true })
+        model.back()
         model.showInboxTab(.primary)
         model.setCursor(key, open: false)
         check("d disabled outside ledger lists", registry["commitmentDone"]?.isEnabled() == false)

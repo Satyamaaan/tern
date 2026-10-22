@@ -42,6 +42,9 @@ struct MainView: View {
         .animation(paneAnimation, value: model.readerExpanded)
         .animation(paneAnimation, value: model.readerInPanel)
         .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.14), value: model.settings != nil)
+        .sheet(item: Binding(get: { model.manualCommitment }, set: { model.manualCommitment = $0 })) { draft in
+            ManualCommitmentSheet(draft: draft).environment(model)
+        }
         .sheet(item: projectEditorBinding) { draft in
             ProjectEditor(draft: draft).environment(model)
         }

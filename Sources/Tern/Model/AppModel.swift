@@ -102,6 +102,7 @@ final class AppModel {
     /// Pending `g` chord, shown in a small HUD.
     var chordHUD: String?
     var projectEditor: ProjectDraft?
+    var manualCommitment: ManualCommitmentDraft?
     /// Threads waiting on a custom snooze date.
     var snoozeDateFor: [ThreadKey]?
     var toasts: [Toast] = []

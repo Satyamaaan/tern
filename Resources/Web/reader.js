@@ -508,6 +508,12 @@
   // MARK: API for the app
 
   window.Tern = {
+    reveal(id) {
+      if (!state || !state.payload.messages.some((m) => m.id === id)) return;
+      setOpen(id, true);
+      const element = messageElement(id);
+      if (element) element.scrollIntoView({ block: 'start' });
+    },
     render,
     /// Header-only refresh (chips, summary) without touching message state.
     updateHeader(p) {
