@@ -151,3 +151,22 @@ extension LedgerExtractionTests {
         }
     }
 }
+
+extension LedgerExtractionTests {
+    @Test func rescheduleWithSharedEvidenceKeepsOriginalSource() throws {
+        let (database, _, message) = try ledgerFixture()
+        let key = ThreadKey(accountId: "a", threadId: "t")
+        try database.writer.write { db in
+            try db.execute(sql: "DELETE FROM commitment")
+            let original = extracted(message, text: "Send revised deck.pptx", quote: "I'll send the revised deck.pptx by Thursday.")
+            var changed = extracted(message, text: "Send revised deck.pptx tomorrow", quote: "Update: I will send the revised deck.pptx tomorrow instead.")
+            changed.sourceMessageId = "reschedule"; changed.sourceDate = ledgerNow
+            changed.dueAt = ledgerNow.addingTimeInterval(86400)
+            try Ledger.applyExtraction(db, key: key, items: [changed, original], messageCount: 2, promptVersion: 2, origin: "groq", now: ledgerNow)
+            let rows = try Commitment.fetchAll(db)
+            #expect(rows.count == 1)
+            #expect(rows.first?.sourceMessageId == message.id)
+            #expect(rows.first?.dueAt == changed.dueAt)
+        }
+    }
+}

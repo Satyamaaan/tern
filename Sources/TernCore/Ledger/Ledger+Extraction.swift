@@ -33,7 +33,7 @@ extension Ledger {
     public static func applyExtraction(_ db: Database, key: ThreadKey, items: [LedgerExtraction],
                                        messageCount: Int, promptVersion: Int, origin: String, now: Date = Date()) throws {
         let settings = try LedgerSettings.load(db)
-        for value in items {
+        for value in items.sorted(by: { ($0.sourceDate, $0.sourceMessageId) < ($1.sourceDate, $1.sourceMessageId) }) {
             let rows = try Commitment.filter(Column("accountId") == key.accountId && Column("threadId") == key.threadId).fetchAll(db)
             let words = tokens(value.deliverable)
             let ordered = value.deliverable.lowercased().split { !$0.isLetter && !$0.isNumber }.joined(separator: " ")
@@ -43,16 +43,27 @@ extension Ledger {
                 let b = value.quote.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
                 return !a.isEmpty && !b.isEmpty && (a.contains(b) || b.contains(a))
             }
+            func sharesEvidence(_ row: Commitment) -> Bool {
+                if overlap(row) { return true }
+                func phrases(_ text: String) -> Set<String> {
+                    let words = text.lowercased().split { !$0.isLetter && !$0.isNumber }
+                        .map(String.init).filter { !stopwords.contains($0) }
+                    guard words.count >= 3 else { return [] }
+                    return Set((0...(words.count - 3)).map { words[$0..<($0 + 3)].joined(separator: " ") })
+                }
+                return !phrases(row.sourceQuote).intersection(phrases(value.quote)).isEmpty
+            }
             let candidates = rows.filter { row in
                 row.direction == value.direction && row.counterpartyEmail.lowercased() == value.counterparty.lowercased()
             }
             let existing = candidates.first { $0.state != .open && $0.sourceMessageId == value.sourceMessageId && overlap($0) }
                 ?? candidates.filter { row in
+                    guard row.state == .open else { return false }
                     if let id = value.existingId { return row.id == id }
                     if row.fingerprint == fingerprint { return true }
                     if row.sourceMessageId == value.sourceMessageId && row.kind == "reply" { return true }
                     let other = tokens(row.deliverable)
-                    return (row.sourceMessageId == value.sourceMessageId || overlap(row)) &&
+                    return (row.sourceMessageId == value.sourceMessageId || sharesEvidence(row)) &&
                         Double(words.intersection(other).count) / Double(max(1, words.union(other).count)) >= 0.67
                 }.max { left, right in
                     func score(_ row: Commitment) -> Double {

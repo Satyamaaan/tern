@@ -171,10 +171,10 @@ public enum Ledger {
     /// Recent sent-only tails are the bounded backfill candidates, including archived conversations.
     public static func waitingCandidates(_ db: Database, now: Date = Date()) throws -> [ThreadKey] {
         try Row.fetchAll(db, sql: """
-            SELECT t.accountId,t.id FROM thread t
+            SELECT t.accountId,t.id FROM thread_label sent INDEXED BY thread_label_unified
+            JOIN thread t ON t.accountId=sent.accountId AND t.id=sent.threadId
             LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
-            WHERE t.lastDate BETWEEN ? AND ? AND (t.lastInboundDate IS NULL OR t.lastInboundDate<t.lastDate)
-              AND EXISTS (SELECT 1 FROM thread_label s INDEXED BY thread_label_by_thread WHERE s.accountId=t.accountId AND s.threadId=t.id AND s.labelId='SENT')
+            WHERE sent.labelId='SENT' AND sent.lastDate BETWEEN ? AND ? AND (t.lastInboundDate IS NULL OR t.lastInboundDate<t.lastDate)
               AND (ai.category IS NULL OR ai.category IN ('people','other'))
               AND NOT EXISTS (SELECT 1 FROM thread_label x INDEXED BY thread_label_by_thread WHERE x.accountId=t.accountId AND x.threadId=t.id AND x.labelId IN ('TRASH','SPAM'))
             UNION SELECT accountId,threadId FROM commitment WHERE origin='rule' AND state='open'
