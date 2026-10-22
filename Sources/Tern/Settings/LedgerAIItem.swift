@@ -10,16 +10,14 @@ struct LedgerAIItem: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsRow(title: "Find promises and requests in mail", detail: error ?? "Track concrete deliverables with evidence from the conversation.") { InkToggle(isOn: $ai) }
-            SettingsRow(title: "Show uncertain items", detail: "Include commitments the model is less sure about.") { InkToggle(isOn: $maybe).disabled(!ai) }
+            SettingsRow(title: "Find promises and requests in mail", detail: error ?? "Track concrete deliverables with evidence from the conversation.") { InkToggle(isOn: Binding(get: { ai }, set: { ai = $0; save() })) }
+            SettingsRow(title: "Show uncertain items", detail: "Include commitments the model is less sure about.") { InkToggle(isOn: Binding(get: { maybe }, set: { maybe = $0; save() })).disabled(!ai) }
         }
         .task {
             if let settings = try? model.store.database.reader.read({ try LedgerSettings.load($0) }) {
                 ai = settings.ai; maybe = settings.showMaybe; loaded = true
             }
         }
-        .onChange(of: ai) { save() }
-        .onChange(of: maybe) { save() }
     }
 
     private func save() {

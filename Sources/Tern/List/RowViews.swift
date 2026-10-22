@@ -88,6 +88,11 @@ struct RowModel: Equatable {
     var chips: [RowChip] = []
     /// Replaces the compact time (snoozed list shows when it wakes).
     var timeOverride: String?
+    var timeEmphasis: Int {
+        guard let ledger = row.ledger, ledger.dueAt != nil else { return 0 }
+        if ledger.isOverdue() { return 2 }
+        return ["Today", "Tomorrow"].contains(ledger.timeText()) ? 1 : 0
+    }
     var summaryHeadline = true
     var dimmed = false
     /// While searching: the matched words, and the excerpt shown in place of the preview.
@@ -207,7 +212,7 @@ private struct RowPainter {
         let senderWidth = min(max(column.width * 0.2, 160), 220)
         drawSender(in: CGRect(x: senderX, y: line.minY, width: senderWidth, height: line.height))
         let dotX = senderX + senderWidth + 2
-        if unread || model.row.ledger?.isOverdue() == true { drawDot(centerX: dotX + 3, centerY: line.midY) }
+        if unread { drawDot(centerX: dotX + 3, centerY: line.midY) }
 
         let subjectX = dotX + 14
         let trailing = drawTrailing(in: line, chips: model.chips.count, minimumX: subjectX + 200)
@@ -224,7 +229,7 @@ private struct RowPainter {
 
         let trailing = drawTrailing(in: line1, chips: min(model.chips.count, 1), minimumX: textX + 120)
         let end = drawSender(in: CGRect(x: textX, y: line1.minY, width: max(0, trailing - 22 - textX), height: line1.height))
-        if unread || model.row.ledger?.isOverdue() == true { drawDot(centerX: end + 9, centerY: line1.midY) }
+        if unread { drawDot(centerX: end + 9, centerY: line1.midY) }
         drawSubjectAndPreview(in: line2)
     }
 
@@ -293,7 +298,8 @@ private struct RowPainter {
         } else {
             let time = model.timeOverride ?? RowFormat.compactTime(thread.lastDate)
             var attrs = Self.timeAttributes
-            attrs[.foregroundColor] = quiet
+            attrs[.foregroundColor] = model.timeEmphasis == 2 ? Theme.text1 : model.timeEmphasis == 1 ? Theme.text2 : quiet
+            if model.timeEmphasis == 2 { attrs[.font] = Theme.numeric(12, .medium) }
             let width = Self.width(time, attrs)
             x -= width
             Self.drawText(time, attrs, in: CGRect(x: x, y: line.minY, width: width + 1, height: line.height))
@@ -326,13 +332,14 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
-        if let deliverable = model.row.ledger?.deliverable {
+        if model.highlight == nil, let deliverable = model.row.ledger?.displayDeliverable {
             let attrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, .medium), .foregroundColor: primary]
             let width = min(Self.width(deliverable, attrs), rect.width * 0.7)
             Self.drawText(deliverable, attrs, in: CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height))
             let x = rect.minX + width + 8
             let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
-            Self.drawText(subject, secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
+            guard rect.maxX - x > 24 else { return }
+            Self.drawText("— " + subject, secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
             return
         }
         if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
