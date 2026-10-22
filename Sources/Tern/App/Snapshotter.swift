@@ -17,6 +17,10 @@ struct Snapshotter {
         Self.installDemoAccountPhotos(model.accounts)
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
+        if ProcessInfo.processInfo.environment["TERN_REAL_MAIL_FIXES_SNAPSHOT_ONLY"] == "1" {
+            realMailFixesShots(window, directory)
+            exit(0)
+        }
         if ProcessInfo.processInfo.environment["TERN_LEDGER_SNAPSHOT_ONLY"] == "1" {
             ledgerShots(window, directory)
             print("Ledger snapshots written to \(directory.path)")

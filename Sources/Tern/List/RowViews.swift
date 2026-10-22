@@ -93,7 +93,6 @@ struct RowModel: Equatable {
         if ledger.isOverdue() { return 2 }
         return ["Today", "Tomorrow"].contains(ledger.timeText()) ? 1 : 0
     }
-    var summaryHeadline = true
     var dimmed = false
     /// While searching: the matched words, and the excerpt shown in place of the preview.
     var highlight: RowHighlight?
@@ -340,17 +339,6 @@ private struct RowPainter {
             let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
             guard rect.maxX - x > 24 else { return }
             Self.drawText("· " + (model.row.ledger?.completion ?? subject), secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
-            return
-        }
-        if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
-            Icon.sparkles.draw(in: CGRect(x: rect.minX, y: rect.midY - 6, width: 12, height: 12), color: quiet)
-            let x = rect.minX + 17
-            let width = min(Self.width(summary, subjectAttrs), max(0, (rect.width - 17) * 0.7))
-            Self.drawText(summary, subjectAttrs, in: CGRect(x: x, y: rect.minY, width: width, height: rect.height))
-            let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
-            let secondaryX = x + width + 6
-            guard rect.maxX - secondaryX > 24 else { return }
-            Self.drawText("· " + (model.row.ledger?.completion ?? subject), secondary, in: CGRect(x: secondaryX, y: rect.minY, width: max(0, rect.maxX - secondaryX), height: rect.height))
             return
         }
         let subjectWidth = min(Self.width(subject, subjectAttrs), rect.width * 0.7)

@@ -320,7 +320,6 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard let row = snapshot.row(at: index) else { return nil }
         let key = row.id
         var result = RowModel(row: row, style: style)
-        result.summaryHeadline = model.prefs.summaryHeadline
         if let ledger = row.ledger {
             result.timeOverride = ledger.timeText()
             if ledger.completion != nil { result.chips.append(RowChip(text: "Done", icon: .done, tint: .ink)) }
@@ -468,7 +467,6 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     private func observePreferences() {
         withObservationTracking {
-            _ = model.prefs.summaryHeadline
             _ = model.prefs.density
             _ = model.prefs.dimReadByAge
             _ = model.projects

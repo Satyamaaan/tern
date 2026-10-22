@@ -49,14 +49,3 @@ struct GroqKeyItem: View {
         }
     }
 }
-
-struct ListHeadlineItem: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        @Bindable var prefs = model.prefs
-        SettingsRow(title: "List headline", detail: "Use a one-line AI summary when available.") {
-            SegmentedPicker(options: [true, false], selection: $prefs.summaryHeadline) { $0 ? "AI summary" : "Subject" }
-        }
-    }
-}

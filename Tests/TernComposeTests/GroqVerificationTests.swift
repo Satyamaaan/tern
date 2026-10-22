@@ -1,4 +1,5 @@
 import AppKit
+import GRDB
 import Testing
 import TernAI
 @testable import Tern
@@ -43,10 +44,9 @@ struct ListHeadlineSnapshots {
             }
             for (index, original) in rows.enumerated() {
                 var row = original
-                row.summary = "Approve the revised launch plan by Friday"
+                row.summary = headline ? "Approve the revised launch plan by Friday" : nil
                 let view = ThreadRowView(frame: CGRect(x: 0, y: index * 56, width: 1100, height: 56))
                 var model = RowModel(row: row, style: .twoLines)
-                model.summaryHeadline = headline
                 model.avatar = .letters("MC")
                 view.model = model
                 container.addSubview(view)
@@ -58,5 +58,23 @@ struct ListHeadlineSnapshots {
             try png.write(to: directory.appendingPathComponent(headline ? "summary-light.png" : "subject-light.png"))
             window.close()
         }
+    }
+}
+
+struct PrimarySummaryLiveVerification {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TERN_PRIMARY_SUMMARY_LIVE"] == "1"))
+    func oneDisposableFakeSummary() async throws {
+        let path = "/tmp/tern-real-mail-fixes-live.sqlite"
+        try #require(ProcessInfo.processInfo.environment["TERN_DB"] == path)
+        try #require(ProcessInfo.processInfo.environment["TERN_FAKE"] == "1")
+        let database = try AppDatabase.open(at: URL(fileURLWithPath: path))
+        try await database.writer.write { db in
+            try AISettings(enabled: true, provider: "groq").write(db)
+        }
+        let providers = AIProviders([GroqProvider(key: { GroqCredential.read() })])
+        let assistant = MailAssistant(database: database, providers: providers)
+        let queue = PrimarySummaryQueue(database: database, assistant: assistant, providers: providers, dailyLimit: 1)
+        #expect(try await queue.processNext())
+        print("LIVE PRIMARY SUMMARY: completed one fake-mail queue job; DB=\(path)")
     }
 }
