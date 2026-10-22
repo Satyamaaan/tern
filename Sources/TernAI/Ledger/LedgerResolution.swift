@@ -14,7 +14,7 @@ struct LedgerResolution {
         from the cited LATER message, not from the original commitment. If that later message actually delivers
         the item, mark fulfilled even if the original promise was future tense.
         Thanks, acknowledgements, will do, partial progress, extensions and promises to send later are OPEN.
-        A named attachment matching the deliverable or explicit delivery such as here is/attached the X can fulfill it.
+        Require explicit delivery language such as here is/attached the X, even when an attachment matches. Negation, doubt, questions, drafts and partial work remain OPEN.
         Fulfillment must come from the person owing the deliverable. Withdrawal must come from the requester.
         Cite a later message ref and copy the full delivery or withdrawal sentence verbatim from its body for any closure, never an attachment metadata label. Preserve articles, spelling and punctuation exactly. Never infer delivery merely from a reply.
         \(Prompts.untrusted)
@@ -39,11 +39,12 @@ struct LedgerResolution {
         var seen = Set<String>()
         for answer in answers {
             guard Set(answer.keys) == ["ref", "status", "resolvedByRef", "quote"],
-                  let ref = answer["ref"] as? String, seen.insert(ref).inserted,
+                  let ref = answer["ref"] as? String, !seen.contains(ref),
                   let original = items.first(where: { "c\($0.id!)" == ref }),
                   let item = try Commitment.fetchOne(db, key: original.id), item.state == .open, item.stateSource != "user", item.kind != "reply", item.sourceMessageId == original.sourceMessageId,
                   let status = answer["status"] as? String, ["open", "fulfilled", "withdrawn"].contains(status),
                   let thread = threads.first(where: { $0.key == ThreadKey(accountId: item.accountId, threadId: item.threadId) }) else { continue }
+            seen.insert(ref)
             // Record the inspected version even when the answer is unclear or its citation is rejected.
             var confirmed: MailMessage?
             var note: String?
@@ -66,12 +67,13 @@ struct LedgerResolution {
                 let core = objects.subtracting(["revised", "updated", "final", "signed"])
                 let attachmentMatches = !core.isEmpty && names.contains { core.isSubset(of: Ledger.tokens($0)) }
                 let hasObject = (!core.isEmpty && core.isSubset(of: Ledger.tokens(quote))) || attachmentMatches
-                let future = q.range(of: #"\b(will|tomorrow|later|working on|in progress|not yet|partially)\b"#, options: .regularExpression) != nil
+                let evidence = LedgerVerdict.normalized(fresh)
+                let future = evidence.contains("?") || evidence.range(of: #"n[’']t|\b(will|tomorrow|later|working on|in progress|not|never|forgot|unable|yet|still|partially|draft|preliminary|wip|rough|first pass)\b"#, options: .regularExpression) != nil
                 let delivery = q.range(of: #"\b(attached|here is|here are|sent|completed|finished|signed|enclosed)\b"#, options: .regularExpression) != nil
                 let withdrawal = q.range(of: #"\b(withdrawn|cancelled|canceled|no longer need|do not need|don't need)\b"#, options: .regularExpression) != nil
-                if correctSide && grounded && hasObject && (status == "withdrawn" ? withdrawal : (delivery || attachmentMatches) && !future) {
+                if correctSide && grounded && hasObject && (status == "withdrawn" ? withdrawal : delivery && !future) {
                     confirmed = message
-                    note = "\(status): \(quote)"
+                    note = quote
                 }
             }
             if try Ledger.applyResolution(db, id: item.id!, sourceMessageId: item.sourceMessageId, messageCount: thread.messageCount,

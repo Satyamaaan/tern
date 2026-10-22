@@ -197,7 +197,10 @@ public actor LedgerQueue {
                 let hasList = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE accountId=? AND threadId=? AND listUnsubscribe IS NOT NULL LIMIT 1)", arguments: [thread.key.accountId, thread.key.threadId]) ?? false
                 let hasOpen = (open[thread.key] ?? []).contains { $0.origin != "rule" }
                 if !hasList && (cue || hasOpen || !resolutionItems.isEmpty) { picked.append(thread) }
-                else { try Ledger.recordScan(db, key: thread.key, messageCount: thread.messageCount, promptVersion: Prompts.ledgerVersion, origin: "cue-skip", now: stamp) }
+                else {
+                    try Ledger.recordScan(db, key: thread.key, messageCount: thread.messageCount, promptVersion: Prompts.ledgerVersion, origin: "cue-skip", now: stamp)
+                    if !resolutionItems.isEmpty { _ = try LedgerResolution.apply("{\"items\":[]}", db: db, threads: [thread], items: resolutionItems, now: stamp) }
+                }
             }
             return picked
         }
@@ -276,6 +279,12 @@ public actor LedgerQueue {
                 }
             }
             if cancelled { throw CancellationError() }
+            if invalid && !resolutionItems.isEmpty {
+                try await database.writer.write { db in
+                    _ = try LedgerResolution.apply("{\"items\":[]}", db: db, threads: picked, items: resolutionItems, now: stamp)
+                }
+                return BatchResult(sent: picked.count, extracted: 0)
+            }
             if !(error is CancellationError), case AIError.rateLimited = error { throw error }
             if !(error is CancellationError) {
                 let keys = picked.map(\.key)

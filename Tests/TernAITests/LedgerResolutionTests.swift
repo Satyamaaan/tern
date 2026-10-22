@@ -6,6 +6,22 @@ import TernCore
 
 struct LedgerResolutionTests {
     static let cases: [(String, String, Bool, Bool, Bool)] = [
+        ("Thanks for the call.", "fulfilled", true, true, false),
+        ("I haven't sent the revised deck.", "fulfilled", true, true, false),
+        ("I couldn't finish it. Here is the revised deck.", "fulfilled", true, true, false),
+        ("I didn't send the revised deck.", "fulfilled", true, true, false),
+        ("I have not sent the revised deck.", "fulfilled", true, true, false),
+        ("I never sent the revised deck.", "fulfilled", true, true, false),
+        ("I forgot to send it. Here is the revised deck.", "fulfilled", true, true, false),
+        ("I was unable to finish it. Here is the revised deck.", "fulfilled", true, true, false),
+        ("Here is the revised deck, yet incomplete.", "fulfilled", true, true, false),
+        ("Here is the revised deck, still incomplete.", "fulfilled", true, true, false),
+        ("Have I sent the revised deck?", "fulfilled", true, true, false),
+        ("Here is the draft revised deck.", "fulfilled", true, true, false),
+        ("Here is the preliminary revised deck.", "fulfilled", true, true, false),
+        ("Here is the WIP revised deck.", "fulfilled", true, true, false),
+        ("Here is the rough revised deck.", "fulfilled", true, true, false),
+        ("Here is the first pass revised deck.", "fulfilled", true, true, false),
         ("Thanks for the update.", "fulfilled", true, false, false),
         ("I will send the revised deck tomorrow.", "fulfilled", true, false, false),
         ("The revised deck is partially finished, still working on it.", "fulfilled", true, false, false),
@@ -57,6 +73,27 @@ struct LedgerResolutionTests {
         #expect(stored.state == (done ? .done : .open))
         #expect(stored.checkedCount == 2)
         #expect(stored.stateSource == "ai")
+    }
+
+    @Test(arguments: ["bad-status", "invalid-json"]) func invalidResolutionAdvances(_ output: String) async throws {
+        let (database, threads, items) = try Self.fixture("Thanks for the update.")
+        let item = try #require(items.first)
+        let text = output == "invalid-json" ? "oops" : Self.answer(item, status: "bad", quote: "Thanks for the update.")
+        let provider = FakeProvider { _, _ in text }
+        let queue = LedgerQueue(database: database, providers: AIProviders([provider]), now: { testNow })
+        #expect(try await queue.processBatch().sent == 1)
+        #expect(try await queue.processBatch().sent == 0)
+        #expect(provider.requests.count == 1)
+        #expect(try await database.reader.read { try Commitment.fetchOne($0, key: item.id)?.checkedCount } == threads[0].messageCount)
+    }
+
+    @Test func quoteCannotOmitDraftQualifier() throws {
+        let (database, threads, items) = try Self.fixture("This is a draft. Here is the revised deck for your review.")
+        let item = try #require(items.first)
+        let result = try database.writer.write { db in
+            try LedgerResolution.apply(Self.answer(item, status: "fulfilled", quote: "Here is the revised deck for your review."), db: db, threads: threads, items: items, now: testNow)
+        }
+        #expect(result == 0)
     }
 
     @Test func userLockAndUnknownCitation() throws {
