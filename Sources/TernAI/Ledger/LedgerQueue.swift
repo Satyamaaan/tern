@@ -24,7 +24,12 @@ public actor LedgerQueue {
     private var known: AISettings?
     private var ledgerKnown: LedgerSettings?
     private var retry: [[ThreadKey]] = []
-    private var failed: [ThreadKey: Int] = [:]
+    private struct Failure {
+        var messageCount: Int
+        var count = 0
+        var alone = 0
+    }
+    private var failed: [ThreadKey: Failure] = [:]
     private var blocked: [ThreadKey: Int] = [:]
     private var running = false
     private var resumeAt: Date?
@@ -214,10 +219,14 @@ public actor LedgerQueue {
             if !(error is CancellationError) {
                 let keys = picked.map(\.key)
                 for thread in picked {
-                    failed[thread.key, default: 0] += 1
-                    if failed[thread.key, default: 0] >= 10 || keys.count == 1 && failed[thread.key, default: 0] >= 2 { self.blocked[thread.key] = thread.messageCount }
+                    var failure = failed[thread.key].flatMap { $0.messageCount == thread.messageCount ? $0 : nil } ?? Failure(messageCount: thread.messageCount)
+                    failure.count += 1
+                    if keys.count == 1 { failure.alone += 1 }
+                    failed[thread.key] = failure
+                    if failure.count >= 10 || failure.alone >= 2 { self.blocked[thread.key] = thread.messageCount }
                 }
                 if keys.count > 1 { let half = (keys.count + 1) / 2; retry += [Array(keys.prefix(half)), Array(keys.dropFirst(half))] }
+                else if let key = keys.first, self.blocked[key] == nil { retry.append(keys) }
             }
             throw error
         }

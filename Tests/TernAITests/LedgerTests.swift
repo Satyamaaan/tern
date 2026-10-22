@@ -161,4 +161,18 @@ struct LedgerTests {
         await queue.stop()
     }
 
+    @Test func aBatchedFailureDoesNotCountAsASoloFailure() async throws {
+        let db = try promises(2)
+        try await db.writer.write { try AISettings(enabled: true, provider: "groq").write($0) }
+        let provider = FakeProvider(id: "groq") { request, index in
+            if index <= 2 { throw AIError.invalidOutput("synthetic") }
+            return ledgerAnswer(request)
+        }
+        let queue = LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow })
+        for _ in 0..<2 { do { _ = try await queue.processBatch() } catch {} }
+        #expect(try await queue.processBatch().sent == 1)
+        #expect(try await queue.processBatch().sent == 1)
+        #expect(provider.requests.count == 4)
+    }
+
 }
