@@ -2,7 +2,7 @@ import Foundation
 import TernCore
 
 extension Prompts {
-    static let ledgerVersion = 2
+    static let ledgerVersion = 3
 
     static func ledger(_ threads: [PromptThread], open: [ThreadKey: [Commitment]], owner: [String], today: Date) -> AIRequest {
         let instructions = """

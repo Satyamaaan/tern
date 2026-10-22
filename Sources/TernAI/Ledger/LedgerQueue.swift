@@ -145,7 +145,7 @@ public actor LedgerQueue {
                 LEFT JOIN ledger_scan s ON s.accountId=t.accountId AND s.threadId=t.id
                 LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
                 WHERE t.lastDate>=? AND (s.threadId IS NULL OR s.messageCount<t.messageCount OR s.promptVersion<?)
-                  AND (ai.category IS NULL OR ai.category IN ('people','other'))
+                  AND (ai.category IS NULL OR ai.category IN ('people','other') OR t.gmailTab='primary')
                   AND NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId=t.accountId AND x.threadId=t.id
                     AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || t.accountId)))
                 ORDER BY v.threadId IS NOT NULL DESC,

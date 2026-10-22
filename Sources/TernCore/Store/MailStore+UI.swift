@@ -22,6 +22,7 @@ public struct ScopeCounts: Hashable, Sendable {
     public var inboxUnread = 0
     /// Inbox threads flagged as waiting on your reply, read or not.
     public var needsReply = 0
+    public var ledgerEnabled = true
     public var waitingOn = 0
     public var iOwe = 0
     public var snoozed = 0
@@ -82,6 +83,7 @@ extension MailStore {
     /// One pass over the scope's inbox rows (its index) for the inbox, tab and needs-reply counts.
     public static func fetchScopeCounts(_ db: Database, accountId: String?) throws -> ScopeCounts {
         var counts = ScopeCounts()
+        counts.ledgerEnabled = try LedgerSettings.load(db).enabled
         counts.waitingOn = try Self.fetchLedgerCount(db, accountId: accountId)
         counts.iOwe = try Self.fetchLedgerCount(db, accountId: accountId, direction: .iOwe)
         let scoped = accountId == nil ? "" : " AND i.accountId = ?"

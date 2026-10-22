@@ -12,6 +12,14 @@ struct EmptyListView: View {
                 EmptyLine(text: "Setting up the demo mailbox…")
             } else if model.isSearching {
                 EmptyLine(text: "Nothing matches “\(model.searchText.trimmingCharacters(in: .whitespaces))”.")
+            } else if model.kind == .waitingOn || model.kind == .iOwe {
+                VStack(spacing: 10) {
+                    Text(model.kind == .waitingOn ? "Unanswered requests you send will appear here." : "Promises you make will appear here.")
+                        .font(.display(17)).foregroundStyle(Color(Theme.text2))
+                    Text("Tern checks recent mail in the background. Only clear commitments appear here.")
+                        .font(.ui(12)).foregroundStyle(Color(Theme.text3))
+                }
+                .multilineTextAlignment(.center).padding(32).padding(.bottom, 60)
             } else if case .inbox = model.kind, model.inboxTab == nil || model.inboxTab == .primary {
                 InboxZeroView(cleared: model.prefs.clearedToday, drawn: model.emptiedByTriage && !reduceMotion)
             } else if case .inbox = model.kind {

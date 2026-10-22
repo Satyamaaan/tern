@@ -191,7 +191,7 @@ public enum Ledger {
 
     /// Background backfill commits every 100 candidates. Run away from the main thread.
     public static func rebuildWaiting(in database: AppDatabase, now: Date = Date(), onlyIfNeeded: Bool = false) throws {
-        if onlyIfNeeded, try database.reader.read({ try Setting.fetchOne($0, key: "ledger.backfilled")?.value }) == "1" { return }
+        if onlyIfNeeded, try database.reader.read({ try Setting.fetchOne($0, key: "ledger.backfilled.waiting-v2")?.value }) == "1" { return }
         let keys = try database.reader.read { try waitingCandidates($0, now: now) }
         for offset in stride(from: 0, to: keys.count, by: 100) {
             let chunk = Array(keys[offset..<min(offset + 100, keys.count)])
@@ -199,7 +199,7 @@ public enum Ledger {
         }
         try database.writer.write {
             try sweep($0, now: now)
-            try Setting(key: "ledger.backfilled", value: "1").upsert($0)
+            try Setting(key: "ledger.backfilled.waiting-v2", value: "1").upsert($0)
         }
     }
 }

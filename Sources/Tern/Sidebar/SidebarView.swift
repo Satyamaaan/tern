@@ -34,10 +34,10 @@ struct SidebarView: View {
         let counts = model.counts
         row(.inbox, "Inbox", .inbox, count: counts.inboxUnread, countColor: Theme.text1)
         row(.needsReply, "Needs reply", .needsReply, count: counts.needsReply, countColor: Theme.ink, countWeight: .medium)
-        if counts.waitingOn > 0 {
+        if counts.ledgerEnabled {
             row(.waitingOn, "Waiting on", .waitingOn, count: counts.waitingOn, countColor: Theme.ink, countWeight: .medium)
         }
-        if counts.iOwe > 0 {
+        if counts.ledgerEnabled {
             row(.iOwe, "I owe", .iOwe, count: counts.iOwe, countColor: Theme.ink, countWeight: .medium)
         }
         row(.snoozed, "Snoozed", .snoozed, count: counts.snoozed)

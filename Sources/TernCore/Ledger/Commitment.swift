@@ -112,7 +112,7 @@ public struct LedgerSettings: Hashable, Sendable {
     public var ai = true
     public var showMaybe = false
     public var aiDailyCalls = 40
-    public var backfillDays = 14
+    public var backfillDays = 30
 
     private final class Cached: NSObject {
         let value: LedgerSettings
@@ -141,7 +141,7 @@ public struct LedgerSettings: Hashable, Sendable {
         result.ai = settings["ledger.ai"] != "false"
         result.showMaybe = settings["ledger.showMaybe"] == "true"
         result.aiDailyCalls = max(0, Int(settings["ledger.aiDailyCalls"] ?? "40") ?? 40)
-        result.backfillDays = min(30, max(1, Int(settings["ledger.backfillDays"] ?? "14") ?? 14))
+        result.backfillDays = min(30, max(1, Int(settings["ledger.backfillDays"] ?? "30") ?? 30))
         return result
     }
 }
