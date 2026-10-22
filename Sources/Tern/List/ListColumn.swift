@@ -224,7 +224,9 @@ private struct ToastPill: View {
                 Text("·").opacity(0.6)
                 Button("Undo") { model.undo(undo) }
                     .buttonStyle(.plain)
-                Keycap(text: "z", inverted: true)
+                if let shortcut = model.registry?["undo"]?.shortcutText, !shortcut.isEmpty {
+                    Keycap(text: shortcut, inverted: true)
+                }
             }
         }
         .font(.ui(13))

@@ -37,6 +37,7 @@ struct Snapshotter {
         render(window, appearance: .aqua, to: directory.appendingPathComponent("palette-light.png"))
         render(window, appearance: .darkAqua, to: directory.appendingPathComponent("palette-dark.png"))
         model.palette = nil
+        ledgerShots(window, directory)
         tabShots(window, directory)
         integrationShots(window, directory)
         if ProcessInfo.processInfo.environment["TERN_SNAPSHOT_EXTRAS"] == "1" { extras(window, directory) }

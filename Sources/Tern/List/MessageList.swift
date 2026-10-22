@@ -274,7 +274,14 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         guard let row = snapshot.row(at: index) else { return nil }
         let key = row.id
         var result = RowModel(row: row, style: style)
-        result.summaryHeadline = model.prefs.summaryHeadline
+        result.summaryHeadline = row.ledger == nil && model.prefs.summaryHeadline
+        if let ledger = row.ledger {
+            let days = max(0, Int(Date().timeIntervalSince(ledger.sourceDate) / 86_400))
+            result.timeOverride = "asked \(days)d"
+            if Date().timeIntervalSince(ledger.sourceDate) > 2 * ledger.surfaceAt.timeIntervalSince(ledger.sourceDate) {
+                result.chips.append(RowChip(text: "Follow up", icon: .waitingOn, tint: .ink))
+            }
+        }
         result.isSelected = model.isSelected(key)
         result.fillBelow = key == cursorFillKey
         result.hasFocus = key == model.cursor && listHasKeyboard
@@ -315,7 +322,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     /// mustn't borrow a real company's logo.
     private func avatar(for row: ThreadRow) -> RowAvatar {
         let thread = row.thread
-        let sender = RowFormat.avatarParticipant(thread)
+        let sender = row.ledger.map { Participant(name: $0.counterpartyName, email: $0.counterpartyEmail) } ?? RowFormat.avatarParticipant(thread)
         let email = sender?.email ?? thread.accountId
         let logos = SenderLogos.shared
         if sender != nil, !Self.isQuarantined(thread, in: model.kind) {

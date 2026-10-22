@@ -178,6 +178,7 @@ extension AppModel {
                 switch change {
                 case .mail(_, let result): if let token = result.value { try store.undo(token) }
                 case .needsReply(let result): if let previous = result.value { try store.restoreNeedsReply(previous) }
+                case .ledger(let result): if let previous = result.value { try store.restoreCommitments(previous) }
                 case .project(let id, let keys, let assigned): try store.setProject(id, on: keys, assigned: !assigned)
                 case .custom: break
                 }

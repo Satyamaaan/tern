@@ -4,6 +4,7 @@ import SwiftUI
 /// the sections finds them across all of them.
 enum SettingsItem: String, CaseIterable, Identifiable {
     case accounts, googleClient
+    case ledgerTracking
     case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
     case theme, density, dimRead, senderLogos, listHeadline
     case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
@@ -17,7 +18,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     var section: SettingsSection {
         switch self {
         case .accounts, .googleClient: .accounts
-        case .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
+        case .ledgerTracking, .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
         case .theme, .density, .dimRead, .senderLogos, .listHeadline: .appearance
         case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
@@ -30,6 +31,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     /// The small caps the item sits under in its section.
     var group: String? {
         switch self {
+        case .ledgerTracking: "Follow-ups"
         case .markRead, .afterTriage, .imagesInMail, .remoteImages: "Reading"
         case .undoSend, .signatures, .sendFrom: "Writing"
         case .readingPane, .readerOverlay, .sidebar: "Window"
@@ -43,6 +45,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         let words: String = switch self {
         case .accounts: "accounts gmail add remove sign in workspace name rename colour color personal work"
         case .googleClient: "google client oauth id secret cloud"
+        case .ledgerTracking: "follow up waiting reminder ledger commitments tracking days"
         case .markRead: "mark as read unread open delay"
         case .afterTriage: "after archive delete trash snooze next previous auto advance"
         case .imagesInMail: "images in mail remote pictures logos load automatically ask first block privacy tracking pixels trackers"
@@ -133,6 +136,7 @@ struct SettingsItemView: View {
         switch item {
         case .accounts: AccountsItem(state: state)
         case .googleClient: GoogleClientSection(startEditing: state.editsGoogleClient).padding(.top, 16)
+        case .ledgerTracking: LedgerTrackingItem()
         case .markRead: MarkReadItem()
         case .afterTriage: AfterTriageItem()
         case .imagesInMail: ImagesInMailItem()

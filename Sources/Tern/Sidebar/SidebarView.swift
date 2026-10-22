@@ -33,6 +33,9 @@ struct SidebarView: View {
         let counts = model.counts
         row(.inbox, "Inbox", .inbox, count: counts.inboxUnread, countColor: Theme.text1)
         row(.needsReply, "Needs reply", .needsReply, count: counts.needsReply, countColor: Theme.ink, countWeight: .medium)
+        if counts.waitingOn > 0 {
+            row(.waitingOn, "Waiting on", .waitingOn, count: counts.waitingOn, countColor: Theme.ink, countWeight: .medium)
+        }
         row(.snoozed, "Snoozed", .snoozed, count: counts.snoozed)
         row(.starred, "Starred", .starred)
         row(.drafts, "Drafts", .drafts, count: counts.drafts)

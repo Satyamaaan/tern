@@ -116,7 +116,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ShellActions {
     private func startSnoozeTimer() {
         let store = services.store
         let writes = model.writes
-        let wake = { writes.async { _ = try? store.wakeSnoozed() } }
+        let wake = {
+            writes.async {
+                _ = try? store.wakeSnoozed()
+                try? store.database.writer.write { try Ledger.sweep($0) }
+            }
+        }
+        Task.detached(priority: .utility) { try? Ledger.rebuildWaiting(in: store.database, onlyIfNeeded: true) }
         wake()
         snoozeTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in wake() }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in wake() }

@@ -175,6 +175,7 @@ final class PaletteController {
 
     private static let icons: [String: Icon] = [
         "archive": .archive, "snooze": .snoozed, "trash": .trash, "discardDraft": .trash, "spam": .spam, "moveToInbox": .inbox,
+        "commitmentDone": .done, "commitmentDismiss": .close, "go.waitingOn": .waitingOn,
         "star": .star, "needsReply": .needsReply, "label": .label, "project": .folder, "unread": .unread,
         "mute": .mute, "undo": .undo, "reply": .reply, "replyAll": .replyAll, "forward": .forward,
         "compose": .compose, "search": .search, "summarize": .sparkles, "print": .print, "quickLook": .eye,

@@ -43,6 +43,7 @@ final class SelfCheck {
         paging()
         dropOnProject()
         needsReply()
+        ledger()
         reviewFixes()
         search()
         tabs()

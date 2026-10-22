@@ -257,14 +257,14 @@ private struct RowPainter {
     @discardableResult
     private func drawSender(in rect: CGRect) -> CGFloat {
         let senders = RowFormat.senders(thread)
-        let draft = RowFormat.draftLine(thread)
+        let draft = model.row.ledger == nil ? RowFormat.draftLine(thread) : nil
         var attributes: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .semibold : .regular), .foregroundColor: primary]
-        var name = senders.text
+        var name = model.row.ledger.map { $0.displayName + ($0.extraCount > 0 ? " +\($0.extraCount)" : "") } ?? senders.text
         if let draft {
             name = draft
             attributes = [.font: Theme.ui(13, .medium), .foregroundColor: Theme.text2, .obliqueness: 0.14]
         }
-        let countText = senders.count.map { "(\($0))" }
+        let countText = model.row.ledger == nil ? senders.count.map { "(\($0))" } : nil
         var countAttributes = Self.countAttributes
         countAttributes[.foregroundColor] = quiet
         let countWidth = countText.map { Self.width($0, countAttributes) + 5 } ?? 0
@@ -326,7 +326,7 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
-        if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
+        if model.row.ledger == nil, model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
             Icon.sparkles.draw(in: CGRect(x: rect.minX, y: rect.midY - 6, width: 12, height: 12), color: quiet)
             let x = rect.minX + 17
             let width = min(Self.width(summary, subjectAttrs), max(0, (rect.width - 17) * 0.7))
@@ -348,7 +348,11 @@ private struct RowPainter {
         var x = rect.minX + subjectWidth + 6
         guard rect.maxX - x > 24 else { return }
         let preview: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
-        if let highlight = model.highlight {
+        if let ledger = model.row.ledger {
+            let days = max(0, Int(Date().timeIntervalSince(ledger.sourceDate) / 86_400))
+            Self.drawText("— asked \(days)d ago", preview, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x, height: rect.height))
+            return
+        } else if let highlight = model.highlight {
             // While searching, the excerpt around the match replaces the preview and the summary.
             let prefix = "— "
             let text = NSMutableAttributedString(string: prefix + highlight.snippet.replacingOccurrences(of: "\n", with: " "), attributes: preview)

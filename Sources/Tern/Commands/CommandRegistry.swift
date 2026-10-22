@@ -119,6 +119,10 @@ final class CommandRegistry {
             Command(id: "unread", title: "Mark as Unread", group: .actions, keys: [.key("u"), .key("U")], menu: .message, section: 1,
                     aliases: ["read"], isEnabled: hasTargets,
                     currentTitle: { m.targets.contains { (m.row($0)?.thread.unreadCount ?? 0) > 0 } ? "Mark as Read" : "Mark as Unread" }) { m.toggleUnread() },
+            Command(id: "commitmentDone", title: "Mark Done", group: .actions, keys: [.key("d")], menu: .message, section: 1,
+                    isEnabled: { m.canChangeCommitments }, currentTitle: { m.commitmentsAreDone ? "Reopen" : "Mark Done" }) { m.toggleCommitmentDone() },
+            Command(id: "commitmentDismiss", title: "Dismiss Commitment", group: .actions, keys: [.key("D")], menu: .message, section: 1,
+                    isEnabled: { m.hasOpenCommitments }) { m.dismissCommitment() },
             Command(id: "needsReply", title: "Mark Needs Reply", group: .actions, keys: [.key("R")], menu: .message, section: 1,
                     aliases: ["reply later", "waiting"], isEnabled: hasTargets,
                     currentTitle: { m.targets.allSatisfy { m.row($0)?.needsReply ?? false } && hasTargets() ? "Clear Needs Reply" : "Mark Needs Reply" }) { m.toggleNeedsReply() },
@@ -190,6 +194,7 @@ final class CommandRegistry {
         // Go
         let mailboxes: [(String, String, Mailbox.Kind, String, [String])] = [
             ("go.inbox", "Inbox", .inbox, "g i", []),
+            ("go.waitingOn", "Waiting On", .waitingOn, "g w", ["follow up", "commitments"]),
             ("go.needsReply", "Needs Reply", .needsReply, "g r", ["waiting"]),
             ("go.snoozed", "Snoozed", .snoozed, "g h", []),
             ("go.starred", "Starred", .starred, "g s", []),

@@ -462,6 +462,7 @@ struct UndoEntry: Identifiable {
     enum Change {
         case mail(MailAction, WriteResult<UndoToken>)
         case needsReply(WriteResult<NeedsReplyUndo>)
+        case ledger(WriteResult<LedgerUndo>)
         case project(String, [ThreadKey], assigned: Bool)
         /// Undo handled by its owner on the main actor, e.g. cancelling a send.
         case custom(@MainActor () -> Void)

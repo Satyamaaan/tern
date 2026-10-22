@@ -13,23 +13,27 @@ struct RowHoverBar: View {
             if !keys.isEmpty, keys.allSatisfy(model.isDraftRow) {
                 HoverButton(icon: .trash, help: hint("Discard draft", "trash")) { model.discardDrafts(keys) }
             } else {
-                if model.inArchive {
+                if model.inLedger {
+                    HoverButton(icon: .done, help: hint("Mark done", "commitmentDone")) { model.toggleCommitmentDone(on: keys) }
+                } else if model.inArchive {
                     HoverButton(icon: .inbox, help: hint("Move to Inbox", "moveToInbox")) { model.perform(.moveToInbox, on: keys) }
                 } else {
                     HoverButton(icon: .archive, help: hint("Archive", "archive")) { model.perform(.archive, on: keys) }
                 }
-                Menu {
-                    SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
-                } label: {
-                    // Menu labels on macOS only render text and images.
-                    Image(nsImage: Icon.snoozed.image(size: 15))
-                        .foregroundStyle(Color(Theme.text2))
+                if !model.inLedger {
+                    Menu {
+                        SnoozeMenuItems(threads: keys) { model.snoozeDateFor = keys }
+                    } label: {
+                        // Menu labels on macOS only render text and images.
+                        Image(nsImage: Icon.snoozed.image(size: 15))
+                            .foregroundStyle(Color(Theme.text2))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .frame(width: 26, height: 24)
+                    .help(hint("Snooze", "snooze"))
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .frame(width: 26, height: 24)
-                .help(hint("Snooze", "snooze"))
             }
             HoverButton(icon: .ellipsis, help: "More") {
                 guard let registry = model.registry, let event = NSApp.currentEvent, let view = event.window?.contentView else { return }

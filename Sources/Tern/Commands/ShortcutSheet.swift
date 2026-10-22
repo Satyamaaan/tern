@@ -116,6 +116,7 @@ enum ShortcutTable {
 
     private static let toggleTitles = [
         "star": "Star or Unstar",
+        "commitmentDone": "Mark Done or Reopen",
         "unread": "Mark Read or Unread",
         "needsReply": "Needs Reply",
         "splitInbox": "Inbox Tabs",
