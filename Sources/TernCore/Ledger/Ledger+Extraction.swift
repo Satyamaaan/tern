@@ -5,6 +5,7 @@ import GRDB
 public struct LedgerExtraction: Sendable {
     public var direction: LedgerDirection
     public var counterparty: String
+    public var counterpartyName: String = ""
     public var deliverable: String
     public var sourceMessageId: String
     public var quote: String
@@ -24,7 +25,7 @@ public struct LedgerExtraction: Sendable {
 
 extension Ledger {
     private static let stopwords: Set<String> = ["a", "an", "the", "to", "of", "for", "by", "my", "your", "me", "you", "i", "please", "will", "can", "could", "and", "in", "on"]
-    static func tokens(_ text: String) -> Set<String> {
+    public static func tokens(_ text: String) -> Set<String> {
         Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)).subtracting(stopwords)
     }
 
@@ -35,35 +36,59 @@ extension Ledger {
         for value in items {
             let rows = try Commitment.filter(Column("accountId") == key.accountId && Column("threadId") == key.threadId).fetchAll(db)
             let words = tokens(value.deliverable)
-            let fingerprint = "\(value.direction.rawValue)|\(value.counterparty.lowercased())|" + words.sorted().prefix(6).joined(separator: " ")
-            let existing = rows.first { row in
-                if let id = value.existingId { return row.id == id }
-                guard row.direction == value.direction, row.counterpartyEmail.lowercased() == value.counterparty.lowercased() else { return false }
-                if row.fingerprint == fingerprint { return true }
-                if row.sourceMessageId == value.sourceMessageId && (row.kind == "reply" || row.sourceQuote.lowercased() == value.quote.lowercased()) { return true }
-                let other = tokens(row.deliverable)
-                return Double(words.intersection(other).count) / Double(max(1, words.union(other).count)) >= 0.5
+            let ordered = value.deliverable.lowercased().split { !$0.isLetter && !$0.isNumber }.joined(separator: " ")
+            let fingerprint = "\(value.direction.rawValue)|\(value.counterparty.lowercased())|\(ordered.isEmpty ? value.deliverable : ordered)|\(value.sourceMessageId)"
+            func overlap(_ row: Commitment) -> Bool {
+                let a = row.sourceQuote.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                let b = value.quote.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                return !a.isEmpty && !b.isEmpty && (a.contains(b) || b.contains(a))
             }
+            let candidates = rows.filter { row in
+                row.direction == value.direction && row.counterpartyEmail.lowercased() == value.counterparty.lowercased()
+            }
+            let existing = candidates.first { $0.state != .open && $0.sourceMessageId == value.sourceMessageId && overlap($0) }
+                ?? candidates.filter { row in
+                    if let id = value.existingId { return row.id == id }
+                    if row.fingerprint == fingerprint { return true }
+                    if row.sourceMessageId == value.sourceMessageId && row.kind == "reply" { return true }
+                    let other = tokens(row.deliverable)
+                    return (row.sourceMessageId == value.sourceMessageId || overlap(row)) &&
+                        Double(words.intersection(other).count) / Double(max(1, words.union(other).count)) >= 0.67
+                }.max { left, right in
+                    func score(_ row: Commitment) -> Double {
+                        if row.id == value.existingId { return 3 }
+                        let other = tokens(row.deliverable)
+                        return Double(words.intersection(other).count) / Double(max(1, words.union(other).count))
+                    }
+                    return score(left) < score(right)
+                }
+            let contact = try String.fetchOne(db, sql: "SELECT name FROM contact WHERE id=?", arguments: [value.counterparty.lowercased()]) ?? ""
+            let local = MailText.localPart(of: value.counterparty).replacingOccurrences(of: #"[0-9]+$"#, with: "", options: .regularExpression)
+                .split { !$0.isLetter }.map { $0.capitalized }.joined(separator: " ")
+            let name = !value.counterpartyName.isEmpty ? value.counterpartyName : !contact.isEmpty ? contact : local
             let surface = value.direction == .iOwe || value.dueAt != nil ? value.sourceDate : value.sourceDate.addingTimeInterval(Double(settings.waitingDays) * 86_400)
             if var item = existing {
                 guard !rows.contains(where: { $0.id != item.id && $0.fingerprint == fingerprint }) else { continue }
                 guard item.state == .open, item.stateSource != "user", item.direction == value.direction,
                       item.counterpartyEmail.lowercased() == value.counterparty.lowercased() else { continue }
-                if item.dueAt != value.dueAt, let old = item.dueAt {
+                if let due = value.dueAt, item.dueAt != due, let old = item.dueAt {
                     item.resolutionNote = "Previous due date: \(old.formatted(.iso8601.year().month().day()))"
                 }
+                if item.counterpartyName.isEmpty { item.counterpartyName = name }
                 item.kind = "deliverable"; item.deliverable = value.deliverable
-                item.dueAt = value.dueAt; item.dueText = value.dueText; item.origin = origin
-                item.stateSource = "ai"; item.confidence = value.confidence
-                item.sourceMessageId = value.sourceMessageId; item.sourceDate = value.sourceDate; item.sourceQuote = value.quote
+                item.dueAt = value.dueAt ?? item.dueAt; item.dueText = value.dueText ?? item.dueText; item.origin = origin
+                item.stateSource = "ai"; item.confidence = max(item.confidence, value.confidence)
+                if value.sourceDate < item.sourceDate {
+                    item.sourceMessageId = value.sourceMessageId; item.sourceDate = value.sourceDate; item.sourceQuote = value.quote
+                }
                 if let hintAt = item.hintAt, hintAt <= value.sourceDate {
                     item.hintMessageId = nil; item.hintAt = nil
                 }
-                item.surfaceAt = surface; item.surfaced = surface <= now; item.updatedAt = now
+                item.surfaceAt = item.direction == .iOwe || item.dueAt != nil ? item.sourceDate : item.sourceDate.addingTimeInterval(Double(settings.waitingDays) * 86_400)
+                item.surfaced = item.surfaceAt <= now; item.updatedAt = now
                 item.fingerprint = fingerprint
                 try item.update(db)
             } else {
-                let name = try String.fetchOne(db, sql: "SELECT name FROM contact WHERE id=?", arguments: [value.counterparty.lowercased()]) ?? ""
                 let item = Commitment(id: nil, accountId: key.accountId, threadId: key.threadId, direction: value.direction,
                     kind: "deliverable", counterpartyEmail: value.counterparty.lowercased(), counterpartyName: name,
                     deliverable: value.deliverable, dueAt: value.dueAt, dueText: value.dueText, sourceMessageId: value.sourceMessageId,
@@ -71,7 +96,7 @@ extension Ledger {
                     state: .open, stateSource: "ai", resolvedMessageId: nil, resolvedAt: nil, resolutionNote: nil,
                     hintMessageId: nil, hintAt: nil, checkedCount: 0, surfaceAt: surface, surfaced: surface <= now,
                     fingerprint: fingerprint, createdAt: now, updatedAt: now)
-                try item.insert(db, onConflict: .ignore)
+                try item.insert(db)
             }
         }
         try recordScan(db, key: key, messageCount: messageCount, promptVersion: promptVersion, origin: origin, now: now)
@@ -82,13 +107,13 @@ extension Ledger {
     public static func applyResolutionHint(_ db: Database, id: Int64, messageId: String?, at date: Date?,
                                            note: String?, newDueAt: Date?, now: Date) throws {
         guard var item = try Commitment.fetchOne(db, key: id), item.state == .open, item.stateSource != "user" else { return }
-        if let due = newDueAt, item.dueAt != due {
+        if messageId != nil, let due = newDueAt, item.dueAt != due {
             if let old = item.dueAt { item.resolutionNote = "Previous due date: \(old.formatted(.iso8601.year().month().day()))" }
             item.dueAt = due
         }
         if let messageId, let date {
             item.hintMessageId = messageId; item.hintAt = date
-            if let note { item.resolutionNote = [item.resolutionNote, note].compactMap { $0 }.joined(separator: "\n") }
+            if let note, !(item.resolutionNote ?? "").components(separatedBy: "\n").contains(note) { item.resolutionNote = [item.resolutionNote, note].compactMap { $0 }.joined(separator: "\n") }
         }
         item.updatedAt = now
         try item.update(db)
@@ -102,7 +127,7 @@ extension Ledger {
 
     /// A later reply is evidence to review, never proof that a deliverable arrived.
     static func refreshHints(_ db: Database, keys: some Collection<ThreadKey>, now: Date) throws {
-        guard !keys.isEmpty else { return }
+        guard !keys.isEmpty, try LedgerSettings.load(db).enabled else { return }
         let pairs = keys.map { _ in "(?,?)" }.joined(separator: ",")
         let arguments = StatementArguments(keys.flatMap { [$0.accountId, $0.threadId] })
         let items = try Commitment.fetchAll(db, sql: """
@@ -111,14 +136,22 @@ extension Ledger {
             """, arguments: arguments)
         for item in items {
             let key = ThreadKey(accountId: item.accountId, threadId: item.threadId)
-            let messages = try MailMessage.filter(Column("accountId") == key.accountId && Column("threadId") == key.threadId
-                && Column("date") > item.sourceDate.timeIntervalSince1970 && Column("isDraft") == false).order(Column("date"), Column("id")).fetchAll(db)
-            if let reply = messages.first(where: { message in
-                if item.direction == .waitingOn { return !message.isFromMe && message.fromEmail.lowercased() == item.counterpartyEmail.lowercased() }
-                return message.isFromMe && (message.toList + message.ccList).contains { $0.email.lowercased() == item.counterpartyEmail.lowercased() }
-            }) {
+            let person = item.counterpartyEmail.lowercased()
+            let reply = try Row.fetchOne(db, sql: """
+                SELECT id,date FROM message
+                WHERE accountId=? AND threadId=? AND date>? AND isDraft=0
+                  AND ((?='waitingOn' AND isFromMe=0 AND lower(fromEmail)=?)
+                    OR (?='iOwe' AND isFromMe=1 AND EXISTS (
+                      SELECT 1 FROM json_each(message.toList) r WHERE lower(json_extract(r.value,'$.email'))=?
+                      UNION ALL SELECT 1 FROM json_each(message.ccList) r WHERE lower(json_extract(r.value,'$.email'))=?)))
+                ORDER BY date,id LIMIT 1
+                """, arguments: [key.accountId, key.threadId, item.sourceDate.timeIntervalSince1970,
+                    item.direction.rawValue, person, item.direction.rawValue, person, person])
+            if let reply {
+                let id: String = reply["id"]
+                let date: Double = reply["date"]
                 try db.execute(sql: "UPDATE commitment SET hintMessageId=?,hintAt=?,updatedAt=? WHERE id=?",
-                    arguments: [reply.id, reply.date.timeIntervalSince1970, now.timeIntervalSince1970, item.id])
+                    arguments: [id, date, now.timeIntervalSince1970, item.id])
             }
         }
     }

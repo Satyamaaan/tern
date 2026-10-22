@@ -62,22 +62,30 @@ public struct CommitmentBrief: Hashable, Sendable {
     public var dueAt: Date? = nil
     public var hasHint: Bool = false
 
-    public func timeText(now: Date = Date()) -> String {
+    public func timeText(now: Date = Date(), calendar: Calendar = .current) -> String {
         guard let dueAt else { return ageText(now: now) }
-        let calendar = Calendar.current
-        if calendar.isDate(dueAt, inSameDayAs: now) { return "Today" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = abs(dueAt.timeIntervalSince(now)) < 7 * 86_400 ? "EEE" : "MMM d"
-        return formatter.string(from: dueAt)
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: dueAt)).day ?? 0
+        switch days {
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case -1: return "Yesterday"
+        case -14 ... -2: return "\(-days)d late"
+        default:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = (2...6).contains(days) ? "EEE" : "MMM d"
+            return formatter.string(from: dueAt)
+        }
     }
-    public func isOverdue(now: Date = Date()) -> Bool {
-        dueAt.map { $0 < Calendar.current.startOfDay(for: now) } ?? false
+    public func isOverdue(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        dueAt.map { calendar.startOfDay(for: $0) < calendar.startOfDay(for: now) } ?? false
     }
     /// Compact age for the list's single time slot.
     public func ageText(now: Date = Date()) -> String {
         "\(max(0, Int(now.timeIntervalSince(sourceDate) / 86_400)))d"
     }
+    public var displayDeliverable: String? { deliverable.map { $0.prefix(1).uppercased() + $0.dropFirst() } }
     public var displayName: String { counterpartyName.isEmpty ? counterpartyEmail : counterpartyName }
 }
 

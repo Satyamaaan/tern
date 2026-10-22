@@ -70,16 +70,21 @@ public actor LedgerQueue {
         generation += 1
         call?.cancel()
     }
-    public func prioritize(_ keys: [ThreadKey]) { screen = Array(keys.prefix(60)) }
+    public func prioritize(_ keys: [ThreadKey]) { screen = Array(Set(keys.prefix(60))) }
 
     private func settingsChanged() async {
         guard let values = try? await database.reader.read({ db in (try AISettings.read(db), try LedgerSettings.load(db)) }) else { return }
-        if known != nil && (known != values.0 || ledgerKnown != values.1) {
+        let changed = known == nil || known != values.0 || ledgerKnown.map { !Self.sameExtractionSettings($0, values.1) } == true
+        if known != nil && (known != values.0 || ledgerKnown.map { !Self.sameExtractionSettings($0, values.1) } == true) {
             generation += 1; call?.cancel(); wake?.cancel(); debounceWait?.cancel(); resumeAt = nil; backoff = 300
             blocked = [:]; failed = [:]; retry = []
         }
         known = values.0; ledgerKnown = values.1
-        pokes?.yield()
+        if changed { pokes?.yield() }
+    }
+
+    private static func sameExtractionSettings(_ a: LedgerSettings, _ b: LedgerSettings) -> Bool {
+        a.enabled == b.enabled && a.ai == b.ai && a.backfillDays == b.backfillDays
     }
 
     private func runPass() async {
@@ -128,24 +133,25 @@ public actor LedgerQueue {
         let screen = screen; let blocked = blocked
         let retryKeys = retry.isEmpty ? nil : retry.removeFirst()
         let size = Self.batchSize(for: provider.id)
-        let screenJSON = String(data: try JSONSerialization.data(withJSONObject: screen.map { [$0.accountId, $0.threadId] }), encoding: .utf8)!
+        let visible = screen.isEmpty ? "(NULL,NULL)" : screen.map { _ in "(?,?)" }.joined(separator: ",")
+        var queryArguments = StatementArguments(screen.flatMap { [$0.accountId, $0.threadId] })
+        _ = queryArguments.append(contentsOf: [stamp.addingTimeInterval(-Double(preferences.backfillDays) * 86_400).timeIntervalSince1970, Prompts.ledgerVersion])
         let threads = try await database.reader.read { db -> [PromptThread] in
             let rows = try Row.fetchAll(db, sql: """
+                WITH visible(accountId,threadId) AS (VALUES \(visible))
                 SELECT t.accountId,t.id,t.messageCount FROM thread t
+                LEFT JOIN visible v ON v.accountId=t.accountId AND v.threadId=t.id
                 LEFT JOIN ledger_scan s ON s.accountId=t.accountId AND s.threadId=t.id
                 LEFT JOIN thread_ai ai ON ai.accountId=t.accountId AND ai.threadId=t.id
                 WHERE t.lastDate>=? AND (s.threadId IS NULL OR s.messageCount<t.messageCount OR s.promptVersion<?)
                   AND (ai.category IS NULL OR ai.category IN ('people','other'))
                   AND NOT EXISTS (SELECT 1 FROM thread_label x WHERE x.accountId=t.accountId AND x.threadId=t.id
                     AND (x.labelId IN ('TRASH','SPAM','TERN_PENDING_MUTED') OR x.labelId=(SELECT value FROM setting WHERE key='mute.label.' || t.accountId)))
-                ORDER BY EXISTS (SELECT 1 FROM json_each(?) visible
-                  WHERE json_extract(visible.value,'$[0]')=t.accountId AND json_extract(visible.value,'$[1]')=t.id) DESC,
-                  t.lastDate DESC LIMIT 2000
-                """, arguments: [stamp.addingTimeInterval(-Double(preferences.backfillDays) * 86_400).timeIntervalSince1970, Prompts.ledgerVersion, screenJSON])
-            let order = Dictionary(screen.enumerated().map { ($1, $0) }, uniquingKeysWith: min)
+                ORDER BY v.threadId IS NOT NULL DESC,
+                  t.lastDate DESC,t.id,t.accountId LIMIT 2000
+                """, arguments: queryArguments)
             var keys = rows.filter { blocked[ThreadKey(accountId: $0[0], threadId: $0[1])] != ($0[2] as Int) }.map { ThreadKey(accountId: $0[0], threadId: $0[1]) }
             if let retryKeys { keys = retryKeys.filter { keys.contains($0) } }
-            else { keys.sort { order[$0, default: Int.max] < order[$1, default: Int.max] } }
             return try PromptData.threads(db, keys: Array(keys.prefix(size)), messages: 4, characters: 700)
         }
         guard !threads.isEmpty else { return BatchResult(sent: 0, extracted: 0) }
@@ -155,16 +161,11 @@ public actor LedgerQueue {
             })
         }
         let picked = try await database.writer.write { db -> [PromptThread] in
-            guard try AISettings.read(db) == settings, try LedgerSettings.load(db) == preferences else { throw CancellationError() }
+            guard try AISettings.read(db) == settings, Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) else { throw CancellationError() }
             var picked: [PromptThread] = []
             for thread in threads {
-                let scan = try LedgerScan.fetchOne(db, key: ["accountId": thread.key.accountId, "threadId": thread.key.threadId])
-                // Message counts, not wall-clock scan time, identify arrivals even after a historical sync.
-                let oldCount = (scan?.promptVersion ?? 0) < Prompts.ledgerVersion ? 0 : scan?.messageCount ?? 0
-                let newMessages = try MailMessage.filter(Column("accountId") == thread.key.accountId && Column("threadId") == thread.key.threadId && Column("isDraft") == false)
-                    .order(Column("date"), Column("seq")).limit(-1, offset: oldCount).fetchAll(db)
-                let hasList = newMessages.contains { $0.listUnsubscribe != nil }
-                let cue = newMessages.contains { CommitmentCues.contains($0.bodyText ?? $0.snippet) }
+                let cue = thread.messages.contains { CommitmentCues.contains($0.text) }
+                let hasList = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM message WHERE accountId=? AND threadId=? AND listUnsubscribe IS NOT NULL LIMIT 1)", arguments: [thread.key.accountId, thread.key.threadId]) ?? false
                 let hasOpen = (open[thread.key] ?? []).contains { $0.origin != "rule" }
                 if !hasList && (cue || hasOpen) { picked.append(thread) }
                 else { try Ledger.recordScan(db, key: thread.key, messageCount: thread.messageCount, promptVersion: Prompts.ledgerVersion, origin: "cue-skip", now: stamp) }
@@ -174,7 +175,7 @@ public actor LedgerQueue {
         guard !picked.isEmpty else { return BatchResult(sent: threads.count, extracted: 0) }
         let day = Self.day(stamp)
         let reserved = try await database.writer.write { db -> Bool in
-            guard try AISettings.read(db) == settings, try LedgerSettings.load(db) == preferences else { return false }
+            guard try AISettings.read(db) == settings, Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) else { return false }
             let saved = try Setting.fetchOne(db, key: "ledger.ai.day")?.value ?? ""
             let parts = saved.split(separator: ":")
             let count = parts.first.map(String.init) == day ? Int(parts.last ?? "0") ?? 0 : 0
@@ -183,9 +184,9 @@ public actor LedgerQueue {
             return true
         }
         guard reserved else {
-            let stillCurrent = try await database.reader.read { db in try AISettings.read(db) == settings && LedgerSettings.load(db) == preferences }
+            let stillCurrent = try await database.reader.read { db in try AISettings.read(db) == settings && Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) }
             guard stillCurrent else { throw CancellationError() }
-            var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            let calendar = Calendar.current
             let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: stamp))!
             resumeAt = tomorrow
             scheduleWake(after: tomorrow.timeIntervalSince(stamp))
@@ -199,9 +200,20 @@ public actor LedgerQueue {
         do {
             let text = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
             guard generation == self.generation, !Task.isCancelled else { throw CancellationError() }
+            guard let verdicts = try await database.reader.read({ db in
+                try LedgerVerdict.parse(text, db: db, threads: picked, open: open)
+            }) else { throw AIError.invalidOutput("Invalid ledger answer") }
+            let missing = picked.filter { thread in !verdicts.contains { $0.thread.key == thread.key } }
+            for thread in missing {
+                var failure = failed[thread.key].flatMap { $0.messageCount == thread.messageCount ? $0 : nil } ?? Failure(messageCount: thread.messageCount)
+                failure.count += 1
+                if picked.count == 1 { failure.alone += 1 }
+                failed[thread.key] = failure
+                if failure.count >= 10 || failure.alone >= 2 { self.blocked[thread.key] = thread.messageCount }
+                else { retry.append([thread.key]) }
+            }
             let count = try await database.writer.write { db -> Int in
-                guard try AISettings.read(db) == settings, try LedgerSettings.load(db) == preferences else { throw CancellationError() }
-                guard let verdicts = try LedgerVerdict.parse(text, db: db, threads: picked, open: open), verdicts.count == picked.count else { throw AIError.invalidOutput("Incomplete ledger answer") }
+                guard try AISettings.read(db) == settings, Self.sameExtractionSettings(try LedgerSettings.load(db), preferences) else { throw CancellationError() }
                 for verdict in verdicts {
                     try Ledger.applyExtraction(db, key: verdict.thread.key, items: verdict.items, messageCount: verdict.thread.messageCount,
                         promptVersion: Prompts.ledgerVersion, origin: provider.id, now: stamp)
@@ -215,6 +227,18 @@ public actor LedgerQueue {
             backoff = 300
             return BatchResult(sent: threads.count, extracted: count)
         } catch {
+            let cancelled = error is CancellationError || task.isCancelled || generation != self.generation || Task.isCancelled
+            // Refund interruptions and provider failures. Invalid output consumed a useful call and remains charged.
+            let invalid: Bool
+            if case AIError.invalidOutput = error { invalid = true } else { invalid = false }
+            if cancelled || !invalid {
+                try await database.writer.write { db in
+                    guard let saved = try Setting.fetchOne(db, key: "ledger.ai.day"), saved.value.hasPrefix(day + ":") else { return }
+                    let count = Int(saved.value.split(separator: ":").last ?? "0") ?? 0
+                    try Setting(key: "ledger.ai.day", value: "\(day):\(max(0, count - 1))").upsert(db)
+                }
+            }
+            if cancelled { throw CancellationError() }
             if !(error is CancellationError), case AIError.rateLimited = error { throw error }
             if !(error is CancellationError) {
                 let keys = picked.map(\.key)
@@ -243,7 +267,7 @@ public actor LedgerQueue {
 
     static func day(_ date: Date) -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current; formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
     }
 }

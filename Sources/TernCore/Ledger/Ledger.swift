@@ -53,7 +53,8 @@ public enum Ledger {
         isDirectQuestion(text) || requests.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
-    private static func isAutomation(_ email: String) -> Bool {
+    /// Recognises senders that cannot make a personal commitment.
+    public static func isAutomation(_ email: String) -> Bool {
         let local = email.lowercased().split(separator: "@").first.map(String.init) ?? ""
         return ["noreply", "no-reply", "no_reply", "do-not-reply", "do_not_reply", "donotreply", "mailer-daemon", "postmaster", "bounce"].contains { local.contains($0) }
     }
