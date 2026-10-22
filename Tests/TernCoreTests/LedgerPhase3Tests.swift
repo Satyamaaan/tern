@@ -4,6 +4,13 @@ import Testing
 @testable import TernCore
 
 struct LedgerPhase3Tests {
+    @Test func completedFilterUsesParsedTokens() {
+        #expect(SearchQuery("is:done proposal").includesDone)
+        #expect(SearchQuery("(is:done OR is:owe) proposal").includesDone)
+        #expect(!SearchQuery("-is:done").includesDone)
+        #expect(!SearchQuery("\"is:done\"").includesDone)
+    }
+
     @Test func manualCreateDetailDoneSearchReopenAndUndo() throws {
         let (database, store, _) = try ledgerFixture()
         let key = ThreadKey(accountId: "a", threadId: "t")
@@ -40,6 +47,27 @@ struct LedgerPhase3Tests {
         }
         #expect(latest?.commitments.contains { undo.created.contains($0.id ?? -1) } == true)
         _ = database
+    }
+
+    @Test func manualSourceFollowsDirectionAndCompletionText() throws {
+        let (database, store, ask) = try ledgerFixture()
+        var reply = ask
+        reply.id = "their-ask"; reply.fromEmail = "maya@example.com"; reply.isFromMe = false
+        reply.date = ask.date.addingTimeInterval(100)
+        var followup = ask
+        followup.id = "my-followup"; followup.date = ask.date.addingTimeInterval(200)
+        try store.upsertMessages([reply, followup])
+        let key = ThreadKey(accountId: "a", threadId: "t")
+        let person = Participant(name: "Maya", email: "maya@example.com")
+        let owe = try store.trackCommitment(on: key, direction: .iOwe, deliverable: "Send proposal", counterparty: person, dueAt: nil)
+        let waiting = try store.trackCommitment(on: key, direction: .waitingOn, deliverable: "Review proposal", counterparty: person, dueAt: nil)
+        let items = try store.commitments(on: [key])
+        #expect(items.first { owe.created.contains($0.id!) }?.sourceMessageId == "their-ask")
+        #expect(items.first { waiting.created.contains($0.id!) }?.sourceMessageId == "my-followup")
+        _ = try store.setCommitmentState(owe.created, to: .done)
+        #expect(try SearchService(database).search("is:done").first?.ledger?.completion == "Marked done by you")
+        #expect(try store.trackCommitment(on: key, direction: .iOwe, deliverable: " ", counterparty: person, dueAt: nil).created.isEmpty)
+        #expect(try store.trackCommitment(on: ThreadKey(accountId: "a", threadId: "missing"), direction: .iOwe, deliverable: "Send", counterparty: person, dueAt: nil).created.isEmpty)
     }
 
 }

@@ -6,8 +6,11 @@ extension MailStore {
     public func trackCommitment(on key: ThreadKey, direction: LedgerDirection, deliverable: String,
                                 counterparty: Participant, dueAt: Date?, now: Date = Date()) throws -> LedgerUndo {
         try database.writer.write { db in
-            guard let detail = try Self.fetchThreadDetail(db, key), let source = detail.messages.last(where: { !$0.isDraft }),
+            guard let detail = try Self.fetchThreadDetail(db, key), let last = detail.messages.last,
                   !deliverable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return LedgerUndo(previous: []) }
+            let source = detail.messages.last(where: { message in
+                !message.isDraft && (direction == .iOwe ? message.fromEmail.caseInsensitiveCompare(counterparty.email) == .orderedSame : message.isFromMe)
+            }) ?? last
             var item = Commitment(id: nil, accountId: key.accountId, threadId: key.threadId, direction: direction,
                 kind: "deliverable", counterpartyEmail: counterparty.email.lowercased(), counterpartyName: counterparty.name,
                 deliverable: String(deliverable.trimmingCharacters(in: .whitespacesAndNewlines).prefix(90)), dueAt: dueAt, dueText: nil,

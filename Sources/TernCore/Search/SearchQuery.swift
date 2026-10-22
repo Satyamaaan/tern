@@ -135,6 +135,18 @@ public struct SearchQuery: Hashable, Sendable {
 
     public var isEmpty: Bool { root == nil }
 
+    /// Whether a positive completed-items filter occurs anywhere in the query.
+    public var includesDone: Bool {
+        func containsDone(_ expression: SearchExpr?) -> Bool {
+            switch expression {
+            case .filter(.done): return true
+            case .and(let children), .or(let children): return children.contains { containsDone($0) }
+            default: return false
+            }
+        }
+        return containsDone(root)
+    }
+
     /// True when the query asks for trash or spam (or `in:anywhere`), so they are not hidden.
     public var includesTrashOrSpam: Bool {
         guard let root else { return false }

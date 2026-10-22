@@ -27,6 +27,30 @@ extension SelfCheck {
         model.focus = .reader
         window.makeFirstResponder(nil)
         check("reader evidence command has items", registry["commitmentEvidence"]?.isEnabled() == true)
+        if let reader = model.services.reader.model, let first = reader.focusedCommitment,
+           let extra = try? model.store.trackCommitment(on: key, direction: .iOwe, deliverable: "Review focus check",
+                counterparty: Participant(name: first.counterpartyName, email: first.counterpartyEmail), dueAt: nil) {
+            check("strip observes two open items", waitUntil { reader.stripItems.count >= 2 })
+            reader.focusedCommitmentId = extra.created.first
+            registry.run("commitmentNext")
+            check("next commitment moves strip focus", reader.focusedCommitment?.id != extra.created.first)
+            reader.focusedCommitmentId = extra.created.first
+            registry.run("commitmentDone")
+            check("reader done acts on focused item", waitUntil {
+                (try? self.model.store.commitments(on: [key]).first { $0.id == extra.created.first }?.state) == .done
+            })
+            check("reader done leaves other item open", (try? model.store.commitments(on: [key]).first { $0.id == first.id }?.state) == .open)
+            model.undoLast()
+            check("focused done is undoable", waitUntil {
+                (try? self.model.store.commitments(on: [key]).first { $0.id == extra.created.first }?.state) == .open
+            })
+            try? model.store.restoreCommitments(extra)
+            model.setCursor(key, open: true)
+            model.focus = .list
+            model.open()
+            _ = waitUntil { self.model.services.reader.shows(key) && self.model.services.reader.model?.focusedCommitment?.state == .open }
+            model.focus = .reader
+        }
         send("d")
         check("reader d completes its commitment", waitUntil { (try? self.model.store.commitments(on: [key]).contains { $0.state == .done }) == true })
         model.undoLast()

@@ -33,6 +33,20 @@ final class ReaderModel {
     private(set) var detail: ThreadDetail?
     var composing: ComposeRequest?
     var commitmentEvidence = false
+    weak var app: AppModel?
+    var focusedCommitmentId: Int64?
+    var stripItems: [Commitment] {
+        let showDone = SearchQuery(app?.searchText ?? "").includesDone
+        return (detail?.commitments ?? []).filter { $0.state == .open || (showDone && $0.state == .done) }
+    }
+    var stripVisible: Bool { !stripItems.isEmpty }
+    var focusedCommitment: Commitment? { stripItems.first { $0.id == focusedCommitmentId } ?? stripItems.first }
+    func nextCommitment() {
+        let items = stripItems
+        guard !items.isEmpty else { return }
+        let index = items.firstIndex { $0.id == focusedCommitment?.id } ?? 0
+        focusedCommitmentId = items[(index + 1) % items.count].id
+    }
     var findVisible = false
     var findText = ""
     private(set) var findFailed = false
@@ -115,6 +129,7 @@ final class ReaderModel {
         defer { self.prefetch(prefetch) }
         guard key != self.key else { return resume() }
         commitmentEvidence = false
+        focusedCommitmentId = nil
         logosPending = false
         observer?.cancel()
         observer = nil

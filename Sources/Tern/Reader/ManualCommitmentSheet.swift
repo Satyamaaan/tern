@@ -14,13 +14,16 @@ struct ManualCommitmentSheet: View {
     let draft: ManualCommitmentDraft
     @Environment(AppModel.self) private var app
     @State private var deliverable = ""
+    @State private var personName = ""
+    @State private var personEmail = ""
     @State private var hasDue = false
     @State private var due = Date()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(draft.direction == .iOwe ? "Track as I Owe" : "Track as Waiting On").font(.ui(18, .semibold))
-            Text(draft.person.name.isEmpty ? draft.person.email : draft.person.name).font(.ui(13)).foregroundStyle(Color(Theme.text3))
+            TextField("Person", text: $personName).textFieldStyle(.roundedBorder)
+            TextField("Email", text: $personEmail).textFieldStyle(.roundedBorder)
             TextField("Deliverable", text: $deliverable).textFieldStyle(.roundedBorder)
             Toggle("Due date", isOn: $hasDue)
             if hasDue { DatePicker("Due", selection: $due, displayedComponents: .date) }
@@ -28,12 +31,14 @@ struct ManualCommitmentSheet: View {
                 Spacer()
                 Button("Cancel") { app.manualCommitment = nil }.keyboardShortcut(.cancelAction)
                 Button("Track") {
-                    app.saveManualCommitment(draft, deliverable: deliverable, due: hasDue ? due : nil)
+                    var edited = draft
+                    edited.person = Participant(name: personName, email: personEmail.trimmingCharacters(in: .whitespacesAndNewlines))
+                    app.saveManualCommitment(edited, deliverable: deliverable, due: hasDue ? due : nil)
                     app.manualCommitment = nil
-                }.keyboardShortcut(.defaultAction).disabled(deliverable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.keyboardShortcut(.defaultAction).disabled(deliverable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || personEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(24).frame(width: 420)
-        .onAppear { deliverable = draft.deliverable }
+        .onAppear { deliverable = draft.deliverable; personName = draft.person.name; personEmail = draft.person.email }
     }
 }

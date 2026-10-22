@@ -1,4 +1,5 @@
 import AppKit
+import GRDB
 import SwiftUI
 import TernCore
 
@@ -21,6 +22,10 @@ extension Snapshotter {
            let detail = try? model.store.threadDetail(key),
            let person = detail.messages.flatMap({ [Participant(name: $0.fromName, email: $0.fromEmail)] + $0.toList }).first(where: { person in !model.accounts.contains { $0.email.lowercased() == person.email.lowercased() } }),
            let undo = try? model.store.trackCommitment(on: key, direction: .iOwe, deliverable: "Send revised launch deck", counterparty: person, dueAt: Date().addingTimeInterval(2 * 86_400)) {
+            let previous = try? model.store.setCommitmentState(detail.commitments.compactMap(\.id), to: .dismissed)
+            defer { if let previous { try? model.store.restoreCommitments(previous) } }
+            let second = try? model.store.trackCommitment(on: key, direction: .waitingOn, deliverable: "Review launch checklist", counterparty: person, dueAt: nil)
+            defer { if let second { try? model.store.restoreCommitments(second) } }
             model.show(.iOwe)
             model.reloadList()
             render(window, appearance: .aqua, to: directory.appendingPathComponent("i-owe-light.png"))
@@ -29,18 +34,57 @@ extension Snapshotter {
             model.open()
             settle(window)
             render(window, appearance: .aqua, to: directory.appendingPathComponent("reader-commitment-light.png"))
-            if let reader = model.services.reader.model { stripShot(reader, to: directory.appendingPathComponent("strip-collapsed-light.png")) }
+            if let reader = model.services.reader.model {
+                reader.app = model
+                reader.focusedCommitmentId = undo.created.first
+                stripShot(reader, to: directory.appendingPathComponent("strip-collapsed-light.png"))
+            }
             model.services.reader.model?.commitmentEvidence = true
             render(window, appearance: .aqua, to: directory.appendingPathComponent("reader-evidence-light.png"))
             if let reader = model.services.reader.model { stripShot(reader, to: directory.appendingPathComponent("strip-evidence-light.png")) }
             _ = try? model.store.setCommitmentState(undo.created, to: .done)
+            if let id = second?.created.first {
+                try? model.store.database.writer.write { db in
+                    guard var item = try Commitment.fetchOne(db, key: id) else { return }
+                    item.state = .done; item.stateSource = "ai"; item.resolvedAt = Date(); item.updatedAt = Date()
+                    item.resolutionNote = "Here is the reviewed launch checklist."
+                    try item.update(db)
+                }
+            }
             model.back()
             model.searchText = "is:done"
             settle(window)
             model.setCursor(key, open: true)
             model.focus = .list
             model.open()
+            settle(window)
             render(window, appearance: .aqua, to: directory.appendingPathComponent("done-light.png"))
+            if let reader = model.services.reader.model {
+                reader.app = model
+                reader.commitmentEvidence = true
+                reader.focusedCommitmentId = undo.created.first
+                stripShot(reader, to: directory.appendingPathComponent("strip-done-user-light.png"))
+                reader.focusedCommitmentId = second?.created.first
+                stripShot(reader, to: directory.appendingPathComponent("strip-done-ai-light.png"))
+            }
+            model.readerExpanded = false
+            model.prefs.readingPane = false
+            model.focus = .list
+            model.searchText = "is:done"
+            if let second { try? model.store.restoreCommitments(second) }
+            model.refreshSearch()
+            settle(window)
+            render(window, appearance: .aqua, to: directory.appendingPathComponent("done-user-row-light.png"))
+            if let id = undo.created.first {
+                try? model.store.database.writer.write { db in
+                    guard var item = try Commitment.fetchOne(db, key: id) else { return }
+                    item.stateSource = "ai"; item.resolutionNote = "Here is the revised launch deck."
+                    try item.update(db)
+                }
+            }
+            model.refreshSearch()
+            settle(window)
+            render(window, appearance: .aqua, to: directory.appendingPathComponent("done-ai-row-light.png"))
             model.back()
             model.endSearch(restoreFocus: false)
             try? model.store.restoreCommitments(undo)

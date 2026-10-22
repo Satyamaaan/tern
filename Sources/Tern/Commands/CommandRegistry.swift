@@ -124,11 +124,11 @@ final class CommandRegistry {
             Command(id: "commitmentDismiss", title: "Dismiss Commitment", group: .actions, keys: [.key("D")], menu: .message, section: 1,
                     isEnabled: { m.hasOpenCommitments }) { m.dismissCommitment() },
             Command(id: "commitmentReopen", title: "Reopen Commitment", group: .actions, keys: [.option("d")], menu: .message,
-                    aliases: ["completed", "done", "undo closure"], isEnabled: { (try? m.store.hasCommitments(on: m.targets, state: .done)) ?? false }) { m.reopenCommitment() },
+                    aliases: ["completed", "done", "undo closure"], isEnabled: { m.canReopenCommitment }) { m.reopenCommitment() },
             Command(id: "commitmentTrackWaiting", title: "Track as Waiting On…", group: .actions, keys: [.init(key: .char("w"), modifiers: [.option, .shift])],
-                    aliases: ["manual", "commitment", "follow up"], isEnabled: hasTargets) { m.beginManualCommitment(.waitingOn) },
+                    aliases: ["manual", "commitment", "follow up"], isEnabled: { m.canTrackCommitment }) { m.beginManualCommitment(.waitingOn) },
             Command(id: "commitmentTrackOwe", title: "Track as I Owe…", group: .actions, keys: [.init(key: .char("o"), modifiers: [.option, .shift])],
-                    aliases: ["manual", "commitment", "promise"], isEnabled: hasTargets) { m.beginManualCommitment(.iOwe) },
+                    aliases: ["manual", "commitment", "promise"], isEnabled: { m.canTrackCommitment }) { m.beginManualCommitment(.iOwe) },
             Command(id: "commitmentCompleted", title: "Show Completed Commitments", group: .goTo, keys: [.init(key: .char("d"), modifiers: [.option, .shift])],
                     aliases: ["done", "ledger", "last 14 days"], isEnabled: { true }) { m.searchText = "is:done" },
             Command(id: "needsReply", title: "Mark Needs Reply", group: .actions, keys: [.key("R")], menu: .message, section: 1,
@@ -306,12 +306,14 @@ final class CommandRegistry {
                     aliases: ["preview"], readerOnly: true, isEnabled: { reading() && m.focus == .reader }) { reader.quickLook() },
             Command(id: "commitmentShowMessage", title: "Show Commitment Source Message", group: .actions, keys: [.init(key: .char("e"), modifiers: [.option, .shift])],
                     aliases: ["evidence", "quote", "ledger"], readerOnly: true,
-                    isEnabled: { reading() && m.focus == .reader && !(reader.model?.detail?.commitments.isEmpty ?? true) }) {
-                if let item = reader.model?.detail?.commitments.first { reader.model?.reveal(messageId: item.sourceMessageId) }
+                    isEnabled: { reading() && m.focus == .reader && reader.model?.stripVisible == true }) {
+                if let item = reader.model?.focusedCommitment { reader.model?.reveal(messageId: item.sourceMessageId) }
             },
+            Command(id: "commitmentNext", title: "Focus Next Commitment", group: .actions, keys: [.option("v")],
+                    readerOnly: true, isEnabled: { reading() && m.focus == .reader && (reader.model?.stripItems.count ?? 0) > 1 }) { reader.model?.nextCommitment() },
             Command(id: "commitmentEvidence", title: "Show Commitment Evidence", group: .actions, keys: [.key("v")], menu: .message,
                     aliases: ["quote", "source", "ledger"], readerOnly: true,
-                    isEnabled: { reading() && m.focus == .reader && !(reader.model?.detail?.commitments.isEmpty ?? true) }) { reader.model?.commitmentEvidence.toggle() },
+                    isEnabled: { reading() && m.focus == .reader && reader.model?.stripVisible == true }) { reader.model?.commitmentEvidence.toggle() },
             Command(id: "summarize", title: "Summarize", group: .actions, keys: [.command("s", shift: true)], menu: .message, section: 4,
                     aliases: ["tl;dr", "ai"], isEnabled: { reading() && m.services.ai != nil }) { reader.summarize() },
             Command(id: "showOriginal", title: "Show Original", group: .actions, menu: .message, section: 4,

@@ -39,6 +39,13 @@ public struct Commitment: TernRecord, Hashable {
     public var updatedAt: Date
 }
 
+extension Commitment {
+    /// Completion text shared by the reader and completed search rows.
+    public var completionText: String {
+        stateSource == "user" ? "Marked done by you" : "Closed automatically" + (resolutionNote.map { " · " + $0 } ?? "")
+    }
+}
+
 /// Records the evidence version a later AI scan has inspected.
 public struct LedgerScan: TernRecord, Hashable {
     public static let databaseTableName = "ledger_scan"
@@ -107,9 +114,24 @@ public struct LedgerSettings: Hashable, Sendable {
     public var aiDailyCalls = 40
     public var backfillDays = 14
 
-    /// Reads defaults and validated values from the shared setting table.
+    private final class Cached: NSObject {
+        let value: LedgerSettings
+        init(_ value: LedgerSettings) { self.value = value }
+    }
+    private static let cache: NSCache<NSString, Cached> = {
+        let cache = NSCache<NSString, Cached>(); cache.countLimit = 16; return cache
+    }()
+
+    /// Reads only the six ledger keys; caches decoded settings by their exact stored values.
+    /// Reading the keys on every call preserves observation invalidation and transaction visibility.
     public static func load(_ db: Database) throws -> LedgerSettings {
-        load(try Setting.fetchAll(db).reduce(into: [String: String]()) { $0[$1.key] = $1.value })
+        let statement = try db.cachedStatement(sql: "SELECT * FROM setting WHERE key IN ('ledger.enabled','ledger.waitingDays','ledger.ai','ledger.showMaybe','ledger.aiDailyCalls','ledger.backfillDays') ORDER BY key")
+        let rows = try Setting.fetchAll(statement)
+        let key = NSString(data: try JSONEncoder().encode(rows.map { [$0.key, $0.value] }), encoding: String.Encoding.utf8.rawValue)!
+        if let cached = cache.object(forKey: key) { return cached.value }
+        let value = load(rows.reduce(into: [String: String]()) { $0[$1.key] = $1.value })
+        cache.setObject(Cached(value), forKey: key)
+        return value
     }
 
     static func load(_ settings: [String: String]) -> LedgerSettings {

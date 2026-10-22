@@ -76,22 +76,14 @@ public struct SearchService: Sendable {
         case .relevance: try executor.runRanked()
         }
         var rows = try MailStore.fetchThreadRows(db, keys: found.map(\.key))
-        func includesDone(_ expr: SearchExpr?) -> Bool {
-            switch expr {
-            case .filter(.done): return true
-            case .and(let values), .or(let values): return values.contains { includesDone($0) }
-            default: return false
-            }
-        }
-        if includesDone(query.root) {
+        if query.includesDone {
             for i in rows.indices {
                 let key = rows[i].id
                 let completed = try Commitment.fetchAll(db, sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND state='done' AND updatedAt>=? ORDER BY updatedAt DESC LIMIT 20", arguments: [key.accountId, key.threadId, options.now.addingTimeInterval(-14 * 86_400).timeIntervalSince1970])
                 guard let item = completed.first, let id = item.id else { continue }
-                let who = item.stateSource == "ai" ? "AI" : item.stateSource == "user" ? "you" : item.counterpartyName.isEmpty ? item.counterpartyEmail : item.counterpartyName
                 rows[i].ledger = CommitmentBrief(id: id, counterpartyEmail: item.counterpartyEmail, counterpartyName: item.counterpartyName,
                     sourceDate: item.resolvedAt ?? item.updatedAt, extraCount: completed.count - 1, surfaceAt: item.surfaceAt,
-                    deliverable: item.deliverable, completion: "Closed by \(who) · \(item.resolutionNote ?? "Reply received")")
+                    deliverable: item.deliverable, completion: item.completionText)
             }
         }
         return try executor.hits(rows: rows, found: found, resolve: resolveHits)

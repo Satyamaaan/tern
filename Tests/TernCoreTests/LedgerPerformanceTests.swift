@@ -32,6 +32,18 @@ struct LedgerPerformanceTests {
         #expect(count > 0)
         #expect(rebuildMs < 150)
         #expect(countsMs < 30)
+        let detailKeys = try database.reader.read { db in
+            try Row.fetchAll(db, sql: "SELECT DISTINCT accountId,threadId FROM commitment LIMIT 100").map { ThreadKey(accountId: $0[0], threadId: $0[1]) }
+        }
+        var timings: [Double] = []
+        for key in detailKeys {
+            let start = Date()
+            let detail = try MailStore(database).threadDetail(key)
+            timings.append(Date().timeIntervalSince(start) * 1000)
+            #expect(detail?.commitments.isEmpty == false)
+        }
+        print(String(format: "Ledger 50k threadDetail with commitments: %d reads, max %.2f ms, mean %.2f ms", timings.count, timings.max() ?? 0, timings.reduce(0,+) / Double(max(1, timings.count))))
+        #expect((timings.max() ?? 0) < 50)
         let plan = try database.reader.read { db in
             try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN SELECT accountId,threadId FROM commitment WHERE direction='waitingOn' AND state='open' AND surfaced=1").map { $0.description }.joined()
         }

@@ -285,7 +285,7 @@ public struct MailStore: Sendable {
             """, arguments: [key.accountId, key.threadId])
         let snooze = try Snooze.fetchOne(db, key: ["accountId": key.accountId, "threadId": key.threadId])
         let ledgerSettings = try LedgerSettings.load(db)
-        var commitments = ledgerSettings.enabled ? try Commitment.fetchAll(db, sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND (confidence=2 OR ?) AND (state='open' OR (state='done' AND updatedAt>=?)) ORDER BY sourceDate,id", arguments: [key.accountId, key.threadId, ledgerSettings.showMaybe, Date().addingTimeInterval(-14 * 86_400).timeIntervalSince1970]) : []
+        var commitments = ledgerSettings.enabled ? try Commitment.fetchAll(db, sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=? AND (confidence=2 OR ?) AND (state='open' OR (state='done' AND updatedAt>=?)) ORDER BY sourceDate,id LIMIT 100", arguments: [key.accountId, key.threadId, ledgerSettings.showMaybe, Date().addingTimeInterval(-14 * 86_400).timeIntervalSince1970]) : []
         for i in commitments.indices where commitments[i].sourceQuote.isEmpty {
             if let source = messages.first(where: { $0.id == commitments[i].sourceMessageId }) {
                 commitments[i].sourceQuote = String(MailText.stripQuoted(source.bodyText ?? source.snippet).prefix(700))

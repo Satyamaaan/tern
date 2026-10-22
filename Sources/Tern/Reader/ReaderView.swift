@@ -55,7 +55,7 @@ struct ReaderView: View {
     var body: some View {
         VStack(spacing: 0) {
             ReaderTopBar(model: model, position: position, onBack: onBack, panel: panel)
-            if let detail = model.detail, detail.commitments.contains(where: { $0.state == .open }) || (!(detail.commitments.isEmpty) && app?.searchText == "is:done") {
+            if model.stripVisible {
                 ReaderCommitmentStrip(model: model)
                     .readerColumn(panel: panel != nil)
                     .padding(.vertical, 8)
@@ -110,6 +110,7 @@ struct ReaderView: View {
             model.attach(services)
             if active { model.show(key, prefetch: prefetch) } else { model.suspend() }
         }
+        .onAppear { model.app = app }
         .onChange(of: prefetch) { if active { model.prefetch(prefetch) } }
         .onChange(of: colorScheme, initial: true) { model.setTheme(dark: colorScheme == .dark) }
         .onChange(of: panel != nil, initial: true) { model.setLayout(panel: panel != nil) }
