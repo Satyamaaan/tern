@@ -28,6 +28,7 @@ ICONS = [
     ("inbox", "InboxIcon"),
     ("needsReply", "MailReply01Icon"),
     ("waitingOn", "Clock01Icon"),
+    ("due", "CheckListIcon"),
     ("snoozed", "Clock01Icon"),
     ("starred", "StarIcon"),
     ("drafts", "PencilEdit02Icon"),

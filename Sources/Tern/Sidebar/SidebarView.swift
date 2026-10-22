@@ -35,7 +35,7 @@ struct SidebarView: View {
         row(.inbox, "Inbox", .inbox, count: counts.inboxUnread, countColor: Theme.text1)
         row(.needsReply, "Needs reply", .needsReply, count: counts.needsReply, countColor: Theme.ink, countWeight: .medium)
         if counts.ledgerEnabled {
-            row(.due, "Due", .calendar, count: counts.due, countColor: Theme.ink, countWeight: .medium)
+            row(.due, "Due", .due, count: counts.due, countColor: Theme.ink, countWeight: .medium)
         }
         row(.snoozed, "Snoozed", .snoozed, count: counts.snoozed)
         row(.starred, "Starred", .starred)
@@ -68,11 +68,7 @@ struct SidebarView: View {
             title: title, count: count > 0 ? count : nil, countColor: countColor, countWeight: countWeight,
             selected: model.kind == kind && !model.isSearching
         ) {
-            if kind == .due {
-                Image(systemName: "checklist").font(.system(size: 15)).frame(width: 16, height: 16)
-            } else {
-                IconView(icon: icon, size: 16)
-            }
+            IconView(icon: icon, size: 16)
         } action: {
             model.show(kind)
         }
