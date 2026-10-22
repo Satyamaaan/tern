@@ -36,6 +36,7 @@ struct SidebarView: View {
         if counts.waitingOn > 0 {
             row(.waitingOn, "Waiting on", .waitingOn, count: counts.waitingOn, countColor: Theme.ink, countWeight: .medium)
         }
+        row(.iOwe, "I owe", .needsReply, count: counts.iOwe, countColor: Theme.ink, countWeight: .medium)
         row(.snoozed, "Snoozed", .snoozed, count: counts.snoozed)
         row(.starred, "Starred", .starred)
         row(.drafts, "Drafts", .drafts, count: counts.drafts)

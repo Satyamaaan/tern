@@ -194,6 +194,7 @@ final class CommandRegistry {
         // Go
         let mailboxes: [(String, String, Mailbox.Kind, String, [String])] = [
             ("go.inbox", "Inbox", .inbox, "g i", []),
+            ("go.iOwe", "I Owe", .iOwe, "g o", ["promises", "commitments"]),
             ("go.waitingOn", "Waiting On", .waitingOn, "g w", ["follow up", "commitments"]),
             ("go.needsReply", "Needs Reply", .needsReply, "g r", ["waiting"]),
             ("go.snoozed", "Snoozed", .snoozed, "g h", []),

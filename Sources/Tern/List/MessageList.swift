@@ -276,7 +276,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         var result = RowModel(row: row, style: style)
         result.summaryHeadline = model.prefs.summaryHeadline
         if let ledger = row.ledger {
-            result.timeOverride = ledger.ageText()
+            result.timeOverride = ledger.timeText()
+            if ledger.hasHint { result.chips.append(RowChip(text: "Replied", icon: .reply, tint: .ink)) }
         }
         result.isSelected = model.isSelected(key)
         result.fillBelow = key == cursorFillKey
@@ -287,12 +288,12 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         result.hidesHairline = result.isSelected || result.isHovered || isFilled(index + 1)
         result.avatar = avatar(for: row)
         result.account = account(for: row)
-        if row.needsReply, model.kind != .needsReply {
+        if row.ledger == nil, row.needsReply, model.kind != .needsReply {
             result.chips.append(RowChip(text: "Needs reply", icon: .needsReply, tint: .ink))
         }
-        if let project = row.projectIds.lazy.compactMap({ self.model.project($0) }).first {
+        if row.ledger == nil, let project = row.projectIds.lazy.compactMap({ self.model.project($0) }).first {
             result.chips.append(RowChip(text: project.name, icon: Icon.project(project.icon), tint: .project(project.colorIndex)))
-        } else if let category = row.category, category.showsChip, !isQuiet(category) {
+        } else if row.ledger == nil, let category = row.category, category.showsChip, !isQuiet(category) {
             result.chips.append(RowChip(text: category.title, icon: Icon.category(category), tint: .category(category)))
         }
         if case .snoozed = model.kind, !model.isSearching, let until = row.snoozedUntil {

@@ -9,7 +9,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     case theme, density, dimRead, senderLogos, listHeadline
     case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
-    case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects
+    case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects, ledgerAI
     case shortcuts
     case updates, database, searchIndex, demoMail
 
@@ -22,7 +22,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .theme, .density, .dimRead, .senderLogos, .listHeadline: .appearance
         case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
-        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey: .ai
+        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey, .ledgerAI: .ai
         case .shortcuts: .shortcuts
         case .updates, .database, .searchIndex, .demoMail: .advanced
         }
@@ -71,6 +71,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .aiSorting: "ai sorting classify triage progress status paused"
         case .aiModel: "ai model"
         case .aiProjects: "suggest projects ai"
+        case .ledgerAI: "find promises requests commitments mail ledger owe waiting uncertain maybe"
         case .shortcuts: "shortcuts keys"
         case .updates: "update version automatically check"
         case .database: "database finder"
@@ -87,6 +88,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         // The always-load list only matters while images wait for a click.
         case .remoteImages: model.prefs.imagesInMail == .ask
         case .demoMail: model.isFake
+        case .ledgerAI: model.services.ai != nil
         case .aiSorting: model.services.aiSorting?.isShown ?? false
         default: true
         }
@@ -137,6 +139,7 @@ struct SettingsItemView: View {
         case .accounts: AccountsItem(state: state)
         case .googleClient: GoogleClientSection(startEditing: state.editsGoogleClient).padding(.top, 16)
         case .ledgerTracking: LedgerTrackingItem()
+        case .ledgerAI: LedgerAIItem()
         case .markRead: MarkReadItem()
         case .afterTriage: AfterTriageItem()
         case .imagesInMail: ImagesInMailItem()

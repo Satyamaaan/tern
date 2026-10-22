@@ -207,7 +207,7 @@ private struct RowPainter {
         let senderWidth = min(max(column.width * 0.2, 160), 220)
         drawSender(in: CGRect(x: senderX, y: line.minY, width: senderWidth, height: line.height))
         let dotX = senderX + senderWidth + 2
-        if unread { drawDot(centerX: dotX + 3, centerY: line.midY) }
+        if unread || model.row.ledger?.isOverdue() == true { drawDot(centerX: dotX + 3, centerY: line.midY) }
 
         let subjectX = dotX + 14
         let trailing = drawTrailing(in: line, chips: model.chips.count, minimumX: subjectX + 200)
@@ -224,7 +224,7 @@ private struct RowPainter {
 
         let trailing = drawTrailing(in: line1, chips: min(model.chips.count, 1), minimumX: textX + 120)
         let end = drawSender(in: CGRect(x: textX, y: line1.minY, width: max(0, trailing - 22 - textX), height: line1.height))
-        if unread { drawDot(centerX: end + 9, centerY: line1.midY) }
+        if unread || model.row.ledger?.isOverdue() == true { drawDot(centerX: end + 9, centerY: line1.midY) }
         drawSubjectAndPreview(in: line2)
     }
 
@@ -326,6 +326,15 @@ private struct RowPainter {
         guard rect.width > 20 else { return }
         let subject = thread.subject.isEmpty ? "(no subject)" : thread.subject
         let subjectAttrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, unread ? .medium : .regular), .foregroundColor: primary]
+        if let deliverable = model.row.ledger?.deliverable {
+            let attrs: [NSAttributedString.Key: Any] = [.font: Theme.ui(13, .medium), .foregroundColor: primary]
+            let width = min(Self.width(deliverable, attrs), rect.width * 0.7)
+            Self.drawText(deliverable, attrs, in: CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height))
+            let x = rect.minX + width + 8
+            let secondary: [NSAttributedString.Key: Any] = [.font: Theme.ui(13), .foregroundColor: quiet]
+            Self.drawText(subject, secondary, in: CGRect(x: x, y: rect.minY, width: max(0, rect.maxX - x), height: rect.height))
+            return
+        }
         if model.highlight == nil, model.summaryHeadline, let summary = model.row.summary, !summary.isEmpty {
             Icon.sparkles.draw(in: CGRect(x: rect.minX, y: rect.midY - 6, width: 12, height: 12), color: quiet)
             let x = rect.minX + 17
