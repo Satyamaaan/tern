@@ -52,7 +52,7 @@ public enum InboxTab: String, CaseIterable, Identifiable, Codable, Sendable, Dat
 
     /// SQL for an inbox row being in this tab, given its `thread_label.gmailTab` and `thread_ai.category`
     /// columns. Social and Forums have no fallback, so theirs reads the tab index alone.
-    func condition(gmailTab: String, category: String) -> (sql: String, arguments: StatementArguments) {
+    public func condition(gmailTab: String, category: String) -> (sql: String, arguments: StatementArguments) {
         let fallback = fallbackCategories.map(\.rawValue)
         var alternatives: [String] = []
         if !fallback.isEmpty { alternatives.append("\(category) IN (\(databaseQuestionMarks(count: fallback.count)))") }

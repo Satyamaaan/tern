@@ -16,6 +16,7 @@ enum Schema {
         migrator.registerMigration("archive-1", migrate: ArchiveSchema.migrate)
         migrator.registerMigration("perf-1", migrate: SearchTriggerSchema.migrate)
         migrator.registerMigration("ledger-1", migrate: LedgerSchema.migrate)
+        migrator.registerMigration("summaries-1", migrate: SummaryStore.migrate)
     }
 
     private static func v1Core(_ db: Database) throws {

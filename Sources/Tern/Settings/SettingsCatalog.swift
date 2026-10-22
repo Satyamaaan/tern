@@ -6,10 +6,10 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     case accounts, googleClient
     case ledgerTracking
     case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
-    case theme, density, dimRead, senderLogos, listHeadline
+    case theme, density, dimRead, senderLogos
     case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
     case notifications, notifyImportant
-    case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects, ledgerAI
+    case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects, ledgerAI, primarySummaries
     case shortcuts
     case updates, database, searchIndex, demoMail
 
@@ -19,10 +19,10 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         switch self {
         case .accounts, .googleClient: .accounts
         case .ledgerTracking, .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
-        case .theme, .density, .dimRead, .senderLogos, .listHeadline: .appearance
+        case .theme, .density, .dimRead, .senderLogos: .appearance
         case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
         case .notifications, .notifyImportant: .notifications
-        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey, .ledgerAI: .ai
+        case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey, .ledgerAI, .primarySummaries: .ai
         case .shortcuts: .shortcuts
         case .updates, .database, .searchIndex, .demoMail: .advanced
         }
@@ -67,10 +67,10 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .aiAbout: "ai privacy provider"
         case .aiProvider: "ai provider groq claude code codex"
         case .groqKey: "groq api key secure credential remove replace"
-        case .listHeadline: "list headline ai summary subject"
         case .aiSorting: "ai sorting classify triage progress status paused"
         case .aiModel: "ai model"
         case .aiProjects: "suggest projects ai"
+        case .primarySummaries: "Summarise Primary mail automatically summaries background inbox"
         case .ledgerAI: "find promises requests commitments mail ledger owe waiting uncertain maybe"
         case .shortcuts: "shortcuts keys"
         case .updates: "update version automatically check"
@@ -88,7 +88,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         // The always-load list only matters while images wait for a click.
         case .remoteImages: model.prefs.imagesInMail == .ask
         case .demoMail: model.isFake
-        case .ledgerAI: model.services.ai != nil
+        case .ledgerAI, .primarySummaries: model.services.ai != nil
         case .aiSorting: model.services.aiSorting?.isShown ?? false
         default: true
         }
@@ -140,6 +140,7 @@ struct SettingsItemView: View {
         case .googleClient: GoogleClientSection(startEditing: state.editsGoogleClient).padding(.top, 16)
         case .ledgerTracking: LedgerTrackingItem()
         case .ledgerAI: LedgerAIItem()
+        case .primarySummaries: PrimarySummariesItem()
         case .markRead: MarkReadItem()
         case .afterTriage: AfterTriageItem()
         case .imagesInMail: ImagesInMailItem()
@@ -148,7 +149,6 @@ struct SettingsItemView: View {
         case .signatures: SignaturesItem(state: state)
         case .sendFrom: SendFromItem(state: state)
         case .groqKey: GroqKeyItem(state: state)
-        case .listHeadline: ListHeadlineItem()
         case .theme: ThemeItem()
         case .density: DensityItem()
         case .dimRead: DimReadItem()

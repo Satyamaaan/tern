@@ -9,9 +9,8 @@ public actor MailAssistant {
     public let providers: AIProviders
     private let now: @Sendable () -> Date
 
-    private var summaries: [ThreadKey: (messageCount: Int, bullets: [String])] = [:]
-    private var summaryOrder: [ThreadKey] = []
-    private let summaryCacheSize = 200
+    private var userRequests = 0
+    public var isBusy: Bool { userRequests > 0 }
 
     public init(database: AppDatabase, providers: AIProviders = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
         self.database = database
@@ -19,22 +18,35 @@ public actor MailAssistant {
         self.now = now
     }
 
-    /// Two to four bullets for a long thread. Cached in memory until the thread grows.
-    public func summarize(thread key: ThreadKey) async throws -> [String] {
-        // A cached summary is checked against the thread's count before any body is read.
-        if let cached = summaries[key],
-           try await database.reader.read({ db in try PromptData.messageCount(db, key: key) }) == cached.messageCount {
-            return cached.bullets
-        }
+    /// Two to four bullets, saved locally until the conversation changes.
+    public func summarize(thread key: ThreadKey, background: Bool = false) async throws -> [String] {
+        try Task.checkCancellation()
+        let settings = try await database.reader.read { try AISettings.read($0) }
+        guard await providers.isEnabled(settings) else { throw AIError.disabled }
+        if !background { userRequests += 1 }
+        defer { if !background { userRequests -= 1 } }
+        if let saved = try await database.reader.read({ db in
+            try String.fetchOne(db, sql: """
+                SELECT sm.bullets FROM thread_summary sm JOIN thread t ON t.accountId=sm.accountId AND t.id=sm.threadId
+                WHERE sm.accountId=? AND sm.threadId=? AND sm.messageCount=t.messageCount AND sm.lastDate=t.lastDate
+                """, arguments: [key.accountId, key.threadId])
+        }), let bullets = try? JSONDecoder().decode([String].self, from: Data(saved.utf8)) { return bullets }
+
         let thread = try await load(key, messages: 12, characters: 1_200)
-        if let cached = summaries[key], cached.messageCount == thread.messageCount { return cached.bullets }
-        let object = try await ask(Prompts.summary(thread))
+        var request = Prompts.summary(thread)
+        request.isBackground = background
+        let object = try await ask(request)
         let bullets = (object["bullets"] as? [Any] ?? []).compactMap(Loose.string)
             .map { MailText.compact($0.trimmingCharacters(in: CharacterSet(charactersIn: " -•*")), limit: 140) }
             .filter { !$0.isEmpty }
             .prefix(4)
         guard !bullets.isEmpty else { throw AIError.invalidOutput("The summary was empty.") }
-        remember(Array(bullets), for: key, messageCount: thread.messageCount)
+        try Task.checkCancellation()
+        try await database.writer.write { db in
+            guard try AISettings.read(db) == settings else { throw CancellationError() }
+            if background, try Setting.fetchOne(db, key: "ai.autoPrimarySummaries")?.value == "false" { throw CancellationError() }
+            try SummaryStore.save(db, key: key, messageCount: thread.messageCount, lastDate: thread.lastDate, bullets: Array(bullets))
+        }
         return Array(bullets)
     }
 
@@ -102,18 +114,11 @@ public actor MailAssistant {
         var request = request
         request.model = settings.model(for: provider)
         for _ in 1...2 {
+            try Task.checkCancellation()
             let answer = try await provider.complete(request)
             if let object = ModelJSON.parse(answer) as? [String: Any] { return object }
         }
         throw AIError.invalidOutput("The answer couldn't be read.")
-    }
-
-    private func remember(_ bullets: [String], for key: ThreadKey, messageCount: Int) {
-        if summaries[key] == nil { summaryOrder.append(key) }
-        summaries[key] = (messageCount, bullets)
-        while summaryOrder.count > summaryCacheSize {
-            summaries[summaryOrder.removeFirst()] = nil
-        }
     }
 
     static func words(_ text: String, limit: Int) -> String {

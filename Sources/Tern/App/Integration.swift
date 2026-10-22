@@ -15,6 +15,7 @@ final class Integration {
     let assistant: MailAssistant
     let triage: TriageQueue
     let ledgerQueue: LedgerQueue
+    let summaryQueue: PrimarySummaryQueue
     private var google: GoogleAccounts? { didSet { googleBox.set(google) } }
     private var aiSettingsTask: Task<Void, Never>?
     private var effectiveAIState: String?
@@ -37,6 +38,11 @@ final class Integration {
         assistant = MailAssistant(database: database, providers: providers)
         let triage = TriageQueue(database: database, providers: providers)
         self.triage = triage
+        summaryQueue = PrimarySummaryQueue(database: database, assistant: assistant, providers: providers, idle: {
+            let state = await triage.currentStatus.state
+            if case .working = state { return false }
+            return true
+        })
         ledgerQueue = LedgerQueue(database: database, providers: providers, triageIdle: {
             let state = await triage.currentStatus.state
             if case .working = state { return false }
@@ -280,8 +286,9 @@ final class Integration {
 
     private func wireAI() {
         let assistant = self.assistant
+        let summaries = self.summaryQueue
         let actions = AIActions(
-            summarize: { key in try await assistant.summarize(thread: key) },
+            summarize: { key in await summaries.yieldToForeground(); return try await assistant.summarize(thread: key) },
             suggestReplies: { key in try await assistant.suggestReplies(thread: key) },
             draftReply: { key, instruction in try await assistant.draftReply(thread: key, instruction: instruction) },
             naturalLanguageQuery: { text in try await assistant.naturalLanguageToQuery(text) })
@@ -323,13 +330,14 @@ final class Integration {
         Task { [weak self] in
             for await status in await triage.statusUpdates() {
                 guard let self else { return }
-                if case .working = status.state { await ledgerQueue.yieldToTriage() }
+                if case .working = status.state { await ledgerQueue.yieldToTriage(); await self.summaryQueue.yieldToForeground() }
                 if case .idle = status.state { await ledgerQueue.poke() }
                 let sorting = AISorting(status: status)
                 if self.services.aiSorting != sorting { self.services.aiSorting = sorting }
             }
         }
-        Task.detached(priority: .utility) { await triage.start(); await ledgerQueue.start() }
+        let summaryQueue = self.summaryQueue
+        Task.detached(priority: .utility) { await triage.start(); await ledgerQueue.start(); await summaryQueue.start() }
     }
 
     // MARK: Projects
@@ -365,7 +373,8 @@ final class Integration {
     func stop() {
         let triage = self.triage
         let ledgerQueue = self.ledgerQueue
-        Task { await triage.stop(); await ledgerQueue.stop() }
+        let summaryQueue = self.summaryQueue
+        Task { await triage.stop(); await ledgerQueue.stop(); await summaryQueue.stop() }
     }
 
     /// Quitting: lets sync put in-flight work back in its queue, for at most `timeout` seconds.

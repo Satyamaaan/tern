@@ -148,13 +148,14 @@ public struct MailStore: Sendable {
 
     static let rowColumns = """
         t.*, ai.category AS aiCategory, ai.needsReply AS aiNeedsReply, ai.priority AS aiPriority,
-        ai.summary AS aiSummary, s.until AS snoozedUntil,
+        COALESCE(sm.line, ai.summary) AS aiSummary, s.until AS snoozedUntil,
         (SELECT group_concat(tp.projectId, ',') FROM thread_project tp
           WHERE tp.accountId = t.accountId AND tp.threadId = t.id) AS projectIds
         """
 
     static let rowJoins = """
         LEFT JOIN thread_ai ai ON ai.accountId = t.accountId AND ai.threadId = t.id
+        LEFT JOIN thread_summary sm ON sm.accountId=t.accountId AND sm.threadId=t.id AND sm.messageCount=t.messageCount AND sm.lastDate=t.lastDate
         LEFT JOIN snooze s ON s.accountId = t.accountId AND s.threadId = t.id
         """
 
