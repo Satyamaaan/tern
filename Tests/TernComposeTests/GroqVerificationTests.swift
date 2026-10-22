@@ -1,5 +1,6 @@
 import AppKit
 import GRDB
+import Security
 import Testing
 import TernAI
 @testable import Tern
@@ -71,7 +72,16 @@ struct PrimarySummaryLiveVerification {
         try await database.writer.write { db in
             try AISettings(enabled: true, provider: "groq").write(db)
         }
-        let providers = AIProviders([GroqProvider(key: { GroqCredential.read() })])
+        let providers = AIProviders([GroqProvider(key: {
+            let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: GroqCredential.service, kSecAttrAccount as String: GroqCredential.account,
+                kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
+                kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+                  let data = result as? Data else { return nil }
+            return String(data: data, encoding: .utf8)
+        })])
         let assistant = MailAssistant(database: database, providers: providers)
         let queue = PrimarySummaryQueue(database: database, assistant: assistant, providers: providers, dailyLimit: 1)
         #expect(try await queue.processNext())

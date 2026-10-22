@@ -24,7 +24,10 @@ struct GroqKeyItem: View {
             }
             .disabled(saving)
         }
-        .task { hasKey = await Task.detached { GroqCredential.read() != nil }.value }
+        .task {
+            guard !LaunchOptions.current().isHeadless else { return }
+            hasKey = await Task.detached { GroqCredential.read() != nil }.value
+        }
     }
 
     private func save(_ value: String) {

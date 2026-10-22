@@ -7,6 +7,16 @@ extension Snapshotter {
     /// Targeted offscreen review against a disposable fake mailbox only.
     func realMailFixesShots(_ window: MainWindow, _ directory: URL) {
         guard model.isFake else { return }
+        let saved = (sidebar: model.prefs.sidebarOpen, pane: model.prefs.readingPane,
+                     split: model.prefs.splitInbox, section: model.prefs.settingsSection)
+        defer {
+            model.prefs.sidebarOpen = saved.sidebar
+            model.prefs.readingPane = saved.pane
+            model.prefs.splitInbox = saved.split
+            model.prefs.settingsSection = saved.section
+            UserDefaults.standard.synchronize()
+        }
+        model.prefs.splitInbox = true
         model.prefs.sidebarOpen = true
         model.prefs.readingPane = false
         try? model.store.database.writer.write { db in
@@ -25,7 +35,7 @@ extension Snapshotter {
         render(window, appearance: .darkAqua, to: directory.appendingPathComponent("owe-empty-dark.png"))
         model.showInboxTab(.primary)
         model.reloadList()
-        let rows = model.snapshot.order.prefix(10).compactMap { model.row($0) }
+        let rows = model.snapshot.order.prefix(1).compactMap { model.row($0) }
         try? model.store.database.writer.write { db in
             for row in rows {
                 try SummaryStore.save(db, key: row.id, messageCount: row.thread.messageCount,
