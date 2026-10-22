@@ -206,7 +206,7 @@ final class UpdateWindow {
         self.init(model: UpdateCardModel())
     }
 
-    var isVisible: Bool { panel?.isVisible ?? false }
+    var isVisible: Bool { panel?.isShown ?? false }
 
     /// Shows `phase`. `focus` when the user asked for it (see `CardPanel.present(takesFocus:)`).
     func show(_ phase: UpdatePhase, focus: Bool, primary: @escaping () -> Void = {}, secondary: @escaping () -> Void = {}) {

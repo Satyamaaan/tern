@@ -171,6 +171,11 @@ extension AppModel {
             return
         }
         pendingCursor = entry.threads.first
+        restoring = Set(entry.threads)
+        // A row that never comes back (the undo failed) mustn't slide in much later.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            MainActor.assumeIsolated { self?.restoring.subtract(entry.threads) }
+        }
         let store = self.store
         let change = entry.change
         writes.async {

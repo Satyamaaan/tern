@@ -30,6 +30,7 @@ extension AppModel {
         paletteReturn = nil
         palette = nil
         showsShortcuts = false
+        chordPending = nil
         chordHUD = nil
         markReadTimer?.invalidate()
         if searchFieldFocused { searchFieldFocused = false }

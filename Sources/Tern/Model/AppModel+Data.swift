@@ -134,10 +134,21 @@ extension AppModel {
         let rows = hidden.isEmpty ? input : input.filter { hidden[$0.id] == nil }
 
         let old = snapshot
+        var animation = animation
         snapshot = ListSnapshot(
             rows: rows,
             groupsByDate: isSearching || source.groupsByDate,
             footer: serverSearchFooter.map(ListItem.serverSearch))
+
+        // Rows an undo put back slide in, whichever update brings them (the undo's own or the observation's).
+        if !restoring.isEmpty {
+            let back = restoring.filter { snapshot.rows[$0] != nil && old.rows[$0] == nil }
+            if !back.isEmpty {
+                restoring.subtract(back)
+                if animation == .none { animation = .restore }
+            }
+        }
+        if animation == .collapse, snapshot.isEmpty { emptiedByTriage = true } else if emptiedByTriage, animation == .reset || !snapshot.isEmpty { emptiedByTriage = false }
 
         let stillChecked = checked.filter { snapshot.rows[$0] != nil }
         if stillChecked != checked { checked = stillChecked }

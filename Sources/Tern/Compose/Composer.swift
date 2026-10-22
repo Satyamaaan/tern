@@ -218,10 +218,17 @@ struct InlineComposerView: View {
 
 /// The inline card: a one-line recipient summary (expands to full fields), the body growing with its
 /// content up to a limit, then the bottom bar.
+///
+/// It rises out of the reply field it replaces: opacity, 98 % scale from the bottom and 6 pt, over 150 ms on
+/// the house curve (an 80 ms fade under Reduce Motion). Render-only, so the web view above takes its new
+/// height once; focus is in the card from the first frame. Closing, it sinks back the same way over 120 ms (`ReaderView`).
 struct InlineComposerCard: View {
     let model: ComposerModel
     static let minBody: CGFloat = 96
     static let maxBody: CGFloat = 380
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -252,6 +259,12 @@ struct InlineComposerCard: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
+        .opacity(appeared ? 1 : 0)
+        .scaleEffect(appeared || reduceMotion ? 1 : 0.98, anchor: .bottom)
+        .offset(y: appeared || reduceMotion ? 0 : 6)
+        .onAppear {
+            withAnimation(Motion.or(reduced: reduceMotion, Motion.ease(Motion.cardRise))) { appeared = true }
+        }
     }
 }
 

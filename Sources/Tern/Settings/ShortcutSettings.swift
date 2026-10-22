@@ -58,6 +58,7 @@ struct ShortcutRow: View {
     @Environment(AppModel.self) private var model
     let command: Command
     let state: SettingsState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
 
     var body: some View {
@@ -78,14 +79,14 @@ struct ShortcutRow: View {
                 let tools = hovering && recording == nil
                 if customized {
                     IconButton(icon: .undo, size: Theme.Control.small, iconSize: 14, help: resetHelp) { registry?.resetKeys(for: command.id) }
-                        .opacity(tools ? 1 : 0)
+                        .hoverReveal(tools)
                         .allowsHitTesting(tools)
                 }
                 if !locked, recording == nil {
                     IconButton(icon: .plus, size: Theme.Control.small, iconSize: 14, help: "Add a shortcut") {
                         state.startRecording(command.id, slot: nil)
                     }
-                    .opacity(tools ? 1 : 0)
+                    .hoverReveal(tools)
                     .allowsHitTesting(tools)
                 }
                 ForEach(Array(command.keys.enumerated()), id: \.offset) { slot, key in
@@ -108,6 +109,7 @@ struct ShortcutRow: View {
             if let recording {
                 RecorderHint(recording: recording, state: state)
                     .padding(.bottom, 10)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -4)))
             }
             Hairline()
         }
@@ -117,8 +119,11 @@ struct ShortcutRow: View {
                     .fill(Color(Theme.hover))
                     .padding(.horizontal, -10)
                     .padding(.bottom, 1)
+                    .transition(.opacity)
             }
         }
+        // Recording grows the row for its hint line (160 ms, house curve) and the fill fades with it.
+        .animation(Motion.or(reduced: reduceMotion, Motion.ease(0.16)), value: recording != nil)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
@@ -173,11 +178,21 @@ struct KeyCap: View {
 }
 
 /// The keycap while recording: "Type a shortcut", or the key just pressed when it can't be used.
+/// A key that can't be used shakes the cap (240 ms); with Reduce Motion its border flashes to full `ink` instead.
 private struct RecorderCap: View {
     let recording: ShortcutRecording?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var rejections = 0
+
+    private struct Rejection {
+        var x: CGFloat = 0
+        var flash: Double = 0
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+        let travel: CGFloat = reduceMotion ? 0 : 1
+        let flash: Double = reduceMotion ? 1 : 0
         Text(pressed ?? "Type a shortcut")
             .font(pressed == nil ? .ui(11.5, .medium) : .numeric(11.5, .medium))
             .foregroundStyle(Color(pressed == nil ? Theme.text2 : Theme.text1))
@@ -185,6 +200,23 @@ private struct RecorderCap: View {
             .frame(minWidth: 22, minHeight: 22)
             .background(shape.fill(Color(Theme.bg)))
             .overlay(shape.strokeBorder(Color(Theme.ink).opacity(0.55), lineWidth: 1.5))
+            .keyframeAnimator(initialValue: Rejection(), trigger: rejections) { content, value in
+                content
+                    .overlay(shape.strokeBorder(Color(Theme.ink).opacity(value.flash), lineWidth: 1.5))
+                    .offset(x: value.x)
+            } keyframes: { _ in
+                KeyframeTrack(\.x) {
+                    LinearKeyframe(-4 * travel, duration: 0.06)
+                    LinearKeyframe(4 * travel, duration: 0.06)
+                    LinearKeyframe(-2 * travel, duration: 0.06)
+                    LinearKeyframe(0, duration: 0.06)
+                }
+                KeyframeTrack(\.flash) {
+                    LinearKeyframe(flash, duration: 0.08)
+                    LinearKeyframe(0, duration: 0.08)
+                }
+            }
+            .onChange(of: recording?.problem) { _, problem in if problem != nil { rejections += 1 } }
     }
 
     private var pressed: String? {

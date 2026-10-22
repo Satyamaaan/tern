@@ -245,7 +245,7 @@ extension SelfCheck {
         wait(0.2)
         check("mail keys do nothing while settings is open",
               model.cursor == cursor && model.kind == kind && model.snapshot.order.count == rows && model.toasts.count == toasts
-                && model.checked.isEmpty && !model.searchShown && model.chordHUD == nil)
+                && model.checked.isEmpty && !model.searchShown && model.chordPending == nil && model.chordHUD == nil)
         check("r opens no composer while settings is open", NSApp.windows.filter { $0 is ComposerWindow }.count == composers)
         check("mail commands are off in the menus while settings is open",
               registry["archive"].map(registry.canRun) == false && registry["appearance.toggle"].map(registry.canRun) == true)

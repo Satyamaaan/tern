@@ -30,6 +30,12 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var cursorFillKey: ThreadKey?
     /// The next placement of `cursorFill` comes from a cursor move, so it may slide.
     private var cursorMoved = false
+    /// The cursor is moving because of a click: the fill goes straight under the pointer.
+    var clickPlacing = false
+    /// Rows are sliding in an animation group: the fill moves with them, in the same group.
+    private var fillFollowsRows = false
+    /// The pointer just came into the list, so the hover bar fades in instead of popping.
+    var pointerEntered = true
     /// The rows the hover bar acts on while it shows (the self-check reads it).
     var hoveredKeys: [ThreadKey] { hoverBar.isHidden ? [] : hoverBar.rootView.keys }
     private var lastWidth: CGFloat = 0
@@ -92,6 +98,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     // MARK: ListPresenting
 
+    /// Crossfades from the list on screen to the next one (`Motion.listSwap`; Reduce Motion's 80 ms).
+    private func crossfade() {
+        scrollView.wantsLayer = true
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.08 : Motion.listSwap
+        fade.timingFunction = Motion.timing
+        scrollView.layer?.add(fade, forKey: "listSwap")
+    }
+
     func listDidChange(_ snapshot: ListSnapshot, animation: ListAnimation) {
         defer { reportRowsInView() }
         // Clear hover while the old snapshot still matches the rows on screen.
@@ -101,6 +117,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         self.snapshot = snapshot
 
         if animation == .reset || old.isEmpty {
+            // A different list crossfades in quickly; not at launch or per search keystroke.
+            if !old.isEmpty, !model.isSearching { crossfade() }
             items = new
             resetting = true
             table.reloadData()
@@ -112,31 +130,53 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let diff = new.difference(from: old)
         guard !diff.isEmpty else {
             refreshVisibleRows()
+            updateHoverFromMouse()
             return
         }
         if diff.count > 80 {
             items = new
             table.reloadData()
             refreshVisibleRows()
+            updateHoverFromMouse()
             return
         }
-        items = new
         let removals = diff.removals.map(Self.offset).sorted(by: >)
         let insertions = diff.insertions.map(Self.offset).sorted()
-        let collapse = animation == .collapse && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let collapse = animation == .collapse && !reduceMotion
+        let arrive = animation == .restore || (animation == .none && arrivesAtTop(insertions, removals: removals))
+        items = new
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = collapse ? 0.16 : 0
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = collapse || arrive ? (arrive && reduceMotion ? 0.08 : Motion.list) : 0
+            context.timingFunction = Motion.timing
             table.beginUpdates()
             for offset in removals {
                 table.removeRows(at: IndexSet(integer: offset), withAnimation: collapse ? [.slideUp, .effectFade] : [])
             }
+            let entrance: NSTableView.AnimationOptions = !arrive ? [] : reduceMotion ? [.effectFade] : [.effectFade, .slideDown]
             for offset in insertions {
-                table.insertRows(at: IndexSet(integer: offset), withAnimation: [])
+                table.insertRows(at: IndexSet(integer: offset), withAnimation: entrance)
             }
             table.endUpdates()
+            // The cursor fill moves with the arriving rows, in this group, so it never sits off its row.
+            if arrive {
+                fillFollowsRows = !reduceMotion
+                refreshVisibleRows()
+                fillFollowsRows = false
+            }
         }
-        refreshVisibleRows()
+        if !arrive { refreshVisibleRows() }
+        // The row that slid under a still pointer gets its hover bar at once: triage by mouse goes on.
+        updateHoverFromMouse()
+    }
+
+    /// New mail at the top of a list scrolled to the top: a few insertions, all in view. Only then do they
+    /// slide in; anything else (paging, search refreshes, mail arriving out of sight) appears at once.
+    private func arrivesAtTop(_ insertions: [Int], removals: [Int]) -> Bool {
+        guard removals.isEmpty, !insertions.isEmpty, insertions.count <= 3, !model.isSearching,
+              scrollView.contentView.bounds.minY < Self.headerHeight else { return false }
+        let visible = table.rows(in: scrollView.contentView.bounds)
+        return insertions.allSatisfy { visible.contains($0) }
     }
 
     private static func offset(_ change: CollectionDifference<ListItem>.Change) -> Int {
@@ -153,10 +193,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     var window: NSWindow? { table.window }
 
     func selectionDidChange(scrollTo key: ThreadKey?) {
-        cursorMoved = true
+        let scrollY = key.flatMap { snapshot.itemIndex[$0] }.flatMap(revealOffset)
+        // The fill slides only within a still list, one key at a time. When the list scrolls, or a held key
+        // repeats, it stays on its row and the rows move under it.
+        cursorMoved = scrollY == nil && NSApp.currentEvent?.isARepeatKey != true
         refreshVisibleRows()
         cursorMoved = false
-        if let key, let index = snapshot.itemIndex[key] { reveal(index) }
+        if let scrollY {
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
         reportRowsInView()
     }
 
@@ -176,16 +222,16 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         }
     }
 
-    /// Scrolls just enough to show the row below the sticky header, without animation (j/k speed).
-    private func reveal(_ index: Int) {
+    /// Where to scroll, without animation (j/k speed), to just show the row below the sticky header; nil
+    /// when it is already in view.
+    private func revealOffset(_ index: Int) -> CGFloat? {
         let rect = table.rect(ofRow: index)
         let visible = scrollView.contentView.bounds
         let top = visible.minY + Self.headerHeight
         let bottom = visible.maxY - scrollView.contentInsets.bottom
-        var y = visible.minY
-        if rect.minY < top { y = rect.minY - Self.headerHeight } else if rect.maxY > bottom { y = rect.maxY - visible.height + scrollView.contentInsets.bottom } else { return }
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        if rect.minY < top { return max(0, rect.minY - Self.headerHeight) }
+        if rect.maxY > bottom { return max(0, rect.maxY - visible.height + scrollView.contentInsets.bottom) }
+        return nil
     }
 
     /// Re-applies models to every row view on screen (selection, hover, content).
@@ -373,12 +419,17 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         if table.subviews.first !== cursorFill { table.addSubview(cursorFill, positioned: .below, relativeTo: nil) }
 
         let from = cursorFillKey.flatMap { snapshot.itemIndex[$0] }
-        let slides = cursorMoved && !cursorFill.isHidden && key != cursorFillKey && from.map { abs($0 - index) <= 12 } == true
+        let slides = cursorMoved && !clickPlacing && !cursorFill.isHidden && key != cursorFillKey && from.map { abs($0 - index) <= 12 } == true
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let follows = fillFollowsRows && !cursorFill.isHidden && (key == cursorFillKey || from.map { abs($0 - index) <= 12 } == true)
         cursorFillKey = key
         cursorFill.isHidden = false
         guard cursorFill.frame != frame else { return }
-        if slides {
+        if follows {
+            // Inside the rows' animation group: same duration and curve as the rows.
+            NSAnimationContext.current.allowsImplicitAnimation = true
+            cursorFill.animator().frame = frame
+        } else if slides {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = CursorFillView.slideDuration
                 context.timingFunction = CursorFillView.slideTiming
@@ -496,7 +547,24 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         hoverBar.frame = CGRect(x: column.maxX - 4 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
         // Row views are added after the bar; keep the bar on top of them.
         if table.subviews.last !== hoverBar { table.addSubview(hoverBar, positioned: .above, relativeTo: nil) }
+        // Fades in only as the pointer comes into the list; from row to row, and after the list changes, it is
+        // simply there (a fade would flicker as the pointer sweeps).
+        // Offscreen renders (click-through windows) have no pointer and draw the bar as it ends up.
+        let realPointer = table.window.map { $0.isVisible && !$0.ignoresMouseEvents } ?? false
+        let fades = hoverBar.isHidden && pointerEntered && realPointer
+        pointerEntered = false
         hoverBar.isHidden = false
+        if fades {
+            hoverBar.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Motion.hover
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                hoverBar.animator().alphaValue = 1
+            }
+        } else if hoverBar.alphaValue != 1 {
+            hoverBar.layer?.removeAllAnimations()
+            hoverBar.alphaValue = 1
+        }
     }
 
     /// A row action applies to the whole selection when the row is part of it.
@@ -563,12 +631,18 @@ final class MessageTableView: NSTableView {
                 return
             }
             if flags.contains(.command) || flags.contains(.shift) {
+                controller.clickPlacing = true
                 controller.model.click(key, command: flags.contains(.command), shift: flags.contains(.shift))
+                controller.clickPlacing = false
                 return
             }
             // A plain click opens the row on mouse-up, so a drag can still carry the whole selection
             // and dragging a row doesn't open it.
-            if !controller.model.checked.contains(key) { controller.model.select(key) }
+            if !controller.model.checked.contains(key) {
+                controller.clickPlacing = true
+                controller.model.select(key)
+                controller.clickPlacing = false
+            }
             pendingClick = key
         }
     }
@@ -596,7 +670,11 @@ final class MessageTableView: NSTableView {
         mouseDownPoint = nil
         guard let key = pendingClick, !isDragging else { return }
         pendingClick = nil
-        MainActor.assumeIsolated { controller?.model.click(key, command: false, shift: false) }
+        MainActor.assumeIsolated {
+            controller?.clickPlacing = true
+            controller?.model.click(key, command: false, shift: false)
+            controller?.clickPlacing = false
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -614,8 +692,15 @@ final class MessageTableView: NSTableView {
         MainActor.assumeIsolated { controller?.updateHoverFromMouse() }
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        MainActor.assumeIsolated { controller?.pointerEntered = true }
+    }
+
     override func mouseExited(with event: NSEvent) {
-        MainActor.assumeIsolated { controller?.setHovered(nil) }
+        MainActor.assumeIsolated {
+            controller?.setHovered(nil)
+            controller?.pointerEntered = true
+        }
     }
 }
 
@@ -651,4 +736,9 @@ enum DragBadge {
         image.unlockFocus()
         return image
     }
+}
+
+private extension NSEvent {
+    /// A key held down and repeating.
+    var isARepeatKey: Bool { type == .keyDown && isARepeat }
 }
