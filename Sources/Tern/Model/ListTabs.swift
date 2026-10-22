@@ -31,6 +31,7 @@ enum ListTab: Hashable, Identifiable {
     /// How a pinned tab is stored in preferences; nil for tabs that can't be pinned.
     var pinKey: String? {
         switch self {
+        case .mailbox(.due): "mailbox:due"
         case .project, .label, .search: id
         default: nil
         }
@@ -40,6 +41,7 @@ enum ListTab: Hashable, Identifiable {
         let parts = pinKey.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2, !parts[1].isEmpty else { return nil }
         switch parts[0] {
+        case "mailbox" where ["due", "waitingOn", "iOwe"].contains(parts[1]): self = .mailbox(.due)
         case "project": self = .project(parts[1])
         case "label": self = .label(parts[1])
         case "search": self = .search(parts[1])

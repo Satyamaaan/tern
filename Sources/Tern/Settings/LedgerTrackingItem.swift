@@ -11,7 +11,7 @@ struct LedgerTrackingItem: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SettingsRow(title: "Waiting on", detail: error ?? "Track requests you send. Decisions stay on this Mac.") {
+            SettingsRow(title: "Due", detail: error ?? "Track promises and requests. Decisions stay on this Mac.") {
                 InkToggle(isOn: $enabled)
             }
             SettingsRow(title: "Show after", detail: "Time since your original request, even after a nudge.") {

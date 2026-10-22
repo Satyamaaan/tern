@@ -16,7 +16,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case category(MailCategory)
         /// Inbox threads the classifier flagged as waiting on your reply.
         case needsReply
-        case waitingOn, iOwe
+        case due, waitingOn, iOwe
     }
 
     public var kind: Kind
@@ -40,7 +40,7 @@ public struct Mailbox: Hashable, Codable, Sendable {
         case .spam: SystemLabel.spam
         case .trash: SystemLabel.trash
         case .label(let id): id
-        case .snoozed, .allMail, .archive, .project, .waitingOn, .iOwe: nil
+        case .snoozed, .allMail, .archive, .project, .due, .waitingOn, .iOwe: nil
         }
     }
 }
@@ -184,6 +184,11 @@ public struct MailStore: Sendable {
         var sql: String
 
         switch mailbox.kind {
+        case .due:
+            // Each section has its own bounded page so a large first section cannot starve the second.
+            let owed = try fetchLedgerRows(db, in: Mailbox(.iOwe, accountId: mailbox.accountId), limit: limit)
+            let waiting = try fetchLedgerRows(db, in: Mailbox(.waitingOn, accountId: mailbox.accountId), limit: limit)
+            return owed + waiting
         case .waitingOn, .iOwe:
             return try fetchLedgerRows(db, in: mailbox, limit: limit)
         case .project(let projectId):

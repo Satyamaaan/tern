@@ -166,9 +166,15 @@ final class Preferences {
         readingPane = defaults.bool(forKey: "readingPane")
         readerOverlay = ReaderOverlay(rawValue: defaults.string(forKey: "readerOverlay") ?? "") ?? .full
         listWidth = defaults.object(forKey: "listWidth") as? Double ?? 452
-        pinnedTabs = defaults.stringArray(forKey: "pinnedTabs") ?? []
+        var pins: [String] = []
+        for key in defaults.stringArray(forKey: "pinnedTabs") ?? [] {
+            let migrated = ["mailbox:waitingOn", "mailbox:iOwe"].contains(key) ? "mailbox:due" : key
+            if !pins.contains(migrated) { pins.append(migrated) }
+        }
+        pinnedTabs = pins
+        defaults.set(pins, forKey: "pinnedTabs")
         moreExpanded = defaults.bool(forKey: "moreExpanded")
-        recentCommands = defaults.stringArray(forKey: "recentCommands") ?? []
+        recentCommands = Array(NSOrderedSet(array: (defaults.stringArray(forKey: "recentCommands") ?? []).map { ["go.iOwe", "go.waitingOn"].contains($0) ? "go.due" : $0 })) as? [String] ?? []
         afterTriage = AfterTriage(rawValue: defaults.string(forKey: "afterTriage") ?? "") ?? .next
         markRead = MarkReadMode(rawValue: defaults.string(forKey: "markRead") ?? "") ?? .afterDelay
         imagesInMail = ImagesInMail(rawValue: defaults.string(forKey: "imagesInMail") ?? "") ?? .automatic

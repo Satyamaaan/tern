@@ -25,6 +25,8 @@ public struct ScopeCounts: Hashable, Sendable {
     public var ledgerEnabled = true
     public var waitingOn = 0
     public var iOwe = 0
+    /// Open visible rows across both directions, matching the two sections in Due.
+    public var due: Int { waitingOn + iOwe }
     public var snoozed = 0
     public var drafts = 0
     /// Unread inbox threads per project id, across accounts.

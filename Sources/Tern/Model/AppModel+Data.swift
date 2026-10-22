@@ -113,7 +113,10 @@ extension AppModel {
             guard let self, self.source == source else { return }
             let first = !self.listLoaded
             self.rawRows = rows
-            if self.hasMore != (rows.count >= limit) { self.hasMore = rows.count >= limit }
+            let more = source.mailbox.kind == .due
+                ? [LedgerDirection.iOwe, .waitingOn].contains { direction in rows.filter { $0.ledger?.direction == direction }.count >= limit }
+                : rows.count >= limit
+            if self.hasMore != more { self.hasMore = more }
             if first { self.listLoaded = true }
             if !self.isSearching { self.rebuildSnapshot(first && !keepingPlace ? .reset : .none, keepingPlace: first && keepingPlace) }
             if first, let done = self.onFirstRows { self.onFirstRows = nil; done() }
@@ -138,6 +141,7 @@ extension AppModel {
         snapshot = ListSnapshot(
             rows: rows,
             groupsByDate: isSearching || source.groupsByDate,
+            groupsByDirection: !isSearching && kind == .due,
             footer: serverSearchFooter.map(ListItem.serverSearch))
 
         // Rows an undo put back slide in, whichever update brings them (the undo's own or the observation's).

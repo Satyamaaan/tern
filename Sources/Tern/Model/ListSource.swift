@@ -28,7 +28,7 @@ struct ListSource: Hashable, Sendable {
 
     /// Lists sorted by something other than date get no date groups.
     var groupsByDate: Bool {
-        if [.snoozed, .waitingOn, .iOwe].contains(mailbox.kind) { return false }
+        if [.snoozed, .due, .waitingOn, .iOwe].contains(mailbox.kind) { return false }
         return true
     }
 
@@ -56,8 +56,9 @@ extension Mailbox.Kind {
         case .label: "Label"
         case .project: "Project"
         case .category(let category): category.title
-        case .waitingOn: "Waiting on"
-        case .iOwe: "I owe"
+        case .due: "Due"
+        case .waitingOn: "Due"
+        case .iOwe: "Due"
         case .needsReply: "Needs reply"
         }
     }
@@ -78,8 +79,8 @@ extension Mailbox.Kind {
         case .label: "No mail with this label."
         case .project: "No mail in this project yet."
         case .category: "Nothing in this tab."
-        case .waitingOn: "Nobody owes you a reply right now."
-        case .iOwe: "You owe nobody anything."
+        case .due, .waitingOn: "Things you owe and are waiting on will appear here."
+        case .iOwe: "Things you owe and are waiting on will appear here."
         case .needsReply: "No one is waiting on you."
         }
     }

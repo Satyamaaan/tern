@@ -45,7 +45,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         let words: String = switch self {
         case .accounts: "accounts gmail add remove sign in workspace name rename colour color personal work"
         case .googleClient: "google client oauth id secret cloud"
-        case .ledgerTracking: "follow up waiting reminder ledger commitments tracking days"
+        case .ledgerTracking: "due follow up waiting owe promises reminder ledger commitments tracking days"
         case .markRead: "mark as read unread open delay"
         case .afterTriage: "after archive delete trash snooze next previous auto advance"
         case .imagesInMail: "images in mail remote pictures logos load automatically ask first block privacy tracking pixels trackers"

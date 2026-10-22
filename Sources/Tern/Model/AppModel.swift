@@ -254,7 +254,8 @@ final class AppModel {
     }
 
     /// Opens a mailbox. The inbox opens on its landing tab (Primary with inbox tabs on), from wherever.
-    func show(_ kind: Mailbox.Kind) {
+    func show(_ destination: Mailbox.Kind) {
+        let kind: Mailbox.Kind = destination == .waitingOn || destination == .iOwe ? .due : destination
         if case .inbox = kind { return showInboxTab(landingTab) }
         if isSearching { endSearch(restoreFocus: false) }
         focus = .list

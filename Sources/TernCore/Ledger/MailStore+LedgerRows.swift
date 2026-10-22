@@ -15,7 +15,7 @@ extension MailStore {
         var arguments: StatementArguments = [mailbox.kind == .waitingOn ? "waitingOn" : "iOwe"]
         if let account = mailbox.accountId { arguments += [account] }
         arguments += [limit]
-        return try ThreadRow.fetchAll(db, sql: """
+        var rows = try ThreadRow.fetchAll(db, sql: """
             WITH ranked AS (
               SELECT *, row_number() OVER (PARTITION BY accountId,threadId ORDER BY hintAt IS NOT NULL,dueAt IS NULL,dueAt,sourceDate,id) AS rank,
                 count(*) OVER (PARTITION BY accountId,threadId)-1 AS extra
@@ -26,6 +26,8 @@ extension MailStore {
             FROM ranked c JOIN thread t ON t.accountId=c.accountId AND t.id=c.threadId \(rowJoins)
             WHERE c.rank=1 ORDER BY c.hintAt IS NOT NULL,c.dueAt IS NULL,c.dueAt,c.sourceDate,c.id LIMIT ?
             """, arguments: arguments)
+        for index in rows.indices { rows[index].ledger?.direction = mailbox.kind == .iOwe ? .iOwe : .waitingOn }
+        return rows
     }
 
     static func fetchLedgerCount(_ db: Database, accountId: String?, direction: LedgerDirection = .waitingOn) throws -> Int {

@@ -40,7 +40,7 @@ extension AppModel {
         }
     }
 
-    var inLedger: Bool { !isSearching && (kind == .waitingOn || kind == .iOwe) }
+    var inLedger: Bool { !isSearching && (kind == .due || kind == .waitingOn || kind == .iOwe) }
 
     var canChangeCommitments: Bool { hasOpenCommitments }
     var hasOpenCommitments: Bool {

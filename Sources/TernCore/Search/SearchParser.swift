@@ -227,6 +227,7 @@ enum SearchParser {
         case "is":
             switch lower {
             case "done": return .filter(.done)
+            case "due": return .or([.filter(.owe), .filter(.waiting)])
             case "owe": return .filter(.owe)
             case "waiting": return .filter(.waiting)
             case "unread": return .filter(.unread)
@@ -241,7 +242,7 @@ enum SearchParser {
             case "trash": return .filter(.folder(.trash))
             case "spam": return .filter(.folder(.spam))
             default:
-                return partial(lower, of: ["unread", "read", "starred", "important", "snoozed", "needsreply", "waiting", "owe", "done"]) ? nil : fallback()
+                return partial(lower, of: ["unread", "read", "starred", "important", "snoozed", "needsreply", "waiting", "owe", "done", "due"]) ? nil : fallback()
             }
         case "in":
             switch lower {
@@ -255,6 +256,7 @@ enum SearchParser {
             case "starred": return .filter(.starred)
             case "important": return .filter(.important)
             case "done": return .filter(.done)
+            case "due": return .or([.filter(.owe), .filter(.waiting)])
             case "owe": return .filter(.owe)
             case "waiting": return .filter(.waiting)
             case "unread": return .filter(.unread)

@@ -23,7 +23,14 @@ struct ShortcutOverrides: Equatable {
     /// checks the rest against its commands (`CommandRegistry.validated`), and again once the key bindings files
     /// are read (`CommandRegistry.loadKeyBindings`), and saves what is left.
     init(stored: [String: [String]]) {
-        for (id, strings) in stored {
+        var migrated = stored
+        if migrated["go.due"] == nil {
+            let old = [stored["go.iOwe"], stored["go.waitingOn"]].compactMap { $0 }
+            if !old.isEmpty { migrated["go.due"] = Array(Set(old.flatMap { $0 })).sorted() }
+        }
+        migrated["go.iOwe"] = nil
+        migrated["go.waitingOn"] = nil
+        for (id, strings) in migrated {
             let shortcuts = strings.compactMap(KeyShortcut.init(stored:))
             guard shortcuts.count == strings.count else { continue }
             let allowed = shortcuts.filter { ShortcutRules.reservation($0, for: id) == nil }

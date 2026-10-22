@@ -5,12 +5,13 @@ import TernCore
 enum ListItem: Hashable {
     /// A sticky date header, e.g. "Today".
     case header(String)
-    case thread(ThreadKey)
+    /// Commitment identity keeps a thread present in each direction without merging its table rows.
+    case thread(ThreadKey, Int64? = nil)
     /// The quiet last row of search results that asks Gmail for older mail, with its current text.
     case serverSearch(String)
 
     var threadKey: ThreadKey? {
-        if case .thread(let key) = self { return key }
+        if case .thread(let key, _) = self { return key }
         return nil
     }
 }
@@ -19,6 +20,8 @@ enum ListItem: Hashable {
 struct ListSnapshot {
     private(set) var items: [ListItem] = []
     private(set) var rows: [ThreadKey: ThreadRow] = [:]
+    // Selection and thread navigation stay thread-scoped; each displayed row retains its own commitment.
+    private var displayedRows: [Int: ThreadRow] = [:]
     /// Thread keys in display order.
     private(set) var order: [ThreadKey] = []
     private(set) var position: [ThreadKey: Int] = [:]
@@ -31,9 +34,16 @@ struct ListSnapshot {
 
     init() {}
 
-    init(rows input: [ThreadRow], groupsByDate: Bool, footer: ListItem? = nil, now: Date = Date(), calendar: Calendar = .current) {
+    init(rows input: [ThreadRow], groupsByDate: Bool, groupsByDirection: Bool = false, footer: ListItem? = nil, now: Date = Date(), calendar: Calendar = .current) {
         let rest = input[...]
-        if groupsByDate {
+        if groupsByDirection {
+            for direction in [LedgerDirection.iOwe, .waitingOn] {
+                let section = rest.filter { $0.ledger?.direction == direction }
+                guard !section.isEmpty else { continue }
+                items.append(.header(direction == .iOwe ? "You owe" : "Waiting on"))
+                for row in section { append(row, separateCommitment: true) }
+            }
+        } else if groupsByDate {
             let buckets = DateBuckets(now: now, calendar: calendar)
             var emitted = Set<String>()
             var current: String?
@@ -60,20 +70,22 @@ struct ListSnapshot {
         return top.key
     }
 
-    private mutating func append(_ row: ThreadRow) {
-        guard rows[row.id] == nil else { return }
-        rows[row.id] = row
-        position[row.id] = order.count
-        order.append(row.id)
-        itemIndex[row.id] = items.count
-        items.append(.thread(row.id))
+    private mutating func append(_ row: ThreadRow, separateCommitment: Bool = false) {
+        guard separateCommitment || rows[row.id] == nil else { return }
+        if rows[row.id] == nil {
+            rows[row.id] = row
+            position[row.id] = order.count
+            order.append(row.id)
+            itemIndex[row.id] = items.count
+        }
+        displayedRows[items.count] = row
+        items.append(.thread(row.id, separateCommitment ? row.ledger?.id : nil))
     }
 
     var isEmpty: Bool { order.isEmpty }
 
     func row(at itemIndex: Int) -> ThreadRow? {
-        guard items.indices.contains(itemIndex), case .thread(let key) = items[itemIndex] else { return nil }
-        return rows[key]
+        displayedRows[itemIndex]
     }
 
     /// The thread `offset` steps from `key`, clamped to the list.

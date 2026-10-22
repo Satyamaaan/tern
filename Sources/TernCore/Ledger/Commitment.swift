@@ -60,6 +60,7 @@ public struct LedgerScan: TernRecord, Hashable {
 /// The highest ranked commitment in a thread and the number behind it.
 public struct CommitmentBrief: Hashable, Sendable {
     public var id: Int64
+    public var direction: LedgerDirection = .waitingOn
     public var counterpartyEmail: String
     public var counterpartyName: String
     public var sourceDate: Date
