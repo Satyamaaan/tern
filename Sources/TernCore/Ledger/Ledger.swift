@@ -77,7 +77,7 @@ public enum Ledger {
             WHERE t.accountId=? AND t.id=?
             """)
         let existingQuery = try db.cachedStatement(sql: "SELECT * FROM commitment WHERE accountId=? AND threadId=?")
-        let bodyQuery = try db.cachedStatement(sql: "SELECT bodyText FROM message WHERE accountId=? AND id=?")
+        let bodyQuery = try db.cachedStatement(sql: "SELECT substr(bodyText,1,6000) FROM message WHERE accountId=? AND id=?")
         let insert = try db.cachedStatement(sql: """
             INSERT INTO commitment (accountId,threadId,direction,kind,counterpartyEmail,counterpartyName,deliverable,
               sourceMessageId,sourceDate,origin,surfaceAt,surfaced,fingerprint,createdAt,updatedAt)

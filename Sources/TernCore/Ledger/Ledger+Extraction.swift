@@ -74,9 +74,8 @@ extension Ledger {
                     return score(left) < score(right)
                 }
             let contact = try String.fetchOne(db, sql: "SELECT name FROM contact WHERE id=?", arguments: [value.counterparty.lowercased()]) ?? ""
-            let local = MailText.localPart(of: value.counterparty).replacingOccurrences(of: #"[0-9]+$"#, with: "", options: .regularExpression)
-                .split { !$0.isLetter }.map { $0.capitalized }.joined(separator: " ")
-            let name = !value.counterpartyName.isEmpty ? value.counterpartyName : !contact.isEmpty ? contact : local
+            let name = !value.counterpartyName.isEmpty ? value.counterpartyName : !contact.isEmpty ? contact : value.counterparty
+            let deliverable = value.deliverable.prefix(1).uppercased() + value.deliverable.dropFirst()
             let surface = value.direction == .iOwe || value.dueAt != nil ? value.sourceDate : value.sourceDate.addingTimeInterval(Double(settings.waitingDays) * 86_400)
             if var item = existing {
                 guard !rows.contains(where: { $0.id != item.id && $0.fingerprint == fingerprint }) else { continue }
@@ -86,7 +85,7 @@ extension Ledger {
                     item.resolutionNote = "Previous due date: \(old.formatted(.iso8601.year().month().day()))"
                 }
                 if item.counterpartyName.isEmpty { item.counterpartyName = name }
-                item.kind = "deliverable"; item.deliverable = value.deliverable
+                item.kind = "deliverable"; item.deliverable = deliverable
                 item.dueAt = value.dueAt ?? item.dueAt; item.dueText = value.dueText ?? item.dueText; item.origin = origin
                 item.stateSource = "ai"; item.confidence = max(item.confidence, value.confidence)
                 if value.sourceDate < item.sourceDate {
@@ -102,7 +101,7 @@ extension Ledger {
             } else {
                 let item = Commitment(id: nil, accountId: key.accountId, threadId: key.threadId, direction: value.direction,
                     kind: "deliverable", counterpartyEmail: value.counterparty.lowercased(), counterpartyName: name,
-                    deliverable: value.deliverable, dueAt: value.dueAt, dueText: value.dueText, sourceMessageId: value.sourceMessageId,
+                    deliverable: deliverable, dueAt: value.dueAt, dueText: value.dueText, sourceMessageId: value.sourceMessageId,
                     sourceQuote: value.quote, sourceDate: value.sourceDate, origin: origin, confidence: value.confidence,
                     state: .open, stateSource: "ai", resolvedMessageId: nil, resolvedAt: nil, resolutionNote: nil,
                     hintMessageId: nil, hintAt: nil, checkedCount: 0, surfaceAt: surface, surfaced: surface <= now,

@@ -406,3 +406,81 @@ extension LedgerTests {
         }
     }
 }
+
+
+extension LedgerTests {
+    @Test func partiallyGroundedDeliverableIsRejected() async throws {
+        let db = try promises()
+        let provider = FakeProvider { request, _ in ledgerAnswer(request, deliverable: "Send revised invoice") }
+        _ = try await LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow }).processBatch()
+        #expect(try await db.reader.read { try Commitment.filter(Column("origin") != "rule").fetchCount($0) } == 0)
+    }
+
+    @Test func groupRequestAddressedToAnotherRecipientIsRejected() async throws {
+        let db = try promises()
+        let quote = "Hi Priya, could you send the revised deck by Thursday?"
+        try MailStore(db).upsertMessages([MailMessage(accountId: me.id, id: "group", threadId: "group", date: testNow,
+            fromEmail: "ethan.brooks@gmail.com", toList: [Participant(email: me.email), Participant(name: "Priya Shah", email: "priya@example.com")],
+            subject: "Deck", snippet: quote, bodyText: quote, labelIds: [SystemLabel.inbox])])
+        try await db.reader.read { db in
+            let threads = try PromptData.threads(db, keys: [ThreadKey(accountId: me.id, threadId: "group")], messages: 4, characters: 700)
+            let request = Prompts.ledger(threads, open: [:], owner: [me.email], today: testNow)
+            let verdicts = try #require(try LedgerVerdict.parse(ledgerAnswer(request, quote: quote), db: db, threads: threads, open: [:]))
+            #expect(verdicts.count == 1)
+            #expect(verdicts[0].items.isEmpty)
+        }
+    }
+}
+
+
+extension LedgerTests {
+    @Test(arguments: ["owe", "waiting"])
+    func mixedPromiseAndAskKeepsBothDirections(_ direction: String) async throws {
+        let quote = "I'll send the revised deck; could you send the revised budget?"
+        let db = try makeDatabase([TestMail(id: "m", thread: "t", from: me.email, to: "ethan.brooks@gmail.com", body: quote, daysAgo: 4)])
+        let provider = FakeProvider { request, _ in
+            ledgerAnswer(request, direction: direction, quote: quote, deliverable: direction == "owe" ? "Send revised deck" : "Send revised budget")
+        }
+        _ = try await LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow }).processBatch()
+        let row = try #require(await db.reader.read { try Commitment.filter(Column("origin") != "rule").fetchOne($0) })
+        #expect(row.direction == (direction == "owe" ? .iOwe : .waitingOn))
+    }
+
+    @Test func pleaseFindAttachedIsNotARequest() async throws {
+        let quote = "Please find attached the revised deck. I'll send the budget tomorrow."
+        let db = try makeDatabase([TestMail(id: "m", thread: "t", from: me.email, to: "ethan.brooks@gmail.com", body: quote, daysAgo: 4)])
+        let provider = FakeProvider { request, _ in ledgerAnswer(request, direction: "waiting", quote: quote) }
+        _ = try await LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow }).processBatch()
+        #expect(try await db.reader.read { try Commitment.filter(Column("origin") != "rule").fetchCount($0) } == 0)
+    }
+}
+
+
+extension LedgerTests {
+    @Test func transientProviderFailureRefundsDailyCap() async throws {
+        let db = try promises()
+        try await db.writer.write { try Setting(key: "ledger.aiDailyCalls", value: "1").upsert($0) }
+        let provider = FakeProvider { request, index in
+            if index == 1 { throw AIError.failed("Synthetic temporary failure") }
+            return ledgerAnswer(request)
+        }
+        let queue = LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow })
+        do { _ = try await queue.processBatch(); Issue.record("Expected failure") } catch AIError.failed {}
+        #expect(try await db.reader.read { try Setting.fetchOne($0, key: "ledger.ai.day")?.value } == LedgerQueue.day(testNow) + ":0")
+        #expect(try await db.reader.read { try LedgerScan.fetchCount($0) } == 0)
+        #expect(try await queue.processBatch().extracted == 1)
+        #expect(provider.requests.count == 2)
+    }
+}
+
+
+extension LedgerTests {
+    @Test func paraphrasedActionStillRequiresGroundedObject() async throws {
+        let quote = "I'll get back to you with the deployment decision by Tuesday."
+        let db = try makeDatabase([TestMail(id: "m", thread: "t", from: me.email, to: "ethan.brooks@gmail.com", body: quote, daysAgo: 4)])
+        let provider = FakeProvider { request, _ in ledgerAnswer(request, quote: quote, deliverable: "Send deployment decision") }
+        _ = try await LedgerQueue(database: db, providers: AIProviders([provider]), now: { testNow }).processBatch()
+        let item = try #require(await db.reader.read { try Commitment.filter(Column("origin") != "rule").fetchOne($0) })
+        #expect(item.deliverable == "Send deployment decision")
+    }
+}

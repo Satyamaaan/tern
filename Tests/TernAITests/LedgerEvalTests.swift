@@ -10,8 +10,8 @@ struct LedgerEvalTests {
     func liveGroq() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-ledger-eval-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
         let source = directory.appendingPathComponent("gold.sqlite")
-        let copy = directory.appendingPathComponent("evaluated.sqlite")
         let now = Date()
         let gold: [FakeMailbox.LedgerAIGold]
         do {
@@ -24,8 +24,7 @@ struct LedgerEvalTests {
             }
             try await generated.writer.writeWithoutTransaction { try $0.checkpoint(.truncate) }
         }
-        try FileManager.default.copyItem(at: source, to: copy)
-        let database = try AppDatabase.open(at: copy)
+        let database = try AppDatabase.open(at: source)
         let provider = GroqProvider(key: {
             let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: "dev.tern.ai.groq", kSecAttrAccount as String: "default",
@@ -61,7 +60,7 @@ struct LedgerEvalTests {
         let prefilter = Double(expected.filter { !skipped.contains($0.thread) }.count) / Double(expected.count)
         let calls = try await database.reader.read { try Setting.fetchOne($0, key: "ledger.ai.day")?.value ?? "" }
         try JSONEncoder().encode(gold).write(to: directory.appendingPathComponent("gold.json"))
-        print("LEDGER EVAL precision=\(precision) recall=\(recall) prefilterRecall=\(prefilter) calls=\(calls) latency=\(Date().timeIntervalSince(started))s surfaced=\(items.count) matched=\(matched.count) expected=\(expected.count) artifacts=\(directory.path)")
+        print("LEDGER EVAL precision=\(precision) recall=\(recall) prefilterRecall=\(prefilter) calls=\(calls) latency=\(Date().timeIntervalSince(started))s surfaced=\(items.count) matched=\(matched.count) expected=\(expected.count)")
         #expect(precision >= 0.95)
         #expect(recall >= 0.7)
         #expect(prefilter >= 0.9)

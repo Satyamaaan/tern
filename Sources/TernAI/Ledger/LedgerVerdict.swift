@@ -83,13 +83,12 @@ struct LedgerVerdict {
                 }
                 guard message.fromEmail.lowercased() == counterparty, !recipients.intersection(own).isEmpty else { return false }
                 if value == .iOwe {
-                    let to = Set(message.toList.map { $0.email.lowercased() })
                     let greeting = normalized(MailText.stripQuoted(message.bodyText.flatMap { $0.isEmpty ? nil : $0 } ?? message.snippet))
                     let targetsOther = (message.toList + message.ccList).filter { !own.contains($0.email.lowercased()) }.contains { person in
                         let name = person.name.split(separator: " ").first.map(String.init) ?? MailText.localPart(of: person.email)
                         return greeting.hasPrefix(name.lowercased() + ",") || greeting.hasPrefix("hi " + name.lowercased()) || greeting.hasPrefix("dear " + name.lowercased())
                     }
-                    if to.intersection(own).isEmpty && targetsOther { return false }
+                    if targetsOther { return false }
                 }
                 return value == .iOwe ? asks : promises
             }
@@ -108,7 +107,10 @@ struct LedgerVerdict {
                 let value: LedgerDirection = d == "owe" ? .iOwe : .waitingOn
                 let fresh = MailText.stripQuoted(message.bodyText.flatMap { $0.isEmpty ? nil : $0 } ?? message.snippet)
                 let words = Ledger.tokens(deliverable)
-                guard !words.isEmpty, words.intersection(Ledger.tokens(fresh)).count >= min(2, words.count) else { continue }
+                let sourceWords = Ledger.tokens(fresh)
+                let objectWords = words.subtracting(["send", "get", "share", "review", "sign", "deliver", "reply", "provide"])
+                guard !objectWords.isEmpty, objectWords.isSubset(of: sourceWords),
+                      words.intersection(sourceWords).count >= min(2, words.count) else { continue }
                 guard !Ledger.isAutomation(message.fromEmail), !Ledger.isAutomation(counterparty) else { continue }
                 guard direction(value, message: message, quote: quote, counterparty: counterparty) else { aiLog.debug("ledger: dropped inconsistent direction"); continue }
                 let existingRef = Loose.string(raw["existingRef"])
@@ -130,7 +132,7 @@ struct LedgerVerdict {
                     sourceMessageId: message.id, quote: quote, sourceDate: message.date,
                     dueAt: date(Loose.string(raw["dueDate"]), source: message.date), dueText: Loose.string(raw["dueText"]),
                     confidence: confidence == "high" ? 2 : 1, existingId: existing?.id)
-                extraction.counterpartyName = message.isFromMe ? (message.toList.first { $0.email.lowercased() == counterparty }?.name ?? "") : message.fromName
+                extraction.counterpartyName = message.isFromMe ? ((message.toList + message.ccList).first { $0.email.lowercased() == counterparty }?.name ?? "") : message.fromName
                 items.append(extraction)
             }
             var updates: [Update] = []

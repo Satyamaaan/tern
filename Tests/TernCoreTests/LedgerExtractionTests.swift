@@ -170,3 +170,19 @@ extension LedgerExtractionTests {
         }
     }
 }
+
+
+extension LedgerExtractionTests {
+    @Test func writeCapitalizesAndFallsBackToEmail() throws {
+        let (database, _, message) = try ledgerFixture()
+        try database.writer.write { db in
+            try db.execute(sql: "DELETE FROM commitment")
+            try db.execute(sql: "DELETE FROM contact")
+            try Ledger.applyExtraction(db, key: ThreadKey(accountId: "a", threadId: "t"),
+                items: [extracted(message, text: "review launch proposal")], messageCount: 1, promptVersion: 2, origin: "groq", now: ledgerNow)
+            let row = try #require(try Commitment.fetchOne(db))
+            #expect(row.deliverable == "Review launch proposal")
+            #expect(row.counterpartyName == "maya@example.com")
+        }
+    }
+}
