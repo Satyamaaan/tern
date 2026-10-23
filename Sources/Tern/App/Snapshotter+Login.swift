@@ -42,7 +42,8 @@ extension Snapshotter {
             let card = LoginCardView(state: state, sender: "Linear · linear.app", account: account, credentials: items,
                                      perform: { _ in }, dismiss: {}, hovering: { _ in })
                 .transaction { $0.animation = nil }
-            standalone(card.background(backdrop), size: NSSize(width: 500, height: height + 40),
+            standalone(card.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(backdrop),
+                       size: NSSize(width: 500, height: height + 40),
                        to: directory.appendingPathComponent("login-card-\(name).png"), dark: false)
         }
 

@@ -49,8 +49,8 @@ enum Motion {
     static let floatingOpen = Animation.spring(response: 0.5, dampingFraction: 0.625)
     static let floatingClose = Animation.spring(response: 0.4, dampingFraction: 1)
     /// Its buttons giving under the pointer while held, and springing back.
-    static let floatingPress = Animation.spring(response: 0.12, dampingFraction: 0.78)
-    static let floatingRelease = Animation.spring(response: 0.3, dampingFraction: 0.74)
+    static let floatingPress = Animation.spring(response: 0.14, dampingFraction: 0.82)
+    static let floatingRelease = Animation.spring(response: 0.24, dampingFraction: 0.74)
     /// A glyph swapping to confirm an action (Copy → Copied).
     static let confirm = Animation.spring(response: 0.3, dampingFraction: 0.6)
 

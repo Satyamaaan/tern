@@ -67,7 +67,9 @@ final class LoginPopup: NSObject {
         })
 
         let panel = LoginPopupPanel()
-        panel.contentView = FirstMouseHostingView(rootView: view)
+        let host = FirstMouseHostingView(rootView: view)
+        host.sizingOptions = []
+        panel.contentView = host
         let margin = LoginCard.margin
         let size = CGSize(width: state.size.width + margin * 2, height: state.size.height + margin)
         panel.setFrame(NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
@@ -76,6 +78,7 @@ final class LoginPopup: NSObject {
         self.state = state
         Self.current = self
         panel.orderFrontRegardless()
+        host.layoutSubtreeIfNeeded()
         // One pass in the hidden pose first, so the card drops in rather than appearing already open.
         DispatchQueue.main.async { state.isOpen = true }
         scheduleDismissal(after: Self.lifetime)
@@ -178,6 +181,7 @@ struct LoginCardView: View {
     let perform: (LoginCredential) -> Void
     let dismiss: () -> Void
     let hovering: (Bool) -> Void
+    @State private var hovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -189,18 +193,24 @@ struct LoginCardView: View {
             .padding(.top, state.closed.height)
             .frame(width: state.size.width, height: state.size.height, alignment: .top)
             .opacity(open ? 1 : 0)
+            .blur(radius: open || reduceMotion ? 0 : 3)
             .offset(y: open || reduceMotion ? 0 : -8)
-            .animation(reduceMotion ? Motion.reduced : Motion.ease(open ? 0.2 : 0.1), value: open)
+            .animation(reduceMotion ? Motion.reduced
+                       : open ? Motion.ease(0.2).delay(0.06) : Motion.ease(0.1), value: open)
             .frame(width: size.width, height: size.height, alignment: .top)
             .clipShape(shape)
-            .background(LoginCardSurface(shape: shape))
+            .background(LoginCardSurface(shape: shape, hovered: hovered))
             .contentShape(shape)
             .opacity(reduceMotion && !open ? 0 : 1)
             .animation(reduceMotion ? Motion.reduced : (open ? Motion.floatingOpen : Motion.floatingClose), value: open)
             .allowsHitTesting(open)
             .accessibilityHidden(!open)
-            .onHover(perform: hovering)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .onHover { inside in
+                hovered = inside
+                hovering(inside)
+            }
+            .frame(width: state.size.width + LoginCard.margin * 2,
+                   height: state.size.height + LoginCard.margin, alignment: .top)
             .environment(\.colorScheme, .dark)
     }
 }
@@ -259,6 +269,10 @@ private final class LoginPopupPanel: NSPanel {
         canHide = false
         isReleasedWhenClosed = false
         sharingType = .none
+        #if DEBUG
+        if LaunchOptions.current().isFake,
+           ProcessInfo.processInfo.environment["TERN_LOGIN_CAPTURABLE"] == "1" { sharingType = .readOnly }
+        #endif
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .transient, .ignoresCycle]
     }
 
@@ -390,26 +404,41 @@ struct LoginPopupView: View {
 /// Black at the camera, with desktop material showing only through the lower part of the shell.
 private struct LoginCardSurface: View {
     let shape: LoginNotchShape
+    let hovered: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         surface
-            .overlay(shape.stroke(.white.opacity(contrast == .increased ? 0.3 : 0.16), lineWidth: 0.5)
+            .overlay(shape.stroke(.white.opacity(contrast == .increased || hovered ? 0.32 : 0.2), lineWidth: 0.5)
                 .mask(LinearGradient(colors: [.clear, .white], startPoint: .center, endPoint: .bottom)))
-            .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
+            .animation(.easeOut(duration: Motion.hover), value: hovered)
     }
 
     @ViewBuilder private var surface: some View {
         if reduceTransparency || contrast == .increased || !LoginCard.drawsGlass {
             shape.fill(.black)
+                .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
         } else {
-            shape.fill(.ultraThinMaterial)
+            material
                 .overlay(shape.fill(LinearGradient(stops: [
                     .init(color: .black, location: 0),
-                    .init(color: .black, location: 0.5),
-                    .init(color: .black.opacity(0.5), location: 1)
+                    .init(color: .black.opacity(0.85), location: 0.12),
+                    .init(color: .black.opacity(0.38), location: 0.4),
+                    .init(color: .black.opacity(0.22), location: 1)
                 ], startPoint: .top, endPoint: .bottom)))
+                // A shadow around the live backdrop flattens it. Draw underneath instead.
+                .background(shape.fill(.black.opacity(0.25)).blur(radius: 12).offset(y: 6))
+        }
+    }
+
+    @ViewBuilder private var material: some View {
+        if LoginBackdropView.isAvailable {
+            LoginBackdrop().clipShape(shape)
+        } else if #available(macOS 26, *) {
+            Color.clear.glassEffect(.clear, in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial)
         }
     }
 }
@@ -443,8 +472,7 @@ private struct LoginCardButtonStyle: ButtonStyle {
                 .contentShape(Capsule())
                 .scaleEffect(pressed && !reduceMotion ? (shape == .circle ? 0.95 : 0.97) : 1)
                 .animation(pressed ? Motion.floatingPress : Motion.floatingRelease, value: pressed)
-                // The hover wash fades in and goes at once.
-                .animation(hovered ? .easeOut(duration: Motion.hover) : nil, value: hovered)
+                .animation(.easeOut(duration: Motion.hover), value: hovered)
                 .onHover { hovered = $0 }
         }
 
