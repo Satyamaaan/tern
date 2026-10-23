@@ -1,11 +1,57 @@
 import AppKit
 import Foundation
 import GRDB
+import SwiftUI
 import Testing
 @testable import Tern
 import TernCore
 
 extension InboxPreferencesTests {
+    @MainActor
+    @Test func multiSelectionKeepsTheReaderObservation() async throws {
+        _ = NSApplication.shared
+        let database = try AppDatabase.inMemory()
+        let account = Account(email: "synthetic@example.com")
+        try await database.writer.write { db in
+            try account.insert(db)
+            try MailStore.upsertMessages(db, (0..<3).map { index in
+                MailMessage(accountId: account.id, id: "m\(index)", threadId: "t\(index)",
+                            date: Date(timeIntervalSince1970: Double(1_000 - index)), fromEmail: "sender@example.com",
+                            subject: "Synthetic \(index)", labelIds: [SystemLabel.inbox])
+            })
+        }
+        let services = AppServices(store: MailStore(database))
+        let app = AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/unused"))
+        app.reloadList()
+        app.readerExpanded = true
+        let hosting = NSHostingView(rootView: ReaderColumn().environment(app).environment(services))
+        hosting.sizingOptions = []
+        let window = MainWindow(contentView: hosting)
+        window.setContentSize(NSSize(width: 640, height: 720))
+        let snapshots = Snapshotter(model: app, registry: CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides()))
+        snapshots.settle(window)
+        weak var original = services.reader.model
+        try #require(original != nil && original?.key == app.cursor)
+        func shot(_ name: String) {
+            guard let path = ProcessInfo.processInfo.environment["TERN_READER_LIFETIME_SHOTS"] else { return }
+            let directory = URL(fileURLWithPath: path)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            snapshots.render(window, appearance: .aqua, to: directory.appendingPathComponent(name + ".png"))
+        }
+        shot("single")
+        app.moveCursor(1, extend: true)
+        snapshots.settle(window)
+        #expect(app.checked.count == 2)
+        shot("multiple")
+        app.checked.removeAll()
+        app.open()
+        snapshots.settle(window)
+        #expect(original != nil && services.reader.model === original,
+                "Multi-select must reuse the reader and its concurrent detail observation")
+        #expect(services.reader.model?.key == app.cursor)
+        shot("returned")
+    }
+
     @MainActor
     @Test func launchObservationsLeaveRoomForNavigationWhileTheWriterIsHeld() async throws {
         _ = NSApplication.shared
