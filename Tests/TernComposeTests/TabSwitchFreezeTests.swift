@@ -7,6 +7,61 @@ import TernCore
 
 extension InboxPreferencesTests {
     @MainActor
+    @Test func readerNavigationReturnsWhileTheWriterIsHeld() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-reader-freeze-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("mail.sqlite")
+        let database = try AppDatabase.open(at: url)
+        let account = Account(email: "synthetic@example.com")
+        try await database.writer.write { db in
+            try account.insert(db)
+            try MailStore.upsertMessages(db, (0..<30).map { index in
+                MailMessage(accountId: account.id, id: "m\(index)", threadId: "t\(index)",
+                    date: Date(), fromEmail: "sender@example.com", subject: "Synthetic \(index)",
+                    labelIds: [SystemLabel.inbox])
+            })
+        }
+        let services = AppServices(store: MailStore(database))
+        services.accounts = [account]
+        let model = ReaderModel()
+        model.attach(services)
+        defer { model.suspend() }
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let writer = Task.detached {
+            try database.writer.write { _ in
+                entered.signal()
+                if release.wait(timeout: .now() + 10) == .timedOut {
+                    Issue.record("Reader navigation exhausted the reader pool while the writer was held")
+                }
+            }
+        }
+        defer { release.signal() }
+        try #require(entered.wait(timeout: .now() + 2) == .success)
+        for index in 0..<24 {
+            let key = ThreadKey(accountId: account.id, threadId: "t\(index)")
+            let start = ContinuousClock.now
+            model.show(key)
+            #expect(start.duration(to: .now) < .seconds(1), "Every thread open must return while the writer is held")
+            #expect(model.detail?.thread.key == key, "The first detail must arrive in the same frame")
+            if index.isMultiple(of: 3) { model.suspend(); model.show(key) }
+        }
+        let finalKey = ThreadKey(accountId: account.id, threadId: "t23")
+        #expect(model.detail?.thread.key == finalKey)
+        release.signal()
+        try await writer.value
+        try await database.writer.write { db in
+            try db.execute(sql: "UPDATE message SET bodyText = 'Body landed', bodyState = 1 WHERE id = 'm23'")
+        }
+        for _ in 0..<200 where model.detail?.messages.first?.bodyText != "Body landed" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.detail?.thread.key == finalKey)
+        #expect(model.detail?.messages.first?.bodyText == "Body landed")
+    }
+
+    @MainActor
     @Test func tabSwitchesReturnWhileTheWriterIsHeld() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-tab-freeze-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
