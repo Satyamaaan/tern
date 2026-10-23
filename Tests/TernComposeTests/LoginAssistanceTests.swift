@@ -106,6 +106,9 @@ struct LoginAssistanceIntegrationTests {
         let services = AppServices(store: MailStore(try AppDatabase.inMemory()))
         let model = AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/dev/null"))
         let popupsBefore = model.prefs.showLoginPopups
+        // Offscreen renders can't draw Liquid Glass; the card shows its solid surface.
+        LoginCard.drawsGlass = false
+        defer { LoginCard.drawsGlass = true }
         defer { model.prefs.showLoginPopups = popupsBefore }
         for dark in [false, true] {
             let appearance = try #require(NSAppearance(named: dark ? .darkAqua : .aqua))

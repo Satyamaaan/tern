@@ -392,6 +392,12 @@ Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 
 - AI waiting shimmer on a 1.4 s loop (still with Reduce Motion); summary lines rise 40 ms apart, at most four.
 - Settings: segmented thumb slides 180 ms; account rows arrive and leave (180 ms); the shortcut recorder shakes on
   a rejected key (240 ms). Onboarding steps on the pane spring. Cards (update, move) in 180 ms, out 120 ms.
+- The floating sign-in card is the one exception to the short timings: it floats outside the window, so it moves
+  like a physical object. It drops in on a spring (response 0.47, damping 0.76) from 86 % × 70 % of its size, 14 pt
+  higher and transparent, and lifts away slower without overshoot (0.54, 0.9). It leans to 101.2 % under the pointer;
+  its buttons spring to 97 % (the close circle 95 %) while held. Copy → Copied pops the glyph (0.3, 0.6). Liquid Glass
+  on macOS 26, tinted dark so the white text reads on any wallpaper; solid with Reduce Transparency or Increase
+  Contrast. Values in `Motion.floating*`.
 - Nothing in the triage path over 200 ms, and nothing ever delays an action.
 
 Reduce Motion: 80 ms crossfades only (no slides, offsets or scale; the tern is drawn already).

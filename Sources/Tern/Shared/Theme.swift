@@ -104,6 +104,8 @@ enum Theme {
         static let overlay: CGFloat = 8
         /// Panels: ⌘K, dropdowns, popovers, the composer card, the shortcut sheet.
         static let card: CGFloat = 10
+        /// The floating sign-in card: its 32 pt pills' radius plus its 16 pt padding, so the corners stay concentric.
+        static let floatingCard: CGFloat = 32
     }
 
     /// Control heights.

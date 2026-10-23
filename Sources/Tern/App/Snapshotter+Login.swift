@@ -4,7 +4,7 @@ import TernCore
 
 extension Snapshotter {
     /// `TERN_LOGIN_SNAPSHOT_ONLY=1`: the newest inbox thread in the reader (its sign-in strip when the mail is fresh),
-    /// the login popup card on its own, and the Notifications settings with its login popup row, light and dark.
+    /// the login card on its own (hidden, open, copied), and the Notifications settings with its login popup row, light and dark.
     func loginShots(_ window: MainWindow, _ directory: URL) {
         func both(_ name: String) {
             render(window, appearance: .aqua, to: directory.appendingPathComponent("\(name)-light.png"))
@@ -25,26 +25,23 @@ extension Snapshotter {
 
         let credentials: [LoginCredential] = [.code("482913"),
                                               .magicLink(URL(string: "https://linear.app/auth/magic/Zk3P9qLmA7xR2vT8wBn5")!)]
+        // Offscreen renders can't draw Liquid Glass; the card shows its solid surface over a wallpaper-like backdrop.
+        LoginCard.drawsGlass = false
+        defer { LoginCard.drawsGlass = true }
         let height = NSHostingView(rootView: LoginPopupView(sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
-            topInset: 32, perform: { _ in }, dismiss: {}).frame(width: LoginIslandGeometry.openWidth)).fittingSize.height
-        // The island as it hangs from a 32 pt notch, over a strip of menu bar and desktop, half-way down and open.
-        for (name, open) in [("closed", false), ("open", true)] {
-            let state = LoginIslandState(closed: CGSize(width: 190, height: 32), open: CGSize(width: LoginIslandGeometry.openWidth, height: height))
+            perform: { _ in }, dismiss: {}).frame(width: LoginCard.width)).fittingSize.height
+        let backdrop = LinearGradient(colors: [Color(red: 0.36, green: 0.52, blue: 0.78), Color(red: 0.86, green: 0.62, blue: 0.5)],
+                                      startPoint: .top, endPoint: .bottom)
+        for (name, open, copied) in [("hidden", false, false), ("open", true, false), ("copied", true, true)] {
+            let state = LoginCardState(size: CGSize(width: LoginCard.width, height: height))
             state.isOpen = open
-            let island = LoginIsland(state: state, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
+            state.copied = copied
+            let card = LoginCardView(state: state, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
                                      perform: { _ in }, dismiss: {}, hovering: { _ in })
                 .transaction { $0.animation = nil }
-            standalone(island.background(alignment: .top) {
-                    Color(white: 0.85).frame(height: 32)
-                }, size: NSSize(width: 520, height: 260),
-                       to: directory.appendingPathComponent("login-island-\(name).png"), dark: false)
+            standalone(card.background(backdrop), size: NSSize(width: 480, height: height + 64),
+                       to: directory.appendingPathComponent("login-card-\(name).png"), dark: false)
         }
-        let copied = LoginIslandState(closed: CGSize(width: 190, height: 32), open: CGSize(width: LoginIslandGeometry.openWidth, height: height))
-        copied.isOpen = true
-        copied.copied = true
-        standalone(LoginIsland(state: copied, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
-                               perform: { _ in }, dismiss: {}, hovering: { _ in }).transaction { $0.animation = nil },
-                   size: NSSize(width: 520, height: 260), to: directory.appendingPathComponent("login-island-copied.png"), dark: false)
 
         model.openSettings(.notifications)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))

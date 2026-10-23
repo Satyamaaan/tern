@@ -3,13 +3,13 @@ import CoreGraphics
 import SwiftUI
 import TernCore
 
-/// A transient, nonactivating surface for locally extracted sign-in credentials. It grows out of the notch (or the
-/// top edge of a screen without one), drops down with the code, and folds back up into it.
+/// A transient, nonactivating glass card for locally extracted sign-in credentials. It floats just under the top of
+/// the screen (below the notch or the menu bar), drops in on a spring and lifts away again.
 @MainActor
 final class LoginPopup: NSObject {
     private static weak var current: LoginPopup?
     private var panel: LoginPopupPanel?
-    private var state: LoginIslandState?
+    private var state: LoginCardState?
     private var dismissal: Task<Void, Never>?
     private var closing: Task<Void, Never>?
     private var locked = false
@@ -17,7 +17,7 @@ final class LoginPopup: NSObject {
     private var sleeping = false
     private var sessionInactive = false
 
-    /// How long the card stays down when nobody touches it; the pointer over it holds it open.
+    /// How long the card stays when nobody touches it; the pointer over it holds it open.
     private static let lifetime: Duration = .seconds(20)
 
     override init() {
@@ -46,41 +46,38 @@ final class LoginPopup: NSObject {
         dismiss(animated: false)
         guard !credentials.isEmpty, mayShow,
               let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main else { return }
-        let notch = LoginIslandGeometry(screen: screen)
-        let width = min(LoginIslandGeometry.openWidth, screen.frame.width - 32)
-        guard width > notch.closed.width || !notch.hasNotch else { return }
-
+        let width = min(LoginCard.width, screen.frame.width - 32)
         let measure = NSHostingView(rootView: LoginPopupView(sender: sender, account: account, credentials: credentials,
-            topInset: notch.closed.height, perform: { _ in }, dismiss: {}).frame(width: width))
-        let open = CGSize(width: width, height: measure.fittingSize.height)
-        let state = LoginIslandState(closed: notch.closed, open: open)
-        let view = LoginIsland(state: state, sender: sender, account: account, credentials: credentials, perform: { [weak self] credential in
+            perform: { _ in }, dismiss: {}).frame(width: width))
+        let state = LoginCardState(size: CGSize(width: width, height: measure.fittingSize.height))
+        let view = LoginCardView(state: state, sender: sender, account: account, credentials: credentials, perform: { [weak self] credential in
             guard let self, self.mayShow else { self?.dismiss(); return }
             perform(credential)
             if case .code = credential {
-                // The button says Copied for a moment before the card folds away.
+                // The button says Copied for a moment before the card lifts away.
                 state.copied = true
-                self.scheduleDismissal(after: .milliseconds(700))
+                self.scheduleDismissal(after: .milliseconds(900))
             } else {
                 self.dismiss()
             }
         }, dismiss: { [weak self] in self?.dismiss() }, hovering: { [weak self] inside in
-            // A card folding away under the pointer must not shorten the one that replaced it.
+            // A card leaving under the pointer must not shorten the one that replaced it.
             guard let self, self.state === state, !state.copied else { return }
             if inside { self.dismissal?.cancel() } else { self.scheduleDismissal(after: .seconds(4)) }
         })
 
         let panel = LoginPopupPanel()
-        let host = FirstMouseHostingView(rootView: view)
-        panel.contentView = host
-        let size = CGSize(width: open.width + LoginIslandGeometry.margin * 2, height: open.height + LoginIslandGeometry.margin)
-        panel.setFrame(NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
+        panel.contentView = FirstMouseHostingView(rootView: view)
+        let margin = LoginCard.margin
+        let size = CGSize(width: state.size.width + margin * 2, height: state.size.height + margin * 2)
+        let top = screen.frame.maxY - LoginCard.topInset(on: screen) - LoginCard.gap + margin
+        panel.setFrame(NSRect(x: screen.frame.midX - size.width / 2, y: top - size.height,
                               width: size.width, height: size.height), display: true)
         self.panel = panel
         self.state = state
         Self.current = self
         panel.orderFrontRegardless()
-        // One pass at the notch's size first, so the drop starts from the notch rather than appearing already open.
+        // One pass in the hidden pose first, so the card drops in rather than appearing already open.
         DispatchQueue.main.async { state.isOpen = true }
         scheduleDismissal(after: Self.lifetime)
     }
@@ -103,7 +100,7 @@ final class LoginPopup: NSObject {
         }
         state.isOpen = false
         closing = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(320))
+            try? await Task.sleep(for: .milliseconds(380))
             panel.orderOut(nil)
             panel.contentView = nil
         }
@@ -142,97 +139,74 @@ final class LoginPopup: NSObject {
     }
 }
 
-/// Where the card grows from: the notch, or a notch-wide slit at the top edge of a screen without one.
-struct LoginIslandGeometry {
-    static let openWidth: CGFloat = 372
-    /// Room around the card for its shadow; transparent, so clicks pass through.
-    static let margin: CGFloat = 24
-    let hasNotch: Bool
-    let closed: CGSize
+/// The card's size, place and motion.
+enum LoginCard {
+    static let width: CGFloat = 372
+    static let padding: CGFloat = 16
+    /// Room around the card for its shadow and its drop; transparent, so clicks pass through.
+    static let margin: CGFloat = 32
+    /// Space between the card and the notch or menu bar above it.
+    static let gap: CGFloat = 8
+    /// Offscreen renders (tests, `--snapshot`) can't draw Liquid Glass, so they get the solid surface.
+    @MainActor static var drawsGlass = true
 
-    init(screen: NSScreen) {
-        let inset = screen.safeAreaInsets.top
-        if inset > 0, let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            hasNotch = true
-            closed = CGSize(width: max(0, screen.frame.width - left.width - right.width), height: inset)
-        } else {
-            hasNotch = false
-            closed = CGSize(width: 200, height: 0)
-        }
+    /// Liquid Glass is drawn (macOS 26, on screen); blurring glass while it fades makes it pop, so only the other
+    /// surfaces blur on the way in and out.
+    @MainActor static var usesGlass: Bool {
+        guard drawsGlass else { return false }
+        if #available(macOS 26, *) { return true }
+        return false
+    }
+
+    /// The notch, or the menu bar on a screen without one; zero when the menu bar is hidden.
+    @MainActor static func topInset(on screen: NSScreen) -> CGFloat {
+        let notch = screen.safeAreaInsets.top
+        return notch > 0 ? notch : max(0, screen.frame.maxY - screen.visibleFrame.maxY)
     }
 }
 
 @MainActor @Observable
-final class LoginIslandState {
-    let closed: CGSize
-    let open: CGSize
+final class LoginCardState {
+    let size: CGSize
     var isOpen = false
     var copied = false
 
-    init(closed: CGSize, open: CGSize) {
-        self.closed = closed
-        self.open = open
+    init(size: CGSize) {
+        self.size = size
     }
 }
 
-/// The black shape between the notch's size and the card's, with the card's content fading in once it has room.
-struct LoginIsland: View {
-    let state: LoginIslandState
+/// The card in its panel: hidden pose (narrower, shorter, blurred, a little higher) to open and back.
+struct LoginCardView: View {
+    let state: LoginCardState
     let sender: String
     let account: String
     let credentials: [LoginCredential]
     let perform: (LoginCredential) -> Void
     let dismiss: () -> Void
     let hovering: (Bool) -> Void
+    @State private var hovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let open = state.isOpen
-        let size = open || reduceMotion ? state.open : state.closed
-        LoginPopupView(sender: sender, account: account, credentials: credentials, topInset: state.closed.height,
-                       copied: state.copied, perform: perform, dismiss: dismiss)
-            .frame(width: state.open.width, height: state.open.height, alignment: .top)
+        let moves = !reduceMotion
+        let blurs = moves && !LoginCard.usesGlass
+        LoginPopupView(sender: sender, account: account, credentials: credentials, copied: state.copied,
+                       perform: perform, dismiss: dismiss)
+            .frame(width: state.size.width, height: state.size.height, alignment: .top)
+            .scaleEffect(x: open || !moves ? 1 : 0.86, y: open || !moves ? 1 : 0.7, anchor: .top)
+            .scaleEffect(hovered && open && moves ? 1.012 : 1, anchor: .top)
+            .offset(y: open || !moves ? 0 : -14)
+            .blur(radius: open || !blurs ? 0 : 10)
             .opacity(open ? 1 : 0)
-            .blur(radius: open || reduceMotion ? 0 : 6)
-            .scaleEffect(open || reduceMotion ? 1 : 0.92, anchor: .top)
-            .animation(Motion.or(reduced: reduceMotion, open ? Motion.ease(0.24).delay(0.08) : Motion.ease(0.1)), value: open)
-            .frame(width: size.width, height: size.height, alignment: .top)
-            .clipShape(LoginIslandShape(radius: open ? 22 : 10))
-            .background(LoginIslandShape(radius: open ? 22 : 10).fill(.black)
-                .shadow(color: .black.opacity(open ? 0.35 : 0), radius: 16, y: 6))
-            .opacity(reduceMotion && !open ? 0 : 1)
-            .animation(reduceMotion ? Motion.reduced
-                       : open ? .spring(response: 0.42, dampingFraction: 0.74) : .spring(response: 0.3, dampingFraction: 1),
-                       value: open)
-            .onHover(perform: hovering)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .environment(\.colorScheme, .dark)
-    }
-}
-
-/// Flat along the top edge with small outward flares where it meets the bezel, rounded below: the notch's own outline.
-private struct LoginIslandShape: Shape {
-    var radius: CGFloat
-    var animatableData: CGFloat {
-        get { radius }
-        set { radius = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let flare: CGFloat = min(8, rect.height / 2)
-        let r = min(radius, rect.height / 2, rect.width / 2 - flare)
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX - flare, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX + flare, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + flare), control: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX - r, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - r), control: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + flare))
-        path.addQuadCurve(to: CGPoint(x: rect.minX - flare, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
-        path.closeSubpath()
-        return path
+            .animation(moves ? (open ? Motion.floatingOpen : Motion.floatingClose) : Motion.reduced, value: open)
+            .animation(Motion.floatingHover, value: hovered)
+            .onHover { inside in
+                hovered = inside
+                hovering(inside)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -247,7 +221,7 @@ private final class LoginPopupPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        // Above the menu bar, so the card can join the notch.
+        // Above the menu bar, so the card shows over full-screen apps too.
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         hidesOnDeactivate = false
         // Stays up when Tern is hidden (⌘H): the card is for mail that arrives while you are in another app.
@@ -259,27 +233,26 @@ private final class LoginPopupPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-    /// The card sits over the menu bar; the default would push it below.
+    /// The card may sit over the menu bar; the default would push it below.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
-/// The open card's content, white on the island's black. Kept independent of the panel for offscreen snapshots.
+/// The card's content on its glass, always in the dark look so white text reads on any wallpaper.
+/// Kept independent of the panel for offscreen snapshots.
 struct LoginPopupView: View {
     let sender: String
     let account: String
     let credentials: [LoginCredential]
-    /// The notch's height: content starts below it.
-    var topInset: CGFloat = 0
     var copied = false
     let perform: (LoginCredential) -> Void
     let dismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(sender: String, account: String, credentials: [LoginCredential], topInset: CGFloat = 0, copied: Bool = false,
+    init(sender: String, account: String, credentials: [LoginCredential], copied: Bool = false,
          perform: @escaping (LoginCredential) -> Void, dismiss: @escaping () -> Void) {
         self.sender = sender
         self.account = account
         self.credentials = credentials
-        self.topInset = topInset
         self.copied = copied
         self.perform = perform
         self.dismiss = dismiss
@@ -300,25 +273,29 @@ struct LoginPopupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
-                IconView(icon: .key, size: 14, color: .white.opacity(0.55))
+                IconView(icon: .key, size: 14, color: .white.opacity(0.6))
                 Text(sender)
                     .font(.ui(13, .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.92))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
+                // With several accounts the address is what tells the cards apart, so it keeps some room.
                 Text(account)
                     .font(.ui(12))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .frame(minWidth: 90, alignment: .leading)
                 Spacer(minLength: 4)
                 Button(action: dismiss) {
-                    IconView(icon: .close, size: 14, color: .white.opacity(0.55))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
+                    IconView(icon: .close, size: 13, color: .white.opacity(0.7))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LoginCardButtonStyle(fill: .veil, shape: .circle))
+                // The circle shows only on hover; the glyph lines up with the pills' right edge, and the row keeps
+                // the text's height.
+                .padding(.trailing, -7)
+                .padding(.vertical, -5)
                 .accessibilityLabel("Dismiss sign-in popup")
                 .help("Dismiss")
             }
@@ -333,45 +310,42 @@ struct LoginPopupView: View {
                     Button { perform(.code(code)) } label: {
                         HStack(spacing: 6) {
                             IconView(icon: copied ? .done : .copy, size: 14, color: .black)
+                                .id(copied)
+                                .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
                             Text(copied ? "Copied" : "Copy")
+                                .contentTransition(.opacity)
                         }
                         .font(.ui(13, .semibold))
                         .foregroundStyle(.black)
-                        .padding(.horizontal, 14)
-                        .frame(height: 32)
-                        .background(Capsule().fill(.white))
-                        .contentShape(Capsule())
+                        // Wide enough for Copied, so the pill never changes size.
+                        .frame(minWidth: 76)
+                        .animation(Motion.or(reduced: reduceMotion, Motion.confirm), value: copied)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LoginCardButtonStyle(fill: .solid, shape: .capsule))
                     .accessibilityLabel("Copy verification code \(code)")
+                    .accessibilityValue(copied ? "Copied" : "")
                 }
             }
             if let link {
                 Button { perform(.magicLink(link)) } label: {
                     HStack(spacing: 8) {
-                        IconView(icon: .link, size: 14, color: .white.opacity(0.7))
+                        IconView(icon: .link, size: 14, color: .white.opacity(0.75))
                         Text("Sign in")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.white.opacity(0.92))
                         Text(link.host ?? "")
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.white.opacity(0.6))
                             .lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 4)
-                        IconView(icon: .external, size: 13, color: .white.opacity(0.5))
+                        IconView(icon: .external, size: 13, color: .white.opacity(0.6))
                     }
                     .font(.ui(13, .medium))
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-                    .background(Capsule().fill(.white.opacity(0.12)))
-                    .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LoginCardButtonStyle(fill: .veil, shape: .capsule))
                 .accessibilityLabel("Open sign-in link for \(link.host ?? "website")")
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.top, topInset + 10)
-        .padding(.bottom, 16)
-        .background(.black)
+        .padding(LoginCard.padding)
+        .background(LoginCardSurface())
         .environment(\.colorScheme, .dark)
     }
 
@@ -380,5 +354,72 @@ struct LoginPopupView: View {
         guard code.count == 6 || code.count == 8 else { return code }
         let middle = code.index(code.startIndex, offsetBy: code.count / 2)
         return "\(code[..<middle]) \(code[middle...])"
+    }
+}
+
+/// Liquid Glass with a dark tint, so the white text reads on any wallpaper. Without glass (before macOS 26, offscreen
+/// renders) a dark material, and a solid surface when Reduce Transparency or Increase Contrast is on.
+private struct LoginCardSurface: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.floatingCard, style: .continuous)
+        surface(shape)
+            .overlay(shape.strokeBorder(.white.opacity(contrast == .increased ? 0.3 : 0.1), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+    }
+
+    @ViewBuilder private func surface(_ shape: RoundedRectangle) -> some View {
+        if reduceTransparency || contrast == .increased || !LoginCard.drawsGlass {
+            shape.fill(Color(white: 0.1))
+        } else if #available(macOS 26, *) {
+            Color.clear.glassEffect(.regular.tint(.black.opacity(0.45)), in: shape)
+        } else {
+            shape.fill(.ultraThinMaterial).overlay(shape.fill(.black.opacity(0.4)))
+        }
+    }
+}
+
+/// The card's buttons: a white capsule for the main action, a light wash for the rest. They lighten under the
+/// pointer and give a little while held, then spring back.
+private struct LoginCardButtonStyle: ButtonStyle {
+    enum Fill { case solid, veil }
+    enum Shape { case capsule, circle }
+    let fill: Fill
+    let shape: Shape
+
+    func makeBody(configuration: Configuration) -> some View {
+        LoginCardButton(configuration: configuration, fill: fill, shape: shape)
+    }
+
+    private struct LoginCardButton: View {
+        let configuration: Configuration
+        let fill: Fill
+        let shape: Shape
+        @State private var hovered = false
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            let pressed = configuration.isPressed
+            configuration.label
+                .padding(.horizontal, shape == .capsule ? 14 : 0)
+                .frame(width: shape == .circle ? 26 : nil, height: shape == .circle ? 26 : 32)
+                .frame(maxWidth: shape == .capsule && fill == .veil ? .infinity : nil, alignment: .leading)
+                .background(Capsule().fill(background(pressed: pressed)))
+                .contentShape(Capsule())
+                .scaleEffect(pressed && !reduceMotion ? (shape == .circle ? 0.95 : 0.97) : 1)
+                .animation(pressed ? Motion.floatingPress : Motion.floatingRelease, value: pressed)
+                // The hover wash fades in and goes at once.
+                .animation(hovered ? .easeOut(duration: Motion.hover) : nil, value: hovered)
+                .onHover { hovered = $0 }
+        }
+
+        private func background(pressed: Bool) -> Color {
+            switch fill {
+            case .solid: .white.opacity(pressed ? 0.85 : hovered ? 0.95 : 1)
+            case .veil: .white.opacity(pressed ? 0.2 : hovered ? 0.16 : shape == .circle ? 0 : 0.1)
+            }
+        }
     }
 }
