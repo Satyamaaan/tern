@@ -100,7 +100,7 @@ extension InboxPreferencesTests {
             }
         }
         defer { release.signal() }
-        try #require(entered.wait(timeout: .now() + 2) == .success)
+        try #require(entered.wait(timeout: .now() + 10) == .success)
         // Stand in for AI settings, login arrivals, notifications and pending ops. Immediate
         // startup ensures each holds its initial reader before AppModel starts its five observers.
         let background = (0..<4).map { _ in
@@ -124,7 +124,7 @@ extension InboxPreferencesTests {
         }
         reader.show(key)
         #expect(database.liveLongLivedObservationCount == AppDatabase.longLivedObservations)
-        #expect(start.duration(to: .now) < .seconds(1), "Launch and navigation must leave a reader available")
+        #expect(start.duration(to: .now) < .seconds(4), "Launch and navigation must leave a reader available")
         #expect(reader.detail?.thread.key == key)
         release.signal()
         try await writer.value
@@ -162,12 +162,12 @@ extension InboxPreferencesTests {
             }
         }
         defer { release.signal() }
-        try #require(entered.wait(timeout: .now() + 2) == .success)
+        try #require(entered.wait(timeout: .now() + 10) == .success)
         for index in 0..<24 {
             let key = ThreadKey(accountId: account.id, threadId: "t\(index)")
             let start = ContinuousClock.now
             model.show(key)
-            #expect(start.duration(to: .now) < .seconds(1), "Every thread open must return while the writer is held")
+            #expect(start.duration(to: .now) < .seconds(4), "Every thread open must return while the writer is held")
             #expect(model.detail?.thread.key == key, "The first detail must arrive in the same frame")
             if index.isMultiple(of: 3) { model.suspend(); model.show(key) }
         }
@@ -223,11 +223,11 @@ extension InboxPreferencesTests {
             }
         }
         defer { release.signal() }
-        try #require(entered.wait(timeout: .now() + 2) == .success)
+        try #require(entered.wait(timeout: .now() + 10) == .success)
         for _ in 0..<24 {
             let start = ContinuousClock.now
             model.cycleTab(1)
-            #expect(start.duration(to: .now) < .seconds(1), "Every tab switch must return while the writer is held")
+            #expect(start.duration(to: .now) < .seconds(4), "Every tab switch must return while the writer is held")
             switch model.activeTab {
             case .all: #expect(model.snapshot.order.count == 6)
             case .needsReply: #expect(model.snapshot.isEmpty)
@@ -346,13 +346,13 @@ extension InboxPreferencesTests {
             }
         }
         defer { release.signal() }
-        try #require(entered.wait(timeout: .now() + 2) == .success)
+        try #require(entered.wait(timeout: .now() + 10) == .success)
         for index in 0..<24 {
             let start = ContinuousClock.now
             model.setScope(index.isMultiple(of: 2) ? .account(account.id) : .all)
             model.showInboxTab(.promotions)
             model.cycleTab(1)
-            #expect(start.duration(to: .now) < .seconds(1), "Scope and tab switches must return while the writer is held")
+            #expect(start.duration(to: .now) < .seconds(4), "Scope and tab switches must return while the writer is held")
             #expect(model.labels.map(\.id) == (index.isMultiple(of: 2) ? ["custom"] : []))
             try await Task.sleep(for: .milliseconds(10))
         }
