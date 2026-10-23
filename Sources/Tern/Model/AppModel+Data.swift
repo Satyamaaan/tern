@@ -102,29 +102,65 @@ extension AppModel {
     }
 
     private func observeRows(immediate: Bool, keepingPlace: Bool = false) {
-        let source = self.source
-        let limit = self.limit
-        let signpost = Timing.begin("list")
-        let observation = ValueObservation
-            .tracking { db in try source.fetch(db, limit: limit) }
-            .removeDuplicates()
-        let receive: ([ThreadRow]) -> Void = { [weak self] rows in
-            Timing.end(signpost)
-            guard let self, self.source == source else { return }
-            let first = !self.listLoaded
-            self.rawRows = rows
-            let more = source.mailbox.kind == .due
-                ? [LedgerDirection.iOwe, .waitingOn].contains { direction in rows.filter { $0.ledger?.direction == direction }.count >= limit }
-                : rows.count >= limit
-            if self.hasMore != more { self.hasMore = more }
-            if first { self.listLoaded = true }
-            if !self.isSearching { self.rebuildSnapshot(first && !keepingPlace ? .reset : .none, keepingPlace: first && keepingPlace) }
-            if first, let done = self.onFirstRows { self.onFirstRows = nil; done() }
-        }
+        let request = rowsSource.set(source: source, limit: limit, keepingPlace: keepingPlace)
         let reader = store.database.reader
-        rowsObservation = immediate
-            ? observation.startRestarting(in: reader, scheduling: .immediate, onError: Self.log, onChange: receive)
-            : observation.startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log, onChange: receive)
+        rowsReadTask?.cancel()
+        if immediate {
+            do { receiveRows(try reader.read { try request.fetch($0) }) }
+            catch {
+                Self.log(error)
+                readRows(request, afterFailure: true)
+            }
+        } else { readRows(request) }
+        guard rowsObservation == nil else { return }
+        let rowsSource = rowsSource
+        // A concurrent observation retains its initial reader until it gets writer access, even
+        // after cancellation. Keep one for the model's lifetime; plain reads above return at once.
+        rowsObservation = ValueObservation
+            .tracking(regions: ListObservationSource.regions) { db in try rowsSource.current.fetch(db) }
+            .removeDuplicates()
+            .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] rows in
+                self?.receiveRows(rows)
+            }
+    }
+
+    private func readRows(_ request: ListObservationSource.Request, afterFailure: Bool = false) {
+        let reader = store.database.reader
+        rowsReadTask = Task { [weak self] in
+            var delay = afterFailure ? 0.25 : 0
+            while !Task.isCancelled {
+                if delay > 0 {
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                }
+                guard self?.rowsSource.current == request else { return }
+                do {
+                    let rows = try await reader.read { try request.fetch($0) }
+                    self?.receiveRows(rows)
+                    return
+                } catch {
+                    Self.log(error)
+                    delay = delay == 0 ? 0.25 : min(30, delay * 2)
+                }
+            }
+        }
+    }
+
+    private func receiveRows(_ value: ListObservationSource.Rows) {
+        // The source can change away and back while a page or observation result is in flight.
+        guard rowsSource.current == value.request else { return }
+        let rows = value.rows
+        let source = value.request.source
+        let limit = value.request.limit
+        let keepingPlace = value.request.keepingPlace
+        let first = !listLoaded
+        rawRows = rows
+        let more = source.mailbox.kind == .due
+            ? [LedgerDirection.iOwe, .waitingOn].contains { direction in rows.filter { $0.ledger?.direction == direction }.count >= limit }
+            : rows.count >= limit
+        if hasMore != more { hasMore = more }
+        if first { listLoaded = true }
+        if !isSearching { rebuildSnapshot(first && !keepingPlace ? .reset : .none, keepingPlace: first && keepingPlace) }
+        if first, let done = onFirstRows { onFirstRows = nil; done() }
     }
 
     /// Recomputes what the list shows from the latest rows, keeping hidden (just triaged) threads out

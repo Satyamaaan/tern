@@ -157,6 +157,8 @@ final class AppModel {
     /// Threads an undo is putting back; their return to the list slides them in (`ListAnimation.restore`).
     @ObservationIgnored var restoring: Set<ThreadKey> = []
     @ObservationIgnored var undoStack: [UndoEntry] = []
+    @ObservationIgnored var rowsReadTask: Task<Void, Never>?
+    @ObservationIgnored let rowsSource: ListObservationSource
     @ObservationIgnored var rowsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var countsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var accountsObservation: AnyDatabaseCancellable?
@@ -188,7 +190,9 @@ final class AppModel {
         self.store = services.store
         self.isFake = isFake
         self.databaseURL = databaseURL
-        self.source = ListSource(mailbox: .unifiedInbox, tab: nil)
+        let source = ListSource(mailbox: .unifiedInbox, tab: nil)
+        self.source = source
+        rowsSource = ListObservationSource(source: source, limit: Self.pageSize)
         inboxTab = landingTab
     }
 
