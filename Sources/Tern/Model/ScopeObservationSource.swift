@@ -45,8 +45,15 @@ final class ScopeObservationSource: @unchecked Sendable {
     }
 
     static let countsRegions: [any DatabaseRegionConvertible] = [
-        "thread_label", "thread_ai", "snooze", "draft", "message", "thread_project", "setting", "commitment",
-    ].map { Table<Row>($0) }
+        Table<Row>("thread_label").select(Column("accountId"), Column("threadId"), Column("labelId"), Column("gmailTab")),
+        Table<Row>("thread_ai").select(Column("accountId"), Column("threadId"), Column("category"), Column("needsReply")),
+        Table<Row>("snooze"),
+        Table<Row>("draft").select(Column("accountId"), Column("gmailMessageId"), Column("state")),
+        Table<Row>("message").select(Column("accountId"), Column("id"), Column("isDraft")),
+        Table<Row>("thread_project").select(Column("accountId"), Column("threadId"), Column("projectId")),
+        Table<Row>("setting"),
+        Table<Row>("commitment").select(Column("accountId"), Column("threadId"), Column("state"), Column("surfaced"), Column("direction"), Column("confidence")),
+    ]
 
     static let labelsRegions: [any DatabaseRegionConvertible] = [Table<Row>("label")]
 }

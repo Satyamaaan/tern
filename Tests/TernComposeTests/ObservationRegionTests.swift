@@ -61,3 +61,20 @@ private func observationRegion(_ regions: [any DatabaseRegionConvertible], _ db:
         }
     }
 }
+
+@Test func unrelatedHotColumnsDoNotInvalidateMailObservations() throws {
+    let database = try AppDatabase.inMemory()
+    try database.reader.read { db in
+        let list = try observationRegion(ListObservationSource.regions, db)
+        let counts = try observationRegion(ScopeObservationSource.countsRegions, db)
+        for region in [list, counts] {
+            #expect(!region.isModified(byEventsOfKind: .update(tableName: "message", columnNames: ["bodyText", "bodyHtml", "bodyState"])))
+            #expect(!region.isModified(byEventsOfKind: .update(tableName: "thread_ai", columnNames: ["classifiedAt"])))
+        }
+        #expect(!list.isModified(byEventsOfKind: .update(tableName: "account", columnNames: ["historyId", "lastSyncAt"])))
+        #expect(list.isModified(byEventsOfKind: .update(tableName: "message", columnNames: ["searchRecipients"])))
+        #expect(list.isModified(byEventsOfKind: .update(tableName: "draft", columnNames: ["bodyHtml"])))
+        #expect(!counts.isModified(byEventsOfKind: .update(tableName: "draft", columnNames: ["bodyHtml", "updatedAt"])))
+        #expect(!counts.isModified(byEventsOfKind: .update(tableName: "commitment", columnNames: ["sourceQuote", "updatedAt"])))
+    }
+}

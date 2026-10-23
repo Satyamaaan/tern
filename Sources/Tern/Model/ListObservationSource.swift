@@ -39,9 +39,17 @@ final class ListObservationSource: @unchecked Sendable {
         }
     }
 
-    /// The union of tables read by every ListSource, including local drafts and Due.
+    /// The union of columns read by every ListSource, including local drafts and Due.
     static let regions: [any DatabaseRegionConvertible] = [
-        "thread", "thread_label", "thread_ai", "thread_summary", "thread_project", "snooze",
-        "message", "account", "draft", "setting", "commitment",
-    ].map { Table<Row>($0) }
+        Table<Row>("thread"),
+        Table<Row>("thread_label").select(Column("accountId"), Column("threadId"), Column("labelId"), Column("lastDate"), Column("gmailTab")),
+        Table<Row>("thread_ai").select(Column("accountId"), Column("threadId"), Column("category"), Column("needsReply"), Column("priority"), Column("summary")),
+        Table<Row>("thread_summary").select(Column("accountId"), Column("threadId"), Column("messageCount"), Column("lastDate"), Column("line")),
+        Table<Row>("thread_project").select(Column("accountId"), Column("threadId"), Column("projectId")),
+        Table<Row>("snooze"),
+        Table<Row>("message").select(Column("accountId"), Column("id"), Column("threadId"), Column("isDraft"), Column("isFromMe"), Column("searchRecipients")),
+        Table<Row>("account").select(Column("id"), Column("email")),
+        // Drafts and Due select whole records, so these regions must stay broad.
+        Table<Row>("draft"), Table<Row>("setting"), Table<Row>("commitment"),
+    ]
 }
