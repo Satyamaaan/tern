@@ -32,7 +32,13 @@ extension AppModel {
         let reader = store.database.reader
         let request = scopeSource.set(accountId: scope.accountId)
         tabsWithMail = (try? reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: request.accountId) }) ?? []
-        labels = (try? reader.read { try request.fetchLabels($0).labels }) ?? []
+        labelsReadTask?.cancel()
+        do { receiveLabels(try reader.read { try request.fetchLabels($0) }) }
+        catch is CancellationError { }
+        catch {
+            Self.log(error)
+            readLabels(request)
+        }
         countsReadTask?.cancel()
         readCounts(request)
 
@@ -50,8 +56,7 @@ extension AppModel {
                 .tracking(regions: ScopeObservationSource.labelsRegions) { db in try scopeSource.current.fetchLabels(db) }
                 .removeDuplicates()
                 .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] value in
-                    guard let self, self.scopeSource.current == value.request else { return }
-                    self.labels = value.labels
+                    self?.receiveLabels(value, fromObservation: true)
                 }
         }
     }
@@ -69,7 +74,9 @@ extension AppModel {
                     let value = try await reader.read { try request.fetchCounts($0) }
                     self?.receiveCounts(value)
                     return
-                } catch {
+                } catch is CancellationError { return }
+                catch {
+                    guard !Task.isCancelled else { return }
                     Self.log(error)
                     delay = delay == 0 ? 0.25 : min(30, delay * 2)
                 }
@@ -86,6 +93,34 @@ extension AppModel {
         if tabs != tabsWithMail { tabsWithMail = tabs }
         let badge = counts.allAccountsInboxUnread
         NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
+    }
+
+    private func readLabels(_ request: ScopeObservationSource.Request) {
+        let reader = store.database.reader
+        labelsReadTask = Task { [weak self] in
+            var delay = 0.25
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard self?.scopeSource.current == request else { return }
+                do {
+                    let value = try await reader.read { try request.fetchLabels($0) }
+                    self?.receiveLabels(value)
+                    return
+                } catch is CancellationError { return }
+                catch {
+                    guard !Task.isCancelled else { return }
+                    Self.log(error)
+                    delay = min(30, delay * 2)
+                }
+            }
+        }
+    }
+
+    func receiveLabels(_ value: ScopeObservationSource.Labels, fromObservation: Bool = false) {
+        guard scopeSource.current == value.request else { return }
+        if fromObservation { labelsObservedGeneration = value.request.generation }
+        else if labelsObservedGeneration >= value.request.generation { return }
+        labels = value.labels
     }
 
     private func receive(accounts: [Account]) {
@@ -164,7 +199,9 @@ extension AppModel {
                     let rows = try await reader.read { try request.fetch($0) }
                     self?.receiveRows(rows)
                     return
-                } catch {
+                } catch is CancellationError { return }
+                catch {
+                    guard !Task.isCancelled else { return }
                     Self.log(error)
                     delay = delay == 0 ? 0.25 : min(30, delay * 2)
                 }

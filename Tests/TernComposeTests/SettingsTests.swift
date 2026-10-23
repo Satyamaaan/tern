@@ -618,38 +618,41 @@ private func bindingsFile(_ bindings: [String: String]) throws -> URL {
     }
 }
 
-@MainActor
-@Test func splitInboxKeepsTheOpenThreadAndTheSelection() throws {
-    let prefs = Preferences.shared
-    let saved = prefs.splitInbox
-    defer { prefs.splitInbox = saved }
-    prefs.splitInbox = true
-    let model = try makeModel(threads: 6)
-    model.reloadList()
-    // Unclassified mail with no Gmail category is in Primary, so that tab lists every thread.
-    model.showInboxTab(.primary)
-    let order = model.snapshot.order
-    try #require(order.count == 6 && model.cursor == order[0])
-    model.setCursor(order[3], open: false)
-    model.click(order[4], command: true, shift: false)
-    let checked: Set<ThreadKey> = [order[3], order[4]]
-    #expect(model.checked == checked)
+extension InboxPreferencesTests {
+    @MainActor
+    @Test func splitInboxKeepsTheOpenThreadAndTheSelection() throws {
+        let prefs = Preferences.shared
+        let saved = prefs.splitInbox
+        defer { prefs.splitInbox = saved }
+        prefs.splitInbox = true
+        let model = try makeModel(threads: 6)
+        model.reloadList()
+        // Unclassified mail with no Gmail category is in Primary, so that tab lists every thread.
+        model.showInboxTab(.primary)
+        let order = model.snapshot.order
+        try #require(order.count == 6 && model.cursor == order[0])
+        model.setCursor(order[3], open: false)
+        model.click(order[4], command: true, shift: false)
+        let checked: Set<ThreadKey> = [order[3], order[4]]
+        #expect(model.checked == checked)
 
-    // Off: the tab becomes All, which still has both threads, with the cursor where it was.
-    model.setSplitInbox(false)
-    #expect(model.activeTab == .all && model.source.tab == nil)
-    #expect(model.cursor == order[4] && model.checked == checked && model.snapshot.order == order)
+        // Off: the tab becomes All, which still has both threads, with the cursor where it was.
+        model.setSplitInbox(false)
+        #expect(model.activeTab == .all && model.source.tab == nil)
+        #expect(model.cursor == order[4] && model.checked == checked && model.snapshot.order == order)
 
-    // On again, the list is All either way: nothing is read again.
-    model.checked = []
-    model.setCursor(order[2], open: false)
-    let source = model.source
-    model.setSplitInbox(true)
-    #expect(model.source == source && model.activeTab == .all && model.cursor == order[2])
+        // On again, the list is All either way: nothing is read again.
+        model.checked = []
+        model.setCursor(order[2], open: false)
+        let source = model.source
+        model.setSplitInbox(true)
+        #expect(model.source == source && model.activeTab == .all && model.cursor == order[2])
 
-    // Choosing another list still starts at its first row.
-    model.show(.allMail)
-    #expect(model.cursor == model.snapshot.order.first && model.cursor != order[2])
+        // Choosing another list still starts at its first row.
+        model.show(.allMail)
+        #expect(model.cursor == model.snapshot.order.first && model.cursor != order[2])
+    }
+
 }
 
 @MainActor

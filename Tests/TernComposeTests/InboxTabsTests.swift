@@ -34,104 +34,107 @@ private func withModel(promotions: Int = 4, primary: Int = 2, _ body: (AppModel)
     try body(model)
 }
 
-@MainActor
-@Test func theInboxOpensOnPrimary() throws {
-    try withModel { model in
-        #expect(model.activeTab == .category(.primary))
-        #expect(model.snapshot.order.map(\.threadId) == ["t4", "t5"])
-        model.show(.sent)
-        model.show(.inbox)
-        #expect(model.activeTab == .category(.primary))
-        // The Inbox (sidebar, g i) lands on Primary from another tab too; All stays a click away.
-        model.showInboxTab(.promotions)
-        model.show(.inbox)
-        #expect(model.activeTab == .category(.primary))
-        model.select(.all)
-        #expect(model.activeTab == .all && model.snapshot.order.count == 6)
+extension InboxPreferencesTests {
+    @MainActor
+    @Test func theInboxOpensOnPrimary() throws {
+        try withModel { model in
+            #expect(model.activeTab == .category(.primary))
+            #expect(model.snapshot.order.map(\.threadId) == ["t4", "t5"])
+            model.show(.sent)
+            model.show(.inbox)
+            #expect(model.activeTab == .category(.primary))
+            // The Inbox (sidebar, g i) lands on Primary from another tab too; All stays a click away.
+            model.showInboxTab(.promotions)
+            model.show(.inbox)
+            #expect(model.activeTab == .category(.primary))
+            model.select(.all)
+            #expect(model.activeTab == .all && model.snapshot.order.count == 6)
 
-        model.setSplitInbox(false)
-        model.show(.sent)
-        model.show(.inbox)
-        #expect(model.activeTab == .all && model.landingTab == nil)
-    }
+            model.setSplitInbox(false)
+            model.show(.sent)
+            model.show(.inbox)
+            #expect(model.activeTab == .all && model.landingTab == nil)
+        }
 }
 
-@MainActor
-@Test func anEmptyTabHidesExceptWhileItIsOpen() throws {
-    try withModel { model in
-        // Read when the scope is set, before any counts arrive.
-        model.observeScope()
-        #expect(model.tabsWithMail == [.primary, .promotions])
-        let gmail = { model.tabs.compactMap { tab -> InboxTab? in if case .category(let inbox) = tab { inbox } else { nil } } }
-        #expect(model.tabs.prefix(2) == [.all, .needsReply])
-        #expect(gmail() == [.primary, .promotions])
-        model.showInboxTab(.forums)
-        #expect(gmail() == [.primary, .promotions, .forums] && model.snapshot.isEmpty)
-        model.cycleTab(-1)
-        #expect(model.activeTab == .category(.promotions) && gmail() == [.primary, .promotions])
-        // Primary shows even when it's empty.
-        model.tabsWithMail = []
-        #expect(gmail() == [.primary, .promotions])
-        model.setSplitInbox(false)
-        #expect(model.tabs == [.all, .needsReply])
+    @MainActor
+    @Test func anEmptyTabHidesExceptWhileItIsOpen() throws {
+        try withModel { model in
+            // Read when the scope is set, before any counts arrive.
+            model.observeScope()
+            #expect(model.tabsWithMail == [.primary, .promotions])
+            let gmail = { model.tabs.compactMap { tab -> InboxTab? in if case .category(let inbox) = tab { inbox } else { nil } } }
+            #expect(model.tabs.prefix(2) == [.all, .needsReply])
+            #expect(gmail() == [.primary, .promotions])
+            model.showInboxTab(.forums)
+            #expect(gmail() == [.primary, .promotions, .forums] && model.snapshot.isEmpty)
+            model.cycleTab(-1)
+            #expect(model.activeTab == .category(.promotions) && gmail() == [.primary, .promotions])
+            // Primary shows even when it's empty.
+            model.tabsWithMail = []
+            #expect(gmail() == [.primary, .promotions])
+            model.setSplitInbox(false)
+            #expect(model.tabs == [.all, .needsReply])
+        }
     }
-}
 
-@MainActor
-@Test func onlyTheQuieterTabsCountUnread() throws {
-    try withModel { model in
-        var counts = ScopeCounts()
-        counts.inboxUnread = 5
-        counts.needsReply = 1
-        counts.tabUnread = [.primary: 3, .promotions: 2]
-        model.counts = counts
-        #expect(model.count(for: .all) == nil && model.count(for: .category(.primary)) == nil)
-        #expect(model.count(for: .category(.promotions)) == 2 && model.count(for: .category(.social)) == nil)
-        #expect(model.count(for: .needsReply) == 1)
-        // Without the tabs, All is the only place the title bar shows unread mail.
-        model.setSplitInbox(false)
-        #expect(model.count(for: .all) == 5)
+    @MainActor
+    @Test func onlyTheQuieterTabsCountUnread() throws {
+        try withModel { model in
+            var counts = ScopeCounts()
+            counts.inboxUnread = 5
+            counts.needsReply = 1
+            counts.tabUnread = [.primary: 3, .promotions: 2]
+            model.counts = counts
+            #expect(model.count(for: .all) == nil && model.count(for: .category(.primary)) == nil)
+            #expect(model.count(for: .category(.promotions)) == 2 && model.count(for: .category(.social)) == nil)
+            #expect(model.count(for: .needsReply) == 1)
+            // Without the tabs, All is the only place the title bar shows unread mail.
+            model.setSplitInbox(false)
+            #expect(model.count(for: .all) == 5)
+        }
     }
-}
 
-@MainActor
-@Test func movingAThreadToAnotherTabTakesItsRowAway() throws {
-    try withModel { model in
-        model.showInboxTab(.promotions)
-        let order = model.snapshot.order
-        try #require(order.count == 4 && model.cursor == order[0])
-        model.perform(.moveToTab(.primary), on: [order[0]])
-        #expect(model.snapshot.rows[order[0]] == nil && model.cursor == order[1])
-        #expect(model.toasts.last?.title == "Moved to Primary")
-        #expect(model.toasts.last?.undo != nil)
+    @MainActor
+    @Test func movingAThreadToAnotherTabTakesItsRowAway() throws {
+        try withModel { model in
+            model.showInboxTab(.promotions)
+            let order = model.snapshot.order
+            try #require(order.count == 4 && model.cursor == order[0])
+            model.perform(.moveToTab(.primary), on: [order[0]])
+            #expect(model.snapshot.rows[order[0]] == nil && model.cursor == order[1])
+            #expect(model.toasts.last?.title == "Moved to Primary")
+            #expect(model.toasts.last?.undo != nil)
 
-        // On All, or to the tab it's already in, the row stays.
-        #expect(!model.leavesList(.moveToTab(.promotions)))
-        model.select(.all)
-        #expect(!model.leavesList(.moveToTab(.social)))
+            // On All, or to the tab it's already in, the row stays.
+            #expect(!model.leavesList(.moveToTab(.promotions)))
+            model.select(.all)
+            #expect(!model.leavesList(.moveToTab(.social)))
+        }
     }
-}
 
-@MainActor
-@Test func moveCommandsOfferTheOtherTabs() throws {
-    try withModel { model in
-        let registry = CommandRegistry(model: model, shell: nil, overrides: ShortcutOverrides(), keyBindings: KeyBindingFiles(urls: []))
-        model.registry = registry
-        model.showInboxTab(.promotions)
-        let enabled = { InboxTab.allCases.filter { registry.canRun(registry["moveToTab.\($0.rawValue)"]!) } }
-        #expect(enabled() == [.primary, .social, .updates, .forums])
-        #expect(registry["moveToTab.primary"]?.title == "Move to Primary" && registry["moveToTab.primary"]?.keys.isEmpty == true)
-        #expect(registry["tab.primary"]?.keys == [.option("3")] && registry["tab.forums"]?.keys == [.option("7")])
+    @MainActor
+    @Test func moveCommandsOfferTheOtherTabs() throws {
+        try withModel { model in
+            let registry = CommandRegistry(model: model, shell: nil, overrides: ShortcutOverrides(), keyBindings: KeyBindingFiles(urls: []))
+            model.registry = registry
+            model.showInboxTab(.promotions)
+            let enabled = { InboxTab.allCases.filter { registry.canRun(registry["moveToTab.\($0.rawValue)"]!) } }
+            #expect(enabled() == [.primary, .social, .updates, .forums])
+            #expect(registry["moveToTab.primary"]?.title == "Move to Primary" && registry["moveToTab.primary"]?.keys.isEmpty == true)
+            #expect(registry["tab.primary"]?.keys == [.option("3")] && registry["tab.forums"]?.keys == [.option("7")])
 
-        let item = ThreadMenu.make(registry: registry, model: model).items.first { $0.title == "Move to Tab" }
-        #expect(item?.submenu?.items.map(\.title) == ["Primary", "Promotions", "Social", "Updates", "Forums"])
-        #expect(item?.submenu?.items.filter { $0.state == .on }.map(\.title) == ["Promotions"])
+            let item = ThreadMenu.make(registry: registry, model: model).items.first { $0.title == "Move to Tab" }
+            #expect(item?.submenu?.items.map(\.title) == ["Primary", "Promotions", "Social", "Updates", "Forums"])
+            #expect(item?.submenu?.items.filter { $0.state == .on }.map(\.title) == ["Promotions"])
 
-        model.setSplitInbox(false)
-        #expect(enabled().isEmpty)
-        #expect(!ThreadMenu.make(registry: registry, model: model).items.contains { $0.title == "Move to Tab" })
-        #expect(registry["splitInbox"]?.displayTitle == "Turn On Inbox Tabs")
+            model.setSplitInbox(false)
+            #expect(enabled().isEmpty)
+            #expect(!ThreadMenu.make(registry: registry, model: model).items.contains { $0.title == "Move to Tab" })
+            #expect(registry["splitInbox"]?.displayTitle == "Turn On Inbox Tabs")
+        }
     }
+
 }
 
 @MainActor

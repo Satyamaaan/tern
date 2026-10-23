@@ -167,6 +167,8 @@ final class AppModel {
     @ObservationIgnored var countsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var accountsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var projectsObservation: AnyDatabaseCancellable?
+    @ObservationIgnored var labelsReadTask: Task<Void, Never>?
+    @ObservationIgnored var labelsObservedGeneration = -1
     @ObservationIgnored var labelsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var searchTask: Task<Void, Never>?
     @ObservationIgnored var searchGeneration = 0
