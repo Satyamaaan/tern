@@ -62,6 +62,7 @@ final class ReaderModel {
     @ObservationIgnored private(set) var services: AppServices?
     @ObservationIgnored let engine = ReaderWebEngine.shared
     @ObservationIgnored private var observer: ThreadDetailObserver?
+    @ObservationIgnored private var isFollowing = false
     @ObservationIgnored private var renderedSignature: String?
     @ObservationIgnored private var openStarted: CFTimeInterval?
     @ObservationIgnored private var openInterval: OSSignpostIntervalState?
@@ -133,8 +134,8 @@ final class ReaderModel {
         commitmentEvidence = false
         focusedCommitmentId = nil
         logosPending = false
-        observer?.cancel()
-        observer = nil
+        observer?.pause()
+        isFollowing = false
         self.key = key
         resetThreadState()
         guard let key, let services else {
@@ -156,8 +157,8 @@ final class ReaderModel {
     /// dropped (asked again on the way back); logo and image-setting changes wait for it.
     func suspend() {
         isActive = false
-        observer?.cancel()
-        observer = nil
+        observer?.pause()
+        isFollowing = false
         quickReplyTask?.cancel()
         quickReplyTask = nil
     }
@@ -165,7 +166,7 @@ final class ReaderModel {
     /// Back on screen with the same thread: follows it again. The first value arrives at once and only redraws
     /// what changed while it was off screen (the images setting included), so the page keeps its place.
     private func resume() {
-        guard observer == nil, let key, let services else { return }
+        guard !isFollowing, let key, let services else { return }
         observe(key, in: services)
         if logosPending {
             logosPending = false
@@ -175,9 +176,12 @@ final class ReaderModel {
 
     private func observe(_ key: ThreadKey, in services: AppServices) {
         Self.work.observed += 1
-        observer = ThreadDetailObserver(store: services.store, key: key) { [weak self] detail in
-            MainActor.assumeIsolated { self?.receive(detail, for: key) }
+        isFollowing = true
+        let receive: (ThreadDetail?) -> Void = { [weak self] detail in
+            self?.receive(detail, for: key)
         }
+        if let observer { observer.follow(key, onChange: receive) }
+        else { observer = ThreadDetailObserver(store: services.store, key: key, onChange: receive) }
     }
 
     private func resetThreadState() {

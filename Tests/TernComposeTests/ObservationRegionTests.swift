@@ -2,7 +2,7 @@ import Foundation
 @testable import GRDB
 import Testing
 @testable import Tern
-import TernCore
+@testable import TernCore
 
 @Test func listObservationCoversEveryMailboxQuery() throws {
     let database = try AppDatabase.inMemory()
@@ -76,5 +76,54 @@ private func observationRegion(_ regions: [any DatabaseRegionConvertible], _ db:
         #expect(list.isModified(byEventsOfKind: .update(tableName: "draft", columnNames: ["bodyHtml"])))
         #expect(!counts.isModified(byEventsOfKind: .update(tableName: "draft", columnNames: ["bodyHtml", "updatedAt"])))
         #expect(!counts.isModified(byEventsOfKind: .update(tableName: "commitment", columnNames: ["sourceQuote", "updatedAt"])))
+    }
+}
+
+@Test func detailObservationCoversEveryDetailQuery() throws {
+    let database = try AppDatabase.inMemory()
+    let store = MailStore(database)
+    let account = Account(email: "synthetic@example.com")
+    let key = ThreadKey(accountId: account.id, threadId: "thread")
+    try database.writer.write { db in
+        try account.insert(db)
+        try MailStore.upsertMessages(db, [
+            MailMessage(accountId: account.id, id: "message", threadId: key.threadId, date: Date(),
+                fromEmail: "sender@example.com", bodyText: "Please send the proposal", labelIds: [SystemLabel.inbox]),
+            MailMessage(accountId: account.id, id: "draft", threadId: "draft", date: Date(),
+                fromEmail: account.email, bodyHtml: "<p>Draft reply</p>", labelIds: [SystemLabel.draft]),
+        ])
+        try MailAttachment(accountId: account.id, messageId: "message", partId: "1", filename: "proposal.pdf",
+                           mimeType: "application/pdf", size: 100).insert(db)
+        let project = Project(name: "Proposal")
+        try project.insert(db)
+        try ThreadProject(accountId: account.id, threadId: key.threadId, projectId: project.id, source: .manual).insert(db)
+        try ThreadAI(accountId: account.id, threadId: key.threadId, category: .people, summary: "Send proposal", messageCount: 1).insert(db)
+        try Snooze(accountId: account.id, threadId: key.threadId, until: Date()).insert(db)
+    }
+    _ = try store.trackCommitment(on: key, direction: .iOwe, deliverable: "Send proposal",
+                                 counterparty: Participant(email: "sender@example.com"), dueAt: nil)
+    try database.writer.write { db in
+        try db.execute(sql: "UPDATE commitment SET sourceQuote = ''")
+        let observed = try observationRegion(DetailObservationSource.regions, db)
+        for enabled in [true, false] {
+            try Setting(key: "ledger.enabled", value: String(enabled)).upsert(db)
+            for showMaybe in [true, false] {
+                try Setting(key: "ledger.showMaybe", value: String(showMaybe)).upsert(db)
+                for threadId in [key.threadId, "draft", "missing"] {
+                    var selected = DatabaseRegion()
+                    let detail = try db.recordingSelection(&selected) {
+                        try MailStore.fetchThreadDetail(db, ThreadKey(accountId: account.id, threadId: threadId))
+                    }
+                    if enabled && threadId == key.threadId {
+                        #expect(detail?.commitments.first?.sourceQuote == "Please send the proposal")
+                    }
+                    #expect(observed.union(selected) == observed, "Missing detail region: \(selected)")
+                }
+            }
+        }
+        #expect(!observed.isModified(byEventsOfKind: .update(tableName: "thread_project", columnNames: ["source"])))
+        #expect(!observed.isModified(byEventsOfKind: .update(tableName: "account", columnNames: ["historyId", "lastSyncAt"])))
+        #expect(!observed.isModified(byEventsOfKind: .update(tableName: "draft", columnNames: ["bodyHtml"])))
+        #expect(observed.isModified(byEventsOfKind: .update(tableName: "message", columnNames: ["bodyHtml", "bodyState"])))
     }
 }
