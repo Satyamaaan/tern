@@ -8,7 +8,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
     case markRead, afterTriage, imagesInMail, remoteImages, undoSend, signatures, sendFrom
     case theme, density, dimRead, senderLogos
     case readingPane, readerOverlay, sidebar, splitInbox, pinnedTabs
-    case notifications, notifyImportant
+    case notifications, notifyImportant, loginPopups
     case aiAbout, aiProvider, groqKey, aiSorting, aiModel, aiProjects, ledgerAI, primarySummaries
     case shortcuts
     case updates, database, searchIndex, demoMail
@@ -21,7 +21,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .ledgerTracking, .markRead, .afterTriage, .imagesInMail, .remoteImages, .undoSend, .signatures, .sendFrom: .mail
         case .theme, .density, .dimRead, .senderLogos: .appearance
         case .readingPane, .readerOverlay, .sidebar, .splitInbox, .pinnedTabs: .layout
-        case .notifications, .notifyImportant: .notifications
+        case .notifications, .notifyImportant, .loginPopups: .notifications
         case .aiAbout, .aiProvider, .aiSorting, .aiModel, .aiProjects, .groqKey, .ledgerAI, .primarySummaries: .ai
         case .shortcuts: .shortcuts
         case .updates, .database, .searchIndex, .demoMail: .advanced
@@ -64,6 +64,7 @@ enum SettingsItem: String, CaseIterable, Identifiable {
         case .pinnedTabs: "pinned tabs pin unpin reorder"
         case .notifications: "notifications new mail banners alerts"
         case .notifyImportant: "only important notifications"
+        case .loginPopups: "show login popups popup OTP verification code magic link sign in local extraction"
         case .aiAbout: "ai privacy provider"
         case .aiProvider: "ai provider groq claude code codex"
         case .groqKey: "groq api key secure credential remove replace"
@@ -160,6 +161,7 @@ struct SettingsItemView: View {
         case .pinnedTabs: PinnedTabsItem()
         case .notifications: NotificationsItem()
         case .notifyImportant: NotifyImportantItem()
+        case .loginPopups: LoginPopupItem()
         case .aiAbout: AIAboutItem()
         case .aiProvider: AIProviderItem(state: state)
         case .aiSorting: AISortingItem()

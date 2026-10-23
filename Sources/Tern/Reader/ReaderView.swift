@@ -56,6 +56,13 @@ struct ReaderView: View {
     var body: some View {
         VStack(spacing: 0) {
             ReaderTopBar(model: model, position: position, onBack: onBack, panel: panel)
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                if !model.loginCredentials.isEmpty {
+                    ReaderLoginActions(credentials: model.loginCredentials, perform: model.useLoginCredential)
+                        .readerColumn(panel: panel != nil)
+                        .padding(.vertical, 8)
+                }
+            }
             if model.stripVisible {
                 ReaderCommitmentStrip(model: model)
                     .readerColumn(panel: panel != nil)

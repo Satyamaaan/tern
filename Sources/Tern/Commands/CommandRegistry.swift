@@ -315,6 +315,22 @@ final class CommandRegistry {
                     isEnabled: { reading() && m.focus == .reader && reader.model?.stripVisible == true }) { reader.model?.commitmentEvidence.toggle() },
             Command(id: "summarize", title: "Summarize", group: .actions, keys: [.command("s", shift: true)], menu: .message, section: 4,
                     aliases: ["tl;dr", "ai"], isEnabled: { reading() && m.services.ai != nil }) { reader.summarize() },
+            Command(id: "copyLoginCode", title: "Copy Sign-in Code", group: .actions, keys: [.init(key: .char("c"), modifiers: [.option, .shift])], menu: .message, section: 4,
+                    aliases: ["otp", "verification", "one-time password"], isEnabled: {
+                        reading() && reader.model?.loginCredentials.contains(where: { if case .code = $0 { return true }; return false }) == true
+                    }) {
+                if let credential = reader.model?.loginCredentials.first(where: { if case .code = $0 { return true }; return false }) {
+                    reader.model?.useLoginCredential(credential)
+                }
+            },
+            Command(id: "openLoginLink", title: "Open Sign-in Link…", group: .actions, keys: [.init(key: .char("o"), modifiers: [.option, .shift])], menu: .message, section: 4,
+                    aliases: ["magic link", "login"], isEnabled: {
+                        reading() && reader.model?.loginCredentials.contains(where: { if case .magicLink = $0 { return true }; return false }) == true
+                    }) {
+                if let credential = reader.model?.loginCredentials.first(where: { if case .magicLink = $0 { return true }; return false }) {
+                    reader.model?.useLoginCredential(credential)
+                }
+            },
             Command(id: "showOriginal", title: "Show Original", group: .actions, menu: .message, section: 4,
                     aliases: ["source", "headers", "raw"], isEnabled: reading) { reader.showOriginal() },
             // ⌘F finds in the open conversation while it is on screen, and searches mail otherwise.

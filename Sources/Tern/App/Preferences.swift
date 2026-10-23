@@ -128,6 +128,8 @@ final class Preferences {
     var showSenderLogos: Bool { didSet { save("showSenderLogos", showSenderLogos) } }
     var notificationsEnabled: Bool { didSet { save("notifications", notificationsEnabled) } }
     var notifyOnlyImportant: Bool { didSet { save("notifyOnlyImportant", notifyOnlyImportant) } }
+    /// Opt-in local popups that can display sign-in codes outside Tern.
+    var showLoginPopups: Bool { didSet { save("showLoginPopups", showLoginPopups) } }
     var splitInbox: Bool { didSet { save("splitInbox", splitInbox) } }
     /// The mailbox sidebar, hidden behind the bottom bar's toggle by default.
     var sidebarOpen: Bool { didSet { save("sidebarOpen", sidebarOpen) } }
@@ -161,6 +163,7 @@ final class Preferences {
         showSenderLogos = defaults.object(forKey: "showSenderLogos") as? Bool ?? true
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
         notifyOnlyImportant = defaults.object(forKey: "notifyOnlyImportant") as? Bool ?? true
+        showLoginPopups = defaults.bool(forKey: "showLoginPopups")
         splitInbox = defaults.object(forKey: "splitInbox") as? Bool ?? true
         sidebarOpen = defaults.bool(forKey: "sidebarOpen")
         readingPane = defaults.bool(forKey: "readingPane")

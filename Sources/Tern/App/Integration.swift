@@ -28,6 +28,7 @@ final class Integration {
     var activityObservers: [any NSObjectProtocol] = []
     var rateLimitTimer: Timer?
     var notifications: MailNotifications?
+    var loginArrivals: LoginArrivals?
 
     init(services: AppServices, model: AppModel) {
         self.services = services
@@ -101,6 +102,9 @@ final class Integration {
         let notifications = MailNotifications(services: services, prefs: model.prefs)
         notifications.start()
         self.notifications = notifications
+        let loginArrivals = LoginArrivals(services: services, prefs: model.prefs)
+        loginArrivals.start()
+        self.loginArrivals = loginArrivals
     }
 
     /// Reads the accounts' kept photos, then asks Google again for those missing or a week old.
@@ -380,6 +384,7 @@ final class Integration {
     /// Quitting: lets sync put in-flight work back in its queue, for at most `timeout` seconds.
     func shutdown(timeout: TimeInterval = 2) async {
         notifications?.stop()
+        loginArrivals?.stop()
         stopObservingActivity()
         pathMonitor?.cancel()
         await sync?.shutdown(timeout: timeout)

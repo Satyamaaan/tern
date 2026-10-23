@@ -31,6 +31,7 @@ struct ReaderWork: Equatable {
 final class ReaderModel {
     private(set) var key: ThreadKey?
     private(set) var detail: ThreadDetail?
+    private(set) var loginArrival: LoginArrival?
     var composing: ComposeRequest?
     var commitmentEvidence = false
     weak var app: AppModel?
@@ -180,6 +181,7 @@ final class ReaderModel {
 
     private func resetThreadState() {
         composing = nil
+        loginArrival = nil
         findVisible = false
         findText = ""
         findFailed = false
@@ -203,11 +205,13 @@ final class ReaderModel {
         guard key == self.key else { return }
         guard let detail else {
             self.detail = nil
+            loginArrival = nil
             renderedSignature = nil
             engine.clear()
             return
         }
         self.detail = detail
+        loginArrival = detail.messages.last(where: { !$0.isDraft }).flatMap { LoginArrival($0, now: Date()) }
         var context = context(for: detail)
         let signature = ReaderPayload.signature(detail, context: context)
         defer { if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) } }
@@ -435,6 +439,19 @@ final class ReaderModel {
         let store = services.store
         Task.detached { try? store.setImagesAllowed(true, sender: sender) }
         if let detail, let key { receive(detail, for: key) }
+    }
+
+    // MARK: Login assistance
+
+    var loginCredentials: [LoginCredential] {
+        guard let loginArrival, LoginAssistance.isFresh(date: loginArrival.date, now: Date()) else { return [] }
+        return loginArrival.credentials
+    }
+
+    func useLoginCredential(_ credential: LoginCredential) {
+        guard loginCredentials.contains(credential) else { return }
+        LoginActions.perform(credential, window: engine.webView.window)
+        if case .code = credential { showToast("Code copied") }
     }
 
     // MARK: Links
