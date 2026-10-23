@@ -25,21 +25,24 @@ extension Snapshotter {
 
         let credentials: [LoginCredential] = [.code("482913"),
                                               .magicLink(URL(string: "https://linear.app/auth/magic/Zk3P9qLmA7xR2vT8wBn5")!)]
-        // Offscreen renders can't draw Liquid Glass; the card shows its solid surface over a wallpaper-like backdrop.
+        // Offscreen renders cannot sample the desktop; verify the solid accessibility surface here.
         LoginCard.drawsGlass = false
         defer { LoginCard.drawsGlass = true }
-        let height = NSHostingView(rootView: LoginPopupView(sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
-            perform: { _ in }, dismiss: {}).frame(width: LoginCard.width)).fittingSize.height
         let backdrop = LinearGradient(colors: [Color(red: 0.36, green: 0.52, blue: 0.78), Color(red: 0.86, green: 0.62, blue: 0.5)],
                                       startPoint: .top, endPoint: .bottom)
-        for (name, open, copied) in [("hidden", false, false), ("open", true, false), ("copied", true, true)] {
-            let state = LoginCardState(size: CGSize(width: LoginCard.width, height: height))
-            state.isOpen = open
-            state.copied = copied
-            let card = LoginCardView(state: state, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
+        for name in ["open", "copied", "hidden", "code-only", "link-only", "no-notch", "long-account"] {
+            let items = name == "code-only" ? [credentials[0]] : name == "link-only" ? [credentials[1]] : credentials
+            let account = name == "long-account" ? "an-exceptionally-long-account@northwind-studio.example.com" : "alex@kiteworks.dev"
+            let closed = CGSize(width: 184, height: name == "no-notch" ? 0 : 32)
+            let height = NSHostingView(rootView: LoginPopupView(sender: "Linear · linear.app", account: account, credentials: items,
+                perform: { _ in }, dismiss: {}).frame(width: LoginCard.width)).fittingSize.height + closed.height
+            let state = LoginCardState(size: CGSize(width: LoginCard.width, height: height), closed: closed)
+            state.isOpen = name != "hidden"
+            state.copied = name == "copied"
+            let card = LoginCardView(state: state, sender: "Linear · linear.app", account: account, credentials: items,
                                      perform: { _ in }, dismiss: {}, hovering: { _ in })
                 .transaction { $0.animation = nil }
-            standalone(card.background(backdrop), size: NSSize(width: 480, height: height + 64),
+            standalone(card.background(backdrop), size: NSSize(width: 500, height: height + 40),
                        to: directory.appendingPathComponent("login-card-\(name).png"), dark: false)
         }
 

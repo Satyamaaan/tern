@@ -45,11 +45,9 @@ enum Motion {
     /// The chord hint's fade, in and out.
     static let hintFade: Double = 0.2
 
-    /// The floating sign-in card: it drops in quick and a little bouncy, and lifts away slower without overshoot.
-    static let floatingOpen = Animation.spring(response: 0.47, dampingFraction: 0.76)
-    static let floatingClose = Animation.spring(response: 0.54, dampingFraction: 0.9)
-    /// The floating card leaning toward the pointer.
-    static let floatingHover = Animation.spring(response: 0.3, dampingFraction: 0.8)
+    /// The sign-in shell expands elastically and retracts without overshoot.
+    static let floatingOpen = Animation.spring(response: 0.5, dampingFraction: 0.625)
+    static let floatingClose = Animation.spring(response: 0.4, dampingFraction: 1)
     /// Its buttons giving under the pointer while held, and springing back.
     static let floatingPress = Animation.spring(response: 0.12, dampingFraction: 0.78)
     static let floatingRelease = Animation.spring(response: 0.3, dampingFraction: 0.74)

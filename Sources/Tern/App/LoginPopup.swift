@@ -3,8 +3,7 @@ import CoreGraphics
 import SwiftUI
 import TernCore
 
-/// A transient, nonactivating glass card for locally extracted sign-in credentials. It floats just under the top of
-/// the screen (below the notch or the menu bar), drops in on a spring and lifts away again.
+/// A transient, nonactivating surface for locally extracted sign-in credentials, attached to the screen's notch.
 @MainActor
 final class LoginPopup: NSObject {
     private static weak var current: LoginPopup?
@@ -46,10 +45,11 @@ final class LoginPopup: NSObject {
         dismiss(animated: false)
         guard !credentials.isEmpty, mayShow,
               let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main else { return }
-        let width = min(LoginCard.width, screen.frame.width - 32)
+        let closed = LoginCard.closedSize(on: screen)
+        let width = min(LoginCard.width, screen.frame.width - LoginCard.margin * 2)
         let measure = NSHostingView(rootView: LoginPopupView(sender: sender, account: account, credentials: credentials,
             perform: { _ in }, dismiss: {}).frame(width: width))
-        let state = LoginCardState(size: CGSize(width: width, height: measure.fittingSize.height))
+        let state = LoginCardState(size: CGSize(width: width, height: measure.fittingSize.height + closed.height), closed: closed)
         let view = LoginCardView(state: state, sender: sender, account: account, credentials: credentials, perform: { [weak self] credential in
             guard let self, self.mayShow else { self?.dismiss(); return }
             perform(credential)
@@ -69,9 +69,8 @@ final class LoginPopup: NSObject {
         let panel = LoginPopupPanel()
         panel.contentView = FirstMouseHostingView(rootView: view)
         let margin = LoginCard.margin
-        let size = CGSize(width: state.size.width + margin * 2, height: state.size.height + margin * 2)
-        let top = screen.frame.maxY - LoginCard.topInset(on: screen) - LoginCard.gap + margin
-        panel.setFrame(NSRect(x: screen.frame.midX - size.width / 2, y: top - size.height,
+        let size = CGSize(width: state.size.width + margin * 2, height: state.size.height + margin)
+        panel.setFrame(NSRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
                               width: size.width, height: size.height), display: true)
         self.panel = panel
         self.state = state
@@ -100,7 +99,7 @@ final class LoginPopup: NSObject {
         }
         state.isOpen = false
         closing = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(380))
+            try? await Task.sleep(for: .milliseconds(600))
             panel.orderOut(nil)
             panel.contentView = nil
         }
@@ -139,44 +138,38 @@ final class LoginPopup: NSObject {
     }
 }
 
-/// The card's size, place and motion.
+/// The attached shell's body width excludes the outward shoulders.
 enum LoginCard {
-    static let width: CGFloat = 372
-    static let padding: CGFloat = 16
-    /// Room around the card for its shadow and its drop; transparent, so clicks pass through.
+    static let width: CGFloat = 404
+    static let padding: CGFloat = 18
+    /// Room beside the shell for its shoulders and below it for the shadow.
     static let margin: CGFloat = 32
-    /// Space between the card and the notch or menu bar above it.
-    static let gap: CGFloat = 8
-    /// Offscreen renders (tests, `--snapshot`) can't draw Liquid Glass, so they get the solid surface.
+    /// Offscreen renders cannot sample the desktop material.
     @MainActor static var drawsGlass = true
 
-    /// Liquid Glass is drawn (macOS 26, on screen); blurring glass while it fades makes it pop, so only the other
-    /// surfaces blur on the way in and out.
-    @MainActor static var usesGlass: Bool {
-        guard drawsGlass else { return false }
-        if #available(macOS 26, *) { return true }
-        return false
-    }
-
-    /// The notch, or the menu bar on a screen without one; zero when the menu bar is hidden.
-    @MainActor static func topInset(on screen: NSScreen) -> CGFloat {
-        let notch = screen.safeAreaInsets.top
-        return notch > 0 ? notch : max(0, screen.frame.maxY - screen.visibleFrame.maxY)
+    @MainActor static func closedSize(on screen: NSScreen) -> CGSize {
+        if screen.safeAreaInsets.top > 0,
+           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+            return CGSize(width: screen.frame.width - left.width - right.width, height: screen.safeAreaInsets.top)
+        }
+        return CGSize(width: 184, height: 0)
     }
 }
 
 @MainActor @Observable
 final class LoginCardState {
     let size: CGSize
+    let closed: CGSize
     var isOpen = false
     var copied = false
 
-    init(size: CGSize) {
+    init(size: CGSize, closed: CGSize) {
         self.size = size
+        self.closed = closed
     }
 }
 
-/// The card in its panel: hidden pose (narrower, shorter, blurred, a little higher) to open and back.
+/// The shell grows around full-size content; neither the code nor its hit targets are stretched.
 struct LoginCardView: View {
     let state: LoginCardState
     let sender: String
@@ -185,28 +178,66 @@ struct LoginCardView: View {
     let perform: (LoginCredential) -> Void
     let dismiss: () -> Void
     let hovering: (Bool) -> Void
-    @State private var hovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let open = state.isOpen
-        let moves = !reduceMotion
-        let blurs = moves && !LoginCard.usesGlass
+        let size = open || reduceMotion ? state.size : state.closed
+        let shape = LoginNotchShape(shoulder: open || reduceMotion ? 28 : 6, bottom: open || reduceMotion ? 28 : 10)
         LoginPopupView(sender: sender, account: account, credentials: credentials, copied: state.copied,
                        perform: perform, dismiss: dismiss)
+            .padding(.top, state.closed.height)
             .frame(width: state.size.width, height: state.size.height, alignment: .top)
-            .scaleEffect(x: open || !moves ? 1 : 0.86, y: open || !moves ? 1 : 0.7, anchor: .top)
-            .scaleEffect(hovered && open && moves ? 1.012 : 1, anchor: .top)
-            .offset(y: open || !moves ? 0 : -14)
-            .blur(radius: open || !blurs ? 0 : 10)
             .opacity(open ? 1 : 0)
-            .animation(moves ? (open ? Motion.floatingOpen : Motion.floatingClose) : Motion.reduced, value: open)
-            .animation(Motion.floatingHover, value: hovered)
-            .onHover { inside in
-                hovered = inside
-                hovering(inside)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .offset(y: open || reduceMotion ? 0 : -8)
+            .animation(reduceMotion ? Motion.reduced : Motion.ease(open ? 0.2 : 0.1), value: open)
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .clipShape(shape)
+            .background(LoginCardSurface(shape: shape))
+            .contentShape(shape)
+            .opacity(reduceMotion && !open ? 0 : 1)
+            .animation(reduceMotion ? Motion.reduced : (open ? Motion.floatingOpen : Motion.floatingClose), value: open)
+            .allowsHitTesting(open)
+            .accessibilityHidden(!open)
+            .onHover(perform: hovering)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Concave shoulders join the screen edge; convex lower corners finish the expanded body.
+struct LoginNotchShape: Shape {
+    var shoulder: CGFloat
+    var bottom: CGFloat
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(shoulder, bottom) }
+        set { shoulder = newValue.first; bottom = newValue.second }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let s = min(max(0, shoulder), rect.height / 2)
+        let r = min(max(0, bottom), rect.height / 2, rect.width / 2)
+        let k: CGFloat = 0.55228475
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX - s, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX + s, y: rect.minY))
+        p.addCurve(to: CGPoint(x: rect.maxX, y: rect.minY + s),
+                   control1: CGPoint(x: rect.maxX + s * (1 - k), y: rect.minY),
+                   control2: CGPoint(x: rect.maxX, y: rect.minY + s * (1 - k)))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+        p.addCurve(to: CGPoint(x: rect.maxX - r, y: rect.maxY),
+                   control1: CGPoint(x: rect.maxX, y: rect.maxY - r * (1 - k)),
+                   control2: CGPoint(x: rect.maxX - r * (1 - k), y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        p.addCurve(to: CGPoint(x: rect.minX, y: rect.maxY - r),
+                   control1: CGPoint(x: rect.minX + r * (1 - k), y: rect.maxY),
+                   control2: CGPoint(x: rect.minX, y: rect.maxY - r * (1 - k)))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + s))
+        p.addCurve(to: CGPoint(x: rect.minX - s, y: rect.minY),
+                   control1: CGPoint(x: rect.minX, y: rect.minY + s * (1 - k)),
+                   control2: CGPoint(x: rect.minX - s * (1 - k), y: rect.minY))
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -345,7 +376,6 @@ struct LoginPopupView: View {
             }
         }
         .padding(LoginCard.padding)
-        .background(LoginCardSurface())
         .environment(\.colorScheme, .dark)
     }
 
@@ -357,26 +387,29 @@ struct LoginPopupView: View {
     }
 }
 
-/// Liquid Glass with a dark tint, so the white text reads on any wallpaper. Without glass (before macOS 26, offscreen
-/// renders) a dark material, and a solid surface when Reduce Transparency or Increase Contrast is on.
+/// Black at the camera, with desktop material showing only through the lower part of the shell.
 private struct LoginCardSurface: View {
+    let shape: LoginNotchShape
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.floatingCard, style: .continuous)
-        surface(shape)
-            .overlay(shape.strokeBorder(.white.opacity(contrast == .increased ? 0.3 : 0.1), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+        surface
+            .overlay(shape.stroke(.white.opacity(contrast == .increased ? 0.3 : 0.16), lineWidth: 0.5)
+                .mask(LinearGradient(colors: [.clear, .white], startPoint: .center, endPoint: .bottom)))
+            .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
     }
 
-    @ViewBuilder private func surface(_ shape: RoundedRectangle) -> some View {
+    @ViewBuilder private var surface: some View {
         if reduceTransparency || contrast == .increased || !LoginCard.drawsGlass {
-            shape.fill(Color(white: 0.1))
-        } else if #available(macOS 26, *) {
-            Color.clear.glassEffect(.regular.tint(.black.opacity(0.45)), in: shape)
+            shape.fill(.black)
         } else {
-            shape.fill(.ultraThinMaterial).overlay(shape.fill(.black.opacity(0.4)))
+            shape.fill(.ultraThinMaterial)
+                .overlay(shape.fill(LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.5),
+                    .init(color: .black.opacity(0.5), location: 1)
+                ], startPoint: .top, endPoint: .bottom)))
         }
     }
 }
