@@ -9,7 +9,7 @@ import Testing
 struct LoginAssistanceIntegrationTests {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    private func mail(_ id: String, account: String = "me@example.com", age: Double = 5,
+    fileprivate func mail(_ id: String, account: String = "me@example.com", age: Double = 5,
                       labels: [String] = ["INBOX", "UNREAD"], fromMe: Bool = false) -> MailMessage {
         MailMessage(accountId: account, id: id, threadId: "t-\(id)", date: now.addingTimeInterval(-age),
             fromName: "Acme", fromEmail: "login@acme.com", subject: "Your sign-in code",
@@ -67,22 +67,36 @@ struct LoginAssistanceIntegrationTests {
         #expect(SettingsCatalog.matches("otp", in: SettingsItem.loginPopups.searchText))
         #expect(SettingsCatalog.matches("magic", in: SettingsItem.loginPopups.searchText))
     }
+}
 
+// Reader tests share one WebKit engine with the offscreen inbox tests.
+extension InboxPreferencesTests {
     @MainActor @Test func readerFollowsFreshCredentialsAndClearsOnNavigation() throws {
+        let fixture = LoginAssistanceIntegrationTests()
         _ = NSApplication.shared
         let store = MailStore(try AppDatabase.inMemory())
         try store.upsertAccount(Account(email: "me@example.com"))
-        var codeMail = mail("reader")
+        var codeMail = fixture.mail("reader")
         codeMail.date = Date()
         try store.upsertMessages([codeMail])
         let services = AppServices(store: store)
+        let engine = ReaderWebEngine.shared
+        let active = engine.webView.isReaderActive
+        let delegate = engine.delegate
+        let openLink = engine.webView.openLinkFromMenu
         let reader = ReaderModel()
+        defer {
+            reader.suspend()
+            engine.webView.isReaderActive = active
+            engine.delegate = delegate
+            engine.webView.openLinkFromMenu = openLink
+        }
         reader.attach(services)
         reader.show(ThreadKey(accountId: codeMail.accountId, threadId: codeMail.threadId))
         #expect(reader.loginCredentials == [.code("038271")])
-        var oldMail = mail("expired")
+        var oldMail = fixture.mail("expired")
         oldMail.date = Date().addingTimeInterval(-1_201)
-        var sentMail = mail("outgoing", fromMe: true)
+        var sentMail = fixture.mail("outgoing", fromMe: true)
         sentMail.date = Date()
         try store.upsertMessages([oldMail, sentMail])
         reader.show(ThreadKey(accountId: oldMail.accountId, threadId: oldMail.threadId))
@@ -92,7 +106,9 @@ struct LoginAssistanceIntegrationTests {
         reader.show(nil)
         #expect(reader.loginCredentials.isEmpty)
     }
+}
 
+extension LoginAssistanceIntegrationTests {
     /// Optional offscreen artifacts with fictional mail. Set CFFIXED_USER_HOME to an isolated scratch home.
     @MainActor @Test(.enabled(if: ProcessInfo.processInfo.environment["TERN_LOGIN_SHOTS"] != nil))
     func snapshots() throws {

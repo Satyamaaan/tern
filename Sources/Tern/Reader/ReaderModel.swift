@@ -71,6 +71,8 @@ final class ReaderModel {
     @ObservationIgnored private var quickReplyTask: Task<Void, Never>?
     /// False while the reader is off screen (`suspend`): nothing deferred touches the page or asks the AI.
     @ObservationIgnored private var isActive = true
+    /// Opening over the list asks for focus before SwiftUI brings the reader back on screen.
+    @ObservationIgnored private var focusPending = false
     /// Logos that arrived while the reader was off screen, sent once it is back.
     @ObservationIgnored private var logosPending = false
     @ObservationIgnored private var hoverText = ""
@@ -130,7 +132,10 @@ final class ReaderModel {
         services?.reader.model = self
         isActive = true
         engine.webView.isReaderActive = true
-        defer { self.prefetch(prefetch) }
+        defer {
+            self.prefetch(prefetch)
+            if focusPending { focusPage() }
+        }
         guard key != self.key else { return resume() }
         commitmentEvidence = false
         focusedCommitmentId = nil
@@ -157,6 +162,7 @@ final class ReaderModel {
     /// written, but stops following it until `show` brings the reader back. Quick replies still waiting are
     /// dropped (asked again on the way back); logo and image-setting changes wait for it.
     func suspend() {
+        focusPending = false
         isActive = false
         engine.webView.isReaderActive = false
         if let window = engine.webView.window, KeyRouter.readerHasKeyboard(window) {
@@ -795,9 +801,12 @@ final class ReaderModel {
     /// Gives the page the keyboard, so the message keys (n, p, Enter, Space as built), Tab and the arrows work
     /// inside the conversation.
     func focusPage() {
+        guard (app?.checked.count ?? 0) <= 1 else { return }
+        focusPending = true
         let webView = engine.webView
-        guard isActive, let window = webView.window, window.firstResponder !== webView else { return }
-        window.makeFirstResponder(webView)
+        guard isActive, let window = webView.window else { return }
+        focusPending = false
+        if window.firstResponder !== webView { window.makeFirstResponder(webView) }
     }
 
     func find(backwards: Bool = false) {

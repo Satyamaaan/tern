@@ -100,14 +100,22 @@ final class SelfCheck {
         model.readerExpanded = true
         defer { model.readerExpanded = expanded }
         wait(0.2)
-        model.moveToTop()
-        model.moveCursor(1, extend: true)
-        model.moveCursor(1, extend: true)
-        check("⇧J twice selects three", model.checked.count == 3 && model.targets.count == 3)
-        wait(0.1)
-        model.clearSelection()
-        wait(0.1)
-        observationBudget("after multi-select round trip")
+        let observations = model.store.database.liveLongLivedObservationCount
+        for cycle in 1...3 {
+            model.moveToTop()
+            model.moveCursor(1, extend: true)
+            model.moveCursor(1, extend: true)
+            check("⇧J twice selects three (round \(cycle))", model.checked.count == 3 && model.targets.count == 3)
+            wait(0.1)
+            model.open()
+            model.open()
+            check("Enter leaves the keyboard on the selection (round \(cycle))",
+                  model.focus == .list && !KeyRouter.readerHasKeyboard(window))
+            model.clearSelection()
+            wait(0.1)
+            check("multi-select keeps the observation count (round \(cycle))",
+                  model.store.database.liveLongLivedObservationCount == observations)
+        }
         model.moveToTop()
         model.moveCursor(1, extend: true)
         model.moveCursor(1, extend: true)

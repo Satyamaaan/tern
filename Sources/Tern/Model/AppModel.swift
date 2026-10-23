@@ -373,7 +373,7 @@ final class AppModel {
     /// Enter / o: open the thread for reading. In the open thread, Enter expands or collapses the
     /// focused message.
     func open() {
-        guard let cursor else { return }
+        guard checked.count <= 1, let cursor else { return }
         if focus == .reader, services.reader.isActive {
             services.reader.toggleMessage()
             return
@@ -411,7 +411,11 @@ final class AppModel {
                 self.paletteReturn = nil
                 guard !self.searchFieldFocused, self.projectEditor == nil else { return }
                 if let settings = self.settings { return settings.takeKeyboard() }
-                if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
+                if self.focus == .reader, self.readerVisible, self.readerKey != nil, self.services.reader.isActive {
+                    self.services.reader.focus()
+                } else {
+                    self.focusList()
+                }
             }
         }
     }

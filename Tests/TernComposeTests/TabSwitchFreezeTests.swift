@@ -69,15 +69,32 @@ extension InboxPreferencesTests {
                             subject: "Synthetic \(index)", labelIds: [SystemLabel.inbox])
             })
         }
+        let prefs = Preferences.shared
+        let pane = prefs.readingPane
+        prefs.readingPane = false
+        defer { prefs.readingPane = pane }
+        let appearance = NSApp.appearance
+        defer { NSApp.appearance = appearance }
+        let engine = ReaderWebEngine.shared
+        let active = engine.webView.isReaderActive
+        let delegate = engine.delegate
+        let openLink = engine.webView.openLinkFromMenu
+        defer {
+            engine.webView.isReaderActive = active
+            engine.delegate = delegate
+            engine.webView.openLinkFromMenu = openLink
+        }
         let services = AppServices(store: MailStore(database))
         let app = AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/unused"))
         app.startObservations()
         app.readerExpanded = true
-        let hosting = NSHostingView(rootView: ReaderColumn().environment(app).environment(services))
+        let registry = CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides())
+        let palette = PaletteController(model: app, registry: registry)
+        let hosting = NSHostingView(rootView: MainView(palette: palette).environment(app).environment(services))
         hosting.sizingOptions = []
         let window = MainWindow(contentView: hosting)
-        window.setContentSize(NSSize(width: 640, height: 720))
-        let registry = CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides())
+        window.setContentSize(MainWindow.defaultSize)
+        defer { services.reader.model?.suspend(); window.contentView = nil; window.close() }
         let snapshots = Snapshotter(model: app, registry: registry)
         snapshots.settle(window)
         weak var original = services.reader.model
@@ -104,6 +121,17 @@ extension InboxPreferencesTests {
         #expect(!KeyRouter.readerHasKeyboard(window), "A covered reader cannot regain the keyboard")
         #expect(registry["nextMessage"]?.isEnabled() == false)
         #expect(registry["reply"]?.isEnabled() == false)
+        app.open()
+        app.open()
+        #expect(app.focus == .list && window.firstResponder is NSTableView,
+                "Enter cannot open or toggle the covered conversation")
+        app.focus = .reader
+        app.palette = .commands
+        app.palette = nil
+        try await Task.sleep(for: .milliseconds(10))
+        snapshots.settle(window)
+        #expect(app.focus == .list && window.firstResponder is NSTableView,
+                "Closing the palette must give the selection the keyboard")
         shot("multiple")
         app.checked.removeAll()
         app.open()
@@ -111,16 +139,18 @@ extension InboxPreferencesTests {
         #expect(original != nil && services.reader.model === original,
                 "Multi-select must reuse the reader and its concurrent detail observation")
         #expect(services.reader.model?.key == app.cursor)
-        #expect(webView.acceptsFirstResponder)
+        #expect(KeyRouter.readerHasKeyboard(window))
+        #expect(database.liveLongLivedObservationCount == launchCount)
         shot("returned")
-        for _ in 0..<AppDatabase.longLivedObservations + 2 {
+        for _ in 0..<3 {
+            let before = database.liveLongLivedObservationCount
             app.moveToTop()
             app.moveCursor(1, extend: true)
             snapshots.settle(window)
             app.clearSelection()
             snapshots.settle(window)
             #expect(services.reader.model === original)
-            #expect(database.liveLongLivedObservationCount == launchCount)
+            #expect(database.liveLongLivedObservationCount == before)
             #expect(database.liveLongLivedObservationCount <= AppDatabase.longLivedObservations)
         }
     }
