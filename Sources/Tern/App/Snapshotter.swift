@@ -25,6 +25,11 @@ struct Snapshotter {
             realMailFixesShots(window, directory)
             exit(0)
         }
+        if ProcessInfo.processInfo.environment["TERN_LOGIN_SNAPSHOT_ONLY"] == "1" {
+            loginShots(window, directory)
+            print("Login snapshots written to \(directory.path)")
+            exit(0)
+        }
         if ProcessInfo.processInfo.environment["TERN_LEDGER_SNAPSHOT_ONLY"] == "1" {
             ledgerShots(window, directory)
             print("Ledger snapshots written to \(directory.path)")

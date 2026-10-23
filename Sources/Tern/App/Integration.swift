@@ -94,6 +94,14 @@ final class Integration {
                     self?.startAccountPhotos()
                 }
             }
+        } else {
+            // The demo mailbox has no sync, but sign-in popups still answer to mail that arrives in it.
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.startLoginArrivals() }
+            }
+            #if DEBUG
+            LoginDemo.schedule(services)
+            #endif
         }
     }
 
@@ -102,6 +110,11 @@ final class Integration {
         let notifications = MailNotifications(services: services, prefs: model.prefs)
         notifications.start()
         self.notifications = notifications
+        startLoginArrivals()
+    }
+
+    /// Sign-in popups over whatever is on screen, whether or not Tern is in front.
+    func startLoginArrivals() {
         let loginArrivals = LoginArrivals(services: services, prefs: model.prefs)
         loginArrivals.start()
         self.loginArrivals = loginArrivals
