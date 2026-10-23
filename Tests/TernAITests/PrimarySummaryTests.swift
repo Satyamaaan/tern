@@ -36,6 +36,67 @@ struct PrimarySummaryTests {
         }
     }
 
+    @Test func candidateLabelProbesUseTheWholePrimaryKey() throws {
+        let database = try makeDatabase([])
+        try database.writer.write { db in
+            try Setting(key: "mute.label." + me.id, value: "muted").upsert(db)
+            var sql: String?
+            db.trace(options: .statement) { event in
+                if case .statement(let statement) = event, statement.sql.contains("SELECT t.accountId,t.id") {
+                    sql = statement.sql
+                }
+            }
+            _ = try PrimarySummaryQueue.candidates(db, now: testNow)
+            db.trace(options: .statement, nil)
+            let query = try #require(sql)
+            try MailStore.upsertMessages(db, (0..<20_000).map { index in
+                MailMessage(accountId: me.id, id: "m\(index)", threadId: "t\(index)", date: testNow,
+                            fromEmail: "sender@example.com", subject: "Synthetic \(index)",
+                            labelIds: [SystemLabel.inbox, "muted", "custom"])
+            })
+            let arguments = StatementArguments(Array(repeating: "x", count: query.filter { $0 == "?" }.count))
+            let plan = try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN \(query)", arguments: arguments)
+                .map { $0["detail"] as String }
+            let probes = plan.filter { $0.contains("SEARCH x ") }
+            #expect(!probes.isEmpty, "\(plan)")
+            #expect(probes.allSatisfy { $0.contains("accountId=? AND labelId=? AND threadId=?") }, "\(probes)")
+        }
+    }
+
+    @Test func candidateSelectionDoesNotHoldTheWriter() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-summary-read-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        var configuration = Configuration()
+        configuration.prepareDatabase { db in
+            db.trace(options: .statement) { event in
+                if case .statement(let statement) = event, statement.sql.contains("SELECT t.accountId,t.id") {
+                    entered.signal()
+                    _ = release.wait(timeout: .now() + 3)
+                }
+            }
+        }
+        let database = try AppDatabase(DatabasePool(path: directory.appendingPathComponent("mail.sqlite").path,
+                                                    configuration: configuration))
+        try await database.writer.write { db in
+            try me.insert(db)
+            try AISettings(enabled: true, provider: "codex").write(db)
+        }
+        let providers = AIProviders([FakeProvider { _, _ in "" }])
+        let assistant = MailAssistant(database: database, providers: providers)
+        let queue = PrimarySummaryQueue(database: database, assistant: assistant, providers: providers)
+        let selection = Task { try await queue.processNext() }
+        defer { release.signal() }
+        try #require(entered.wait(timeout: .now() + 2) == .success)
+        let start = ContinuousClock.now
+        try await database.writer.write { db in try Setting(key: "concurrent.write", value: "done").upsert(db) }
+        #expect(start.duration(to: .now) < .milliseconds(500), "Candidate selection must leave the writer available")
+        release.signal()
+        #expect(try await selection.value == false)
+    }
+
     @Test func capPersistenceResummaryAndDisabled() async throws {
         let db = try makeDatabase([TestMail(id: "m", thread: "t")])
         let provider = FakeProvider { _, index in #"{"bullets":["Summary \#(index)"]}"# }
