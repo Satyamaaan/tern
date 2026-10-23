@@ -127,13 +127,13 @@ struct SearchExecutor {
                          arguments: [expression, Self.ftsCap + 1]) ?? 0
     }
 
-    private func countSet(_ fragment: SQLFragment) throws -> Int {
-        try Int.fetchOne(db, sql: "SELECT count(*) FROM (\(fragment.sql) LIMIT \(Self.setCap + 1))",
+    private func countSet(_ fragment: SQLFragment, limit: Int = SearchExecutor.setCap + 1) throws -> Int {
+        try Int.fetchOne(db, sql: "SELECT count(*) FROM (\(fragment.sql) LIMIT \(limit))",
                          arguments: StatementArguments(fragment.arguments)) ?? 0
     }
 
-    private func countLabel(_ id: String) throws -> Int {
-        try Int.fetchOne(db, sql: "SELECT count(*) FROM (SELECT 1 FROM thread_label WHERE labelId = ? LIMIT 100000)",
+    private func countLabel(_ id: String, limit: Int = 100_000) throws -> Int {
+        try Int.fetchOne(db, sql: "SELECT count(*) FROM (SELECT 1 FROM thread_label WHERE labelId = ? LIMIT \(limit))",
                          arguments: [id]) ?? 0
     }
 
@@ -241,33 +241,51 @@ struct SearchExecutor {
     /// mailbox: `the`, `t`, `th`) tells nothing apart by score, and scoring them all would cost over 20 ms.
     static let rankCap = 20_000
 
-    /// Matching threads, best match first, each with its best-scoring message. Scoring a match costs ~0.4 µs,
-    /// so this is exact for every selective query. It first takes the 4,000 best-scoring messages (a bounded
-    /// sort is cheaper than sorting all of them), and widens to every match only when filters leave the page
-    /// short. Words that match almost everything are returned newest first instead.
+    /// Matching threads, best match first, each with its best-scoring message. Filter before ranking when
+    /// a label or small set narrows the mailbox. Otherwise start with a bounded ranked prefix, and filter
+    /// before ranking only if that leaves the page short.
+    /// Words that match almost everything are returned newest first instead.
     func runRanked() throws -> [Found] {
         guard let fts = compiled.fts else { return try run(try choosePlan()) }
         let matches = try Int.fetchOne(db, sql: "SELECT count(*) FROM (SELECT 1 FROM message_fts WHERE message_fts MATCH ? LIMIT ?)",
                                        arguments: [fts, Self.rankCap + 1]) ?? 0
         if matches > Self.rankCap { return try run(try choosePlan()) }
         let firstPool = 4_000
+        if matches > firstPool {
+            for driver in compiled.drivers {
+                let count = switch driver {
+                case .label(let id): try countLabel(id, limit: firstPool + 1)
+                case .set(let fragment): try countSet(fragment, limit: firstPool + 1)
+                }
+                if count <= firstPool { return try ranked(fts, pool: nil) }
+            }
+        }
         let ordered = try ranked(fts, pool: firstPool)
-        // A short page widens the search only if the first round actually left matches out.
-        return ordered.count >= limit || matches <= firstPool ? ordered : try ranked(fts, pool: 1_000_000)
+        return ordered.count >= limit || matches <= firstPool ? ordered : try ranked(fts, pool: nil)
     }
 
-    private func ranked(_ fts: String, pool: Int) throws -> [Found] {
+    private func ranked(_ fts: String, pool: Int?) throws -> [Found] {
         var sql = SQLBuilder()
-        // LIMIT also keeps the subquery's ORDER BY: without one SQLite drops the sort, and the loop order with it.
-        sql.add("""
-            SELECT m.accountId, m.threadId, m.seq FROM (
-              SELECT rowid AS r, \(Self.bm25) AS score FROM message_fts WHERE message_fts MATCH ?
-              ORDER BY score, rowid DESC LIMIT \(pool)) c
-            CROSS JOIN message m ON m.seq = c.r
-            CROSS JOIN thread t ON t.accountId = m.accountId AND t.id = m.threadId
-            WHERE\u{20}
-            """, fts)
+        if let pool {
+            // LIMIT preserves the prefix's order and bounds its sort before the row lookups.
+            sql.add("""
+                SELECT m.accountId, m.threadId, m.seq FROM (
+                  SELECT rowid AS r, \(Self.bm25) AS score FROM message_fts WHERE message_fts MATCH ?
+                  ORDER BY score, rowid DESC LIMIT \(pool)) c
+                CROSS JOIN message m ON m.seq = c.r
+                CROSS JOIN thread t ON t.accountId = m.accountId AND t.id = m.threadId
+                WHERE\u{20}
+                """, fts)
+        } else {
+            sql.add("""
+                SELECT m.accountId, m.threadId, m.seq FROM message_fts f
+                CROSS JOIN message m ON m.seq = f.rowid
+                CROSS JOIN thread t ON t.accountId = m.accountId AND t.id = m.threadId
+                WHERE message_fts MATCH ? AND\u{20}
+                """, fts)
+        }
         sql.add(SQLFragment.all(compiled.messageConds + compiled.threadConds))
+        if pool == nil { sql.add(" ORDER BY \(Self.bm25), f.rowid DESC") }
         let cursor = try Row.fetchCursor(db, sql: sql.sql, arguments: StatementArguments(sql.arguments))
         var seen = Set<ThreadKey>()
         var ordered: [Found] = []

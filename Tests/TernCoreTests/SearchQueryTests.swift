@@ -591,9 +591,30 @@ private func makeFixture() throws -> Fixture {
     #expect(try f.ids("-tacos", sort: .relevance) == (try f.ids("-tacos", sort: .newest)))   // nothing to rank: falls back to newest
 }
 
-@Test func relevanceRespectsTheLimitAndNamesTheBestMessage() throws {
-    let f = try makeFixture()
-    let hits = try f.search.searchHits("lisbon", options: SearchOptions(limit: 1, sort: .relevance, now: now, timeZone: utc))
-    #expect(hits.count == 1)
-    #expect(hits.first?.matchedMessageId != nil)
+@Test(arguments: [0, 4_001])
+func relevanceRespectsTheLimitAndNamesTheBestMessage(excludedMatches: Int) throws {
+    let store = MailStore(try AppDatabase.inMemory())
+    try store.upsertAccount(acme)
+    try store.upsertMessages([
+        message(acme, "m1", thread: "best", daysAgo: 1, from: ("A", "a@x.com"), subject: "Budget",
+                body: "Details", labels: ["INBOX", "STARRED"]),
+        message(acme, "m2", thread: "best", daysAgo: 2, from: ("A", "a@x.com"), subject: "Budget",
+                body: "Details", labels: ["INBOX", "STARRED"]),
+        message(acme, "m3", thread: "body", daysAgo: 0, from: ("A", "a@x.com"), subject: "Hello",
+                body: "Budget", labels: ["INBOX", "STARRED"]),
+        message(acme, "m4", thread: "excluded", daysAgo: 0, from: ("A", "a@x.com"), subject: "Budget",
+                body: "Details", labels: ["INBOX", "SENT"]),
+    ])
+    try store.upsertMessages((0..<excludedMatches).map { index in
+        message(acme, "excluded-\(index)", thread: "excluded", daysAgo: 0, from: ("A", "a@x.com"), subject: "Budget",
+                body: "Details", labels: ["INBOX", "SENT"])
+    })
+    let search = SearchService(store.database)
+    for query in ["is:starred budget", "-in:sent budget"] {
+        let hits = try search.searchHits(query, options: SearchOptions(limit: 2, sort: .relevance, now: now, timeZone: utc))
+        #expect(hits.map(\.row.thread.id) == ["best", "body"])
+        #expect(hits.map(\.matchedMessageId) == ["m2", "m3"])
+        let first = try search.searchHits(query, options: SearchOptions(limit: 1, sort: .relevance, now: now, timeZone: utc))
+        #expect(first.map(\.matchedMessageId) == ["m2"])
+    }
 }
