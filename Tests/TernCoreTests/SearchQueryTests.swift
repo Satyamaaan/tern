@@ -351,6 +351,8 @@ private func makeFixture() throws -> Fixture {
     let f = try makeFixture()
     #expect(try f.ids("account:alex@home.net") == ["t11", "t4", "t5"])
     #expect(try f.ids("account:home") == ["t11", "t4", "t5"])
+    #expect(try f.ids("account:alex") == ["t3", "t9", "t1", "t2", "t11", "t10", "t4", "t5", "t8"])
+    #expect(try f.ids("account:alex", account: home.id) == ["t11", "t4", "t5"])
     #expect(try f.ids("account:Acme tacos") == ["t3", "t10"])
     #expect(try f.ids("account:nobody") == [])
     #expect(try f.ids("tacos", account: home.id) == [])

@@ -192,9 +192,10 @@ struct SearchExecutor {
             sql.add(" ORDER BY tl.lastDate DESC LIMIT ?", limit)
 
         case .threadWalk:
+            let index = compiled.accountIds?.count == 1 ? "thread_by_account_date" : "thread_by_date"
             sql.add("SELECT t.accountId, t.id")
             if newestMatch { sql.add(", ", newestMatchColumn(on: "t")) }
-            sql.add(" FROM thread t INDEXED BY thread_by_date WHERE ", threadFilter)
+            sql.add(" FROM thread t INDEXED BY \(index) WHERE ", threadFilter)
             sql.add(" AND ", messageExists(on: "t"))
             sql.add(" ORDER BY t.lastDate DESC LIMIT ?", limit)
         }
