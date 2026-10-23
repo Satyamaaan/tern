@@ -160,6 +160,10 @@ final class AppModel {
     @ObservationIgnored var rowsReadTask: Task<Void, Never>?
     @ObservationIgnored let rowsSource: ListObservationSource
     @ObservationIgnored var rowsObservation: AnyDatabaseCancellable?
+    @ObservationIgnored var rowsObservedGeneration = -1
+    @ObservationIgnored let scopeSource = ScopeObservationSource()
+    @ObservationIgnored var countsReadTask: Task<Void, Never>?
+    @ObservationIgnored var countsObservedGeneration = -1
     @ObservationIgnored var countsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var accountsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var projectsObservation: AnyDatabaseCancellable?

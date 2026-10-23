@@ -105,8 +105,16 @@ import TernCore
     let previousRequest = model.rowsSource.current
     model.setSplitInbox(false)
     #expect(model.rowsSource.current != previousRequest)
-    try await database.writer.write { _ in }
-    try await Task.sleep(for: .milliseconds(50))
+    try await database.writer.write { db in
+        try MailStore.upsertMessages(db, [MailMessage(accountId: account.id, id: "m250", threadId: "t250",
+            date: Date(timeIntervalSince1970: 750), fromEmail: "sender@example.com", subject: "Updated open thread",
+            labelIds: [SystemLabel.inbox, SystemLabel.categoryPromotions])])
+    }
+    for _ in 0..<200 where model.snapshot.rows[cursor]?.thread.subject != "Updated open thread" {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.rowsObservedGeneration == model.rowsSource.current.generation)
+    #expect(model.snapshot.rows[cursor]?.thread.subject == "Updated open thread")
     #expect(model.listLoaded && model.snapshot.order.count == 400)
     #expect(model.cursor == cursor && model.checked == [cursor] && model.readerExpanded && model.readerKey == cursor)
     model.loadMore()

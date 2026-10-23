@@ -30,35 +30,62 @@ extension AppModel {
     /// the scope's inbox, always arrive off the main thread and then keep it up to date.
     func observeScope() {
         let reader = store.database.reader
-        let accountId = scope.accountId
-        tabsWithMail = (try? reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: accountId) }) ?? []
-        countsObservation = ValueObservation
-            .tracking { db in try MailStore.fetchScopeCounts(db, accountId: accountId) }
-            .removeDuplicates()
-            .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] counts in
-                guard let self else { return }
-                self.counts = counts
-                let tabs = Set(InboxTab.allCases.filter { counts.tabThreads[$0, default: 0] > 0 })
-                if tabs != self.tabsWithMail { self.tabsWithMail = tabs }
-                let badge = counts.allAccountsInboxUnread
-                NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
-            }
-        guard let accountId else {
-            labelsObservation = nil
-            labels = []
-            return
+        let request = scopeSource.set(accountId: scope.accountId)
+        tabsWithMail = (try? reader.read { db in try MailStore.fetchTabsWithMail(db, accountId: request.accountId) }) ?? []
+        labels = (try? reader.read { try request.fetchLabels($0).labels }) ?? []
+        countsReadTask?.cancel()
+        readCounts(request)
+
+        let scopeSource = scopeSource
+        if countsObservation == nil {
+            countsObservation = ValueObservation
+                .tracking(regions: ScopeObservationSource.countsRegions) { db in try scopeSource.current.fetchCounts(db) }
+                .removeDuplicates()
+                .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] value in
+                    self?.receiveCounts(value, fromObservation: true)
+                }
         }
-        labelsObservation = ValueObservation
-            .tracking { db in
-                try MailLabel
-                    .filter(Column("accountId") == accountId && Column("type") == "user" && Column("hidden") == false)
-                    .order(Column("name"))
-                    .fetchAll(db)
+        if labelsObservation == nil {
+            labelsObservation = ValueObservation
+                .tracking(regions: ScopeObservationSource.labelsRegions) { db in try scopeSource.current.fetchLabels(db) }
+                .removeDuplicates()
+                .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] value in
+                    guard let self, self.scopeSource.current == value.request else { return }
+                    self.labels = value.labels
+                }
+        }
+    }
+
+    private func readCounts(_ request: ScopeObservationSource.Request) {
+        let reader = store.database.reader
+        countsReadTask = Task { [weak self] in
+            var delay = 0.0
+            while !Task.isCancelled {
+                if delay > 0 {
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                }
+                guard self?.scopeSource.current == request else { return }
+                do {
+                    let value = try await reader.read { try request.fetchCounts($0) }
+                    self?.receiveCounts(value)
+                    return
+                } catch {
+                    Self.log(error)
+                    delay = delay == 0 ? 0.25 : min(30, delay * 2)
+                }
             }
-            .removeDuplicates()
-            .startRestarting(in: reader, scheduling: .immediate, onError: Self.log) { [weak self] labels in
-                self?.labels = labels
-            }
+        }
+    }
+
+    func receiveCounts(_ value: ScopeObservationSource.Counts, fromObservation: Bool = false) {
+        guard scopeSource.current == value.request else { return }
+        if fromObservation { countsObservedGeneration = value.request.generation }
+        else if countsObservedGeneration >= value.request.generation { return }
+        counts = value.counts
+        let tabs = Set(InboxTab.allCases.filter { counts.tabThreads[$0, default: 0] > 0 })
+        if tabs != tabsWithMail { tabsWithMail = tabs }
+        let badge = counts.allAccountsInboxUnread
+        NSApp.dockTile.badgeLabel = badge > 0 ? badge.formatted() : nil
     }
 
     private func receive(accounts: [Account]) {
@@ -120,7 +147,7 @@ extension AppModel {
             .tracking(regions: ListObservationSource.regions) { db in try rowsSource.current.fetch(db) }
             .removeDuplicates()
             .startRestarting(in: reader, scheduling: .async(onQueue: .main), onError: Self.log) { [weak self] rows in
-                self?.receiveRows(rows)
+                self?.receiveRows(rows, fromObservation: true)
             }
     }
 
@@ -145,9 +172,12 @@ extension AppModel {
         }
     }
 
-    private func receiveRows(_ value: ListObservationSource.Rows) {
+    func receiveRows(_ value: ListObservationSource.Rows, fromObservation: Bool = false) {
         // The source can change away and back while a page or observation result is in flight.
         guard rowsSource.current == value.request else { return }
+        // An async plain read can resume after the observation delivered a newer snapshot.
+        if fromObservation { rowsObservedGeneration = value.request.generation }
+        else if rowsObservedGeneration >= value.request.generation { return }
         let rows = value.rows
         let source = value.request.source
         let limit = value.request.limit

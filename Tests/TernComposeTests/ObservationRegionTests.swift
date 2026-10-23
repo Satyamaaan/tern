@@ -35,3 +35,29 @@ private func observationRegion(_ regions: [any DatabaseRegionConvertible], _ db:
         try result.formUnion(region.databaseRegion(db))
     }
 }
+
+@Test func scopeObservationsCoverCountsAndLabelsQueries() throws {
+    let database = try AppDatabase.inMemory()
+    let account = Account(email: "synthetic@example.com")
+    try database.writer.write { db in
+        try account.insert(db)
+        try Draft(accountId: account.id, subject: "Local draft").insert(db)
+        let countsRegion = try observationRegion(ScopeObservationSource.countsRegions, db)
+        let labelsRegion = try observationRegion(ScopeObservationSource.labelsRegions, db)
+        for enabled in [true, false] {
+            try Setting(key: "ledger.enabled", value: String(enabled)).upsert(db)
+            for showMaybe in [true, false] {
+                try Setting(key: "ledger.showMaybe", value: String(showMaybe)).upsert(db)
+                for accountId in [nil, account.id] {
+                    let request = ScopeObservationSource.Request(accountId: accountId)
+                    var selectedCounts = DatabaseRegion()
+                    _ = try db.recordingSelection(&selectedCounts) { try request.fetchCounts(db) }
+                    #expect(countsRegion.union(selectedCounts) == countsRegion, "Missing counts region: \(selectedCounts)")
+                    var selectedLabels = DatabaseRegion()
+                    _ = try db.recordingSelection(&selectedLabels) { try request.fetchLabels(db) }
+                    #expect(labelsRegion.union(selectedLabels) == labelsRegion, "Missing labels region: \(selectedLabels)")
+                }
+            }
+        }
+    }
+}
