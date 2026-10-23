@@ -7,6 +7,59 @@ import TernCore
 
 extension InboxPreferencesTests {
     @MainActor
+    @Test func launchObservationsLeaveRoomForNavigationWhileTheWriterIsHeld() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-launch-freeze-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("mail.sqlite")
+        let database = try AppDatabase.open(at: url)
+        let account = Account(email: "synthetic@example.com")
+        try await database.writer.write { db in
+            try account.insert(db)
+            try MailStore.upsertMessages(db, [MailMessage(accountId: account.id, id: "message", threadId: "thread",
+                date: Date(), fromEmail: "sender@example.com", subject: "Synthetic", labelIds: [SystemLabel.inbox])])
+        }
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let writer = Task.detached {
+            try database.writer.write { _ in
+                entered.signal()
+                if release.wait(timeout: .now() + 10) == .timedOut {
+                    Issue.record("Launch observations exhausted the reader pool while the writer was held")
+                }
+            }
+        }
+        defer { release.signal() }
+        try #require(entered.wait(timeout: .now() + 2) == .success)
+        // Stand in for AI settings, login arrivals, notifications and pending ops. Immediate
+        // startup ensures each holds its initial reader before AppModel starts its five observers.
+        let background = (0..<4).map { _ in
+            ValueObservation.tracking { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM pending_op") }
+                .startRestarting(in: database.reader, scheduling: .immediate,
+                    onError: { Issue.record($0) }, onChange: { _ in })
+        }
+        defer { background.forEach { $0.cancel() } }
+        let services = AppServices(store: MailStore(database))
+        let app = AppModel(services: services, isFake: true, databaseURL: url)
+        let reader = ReaderModel()
+        let start = ContinuousClock.now
+        app.startObservations()
+        reader.attach(services)
+        defer { reader.suspend() }
+        let key = ThreadKey(accountId: account.id, threadId: "thread")
+        for index in 0..<24 {
+            app.setScope(index.isMultiple(of: 2) ? .account(account.id) : .all)
+            app.cycleTab(1)
+            reader.show(index.isMultiple(of: 2) ? key : nil)
+        }
+        reader.show(key)
+        #expect(start.duration(to: .now) < .seconds(1), "Launch and navigation must leave a reader available")
+        #expect(reader.detail?.thread.key == key)
+        release.signal()
+        try await writer.value
+    }
+
+    @MainActor
     @Test func readerNavigationReturnsWhileTheWriterIsHeld() async throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tern-reader-freeze-\(UUID().uuidString)")

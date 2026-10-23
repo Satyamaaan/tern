@@ -22,7 +22,11 @@ public final class AppDatabase: Sendable {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var config = Configuration()
         config.foreignKeysEnabled = true
-        config.maximumReaderCount = 8
+        // Each concurrent observation can retain its initial reader until the writer is free.
+        // Reserve one for each of the nine global observations and the reader, plus plain reads.
+        let longLivedObservations = 10
+        let plainReadHeadroom = 4
+        config.maximumReaderCount = longLivedObservations + plainReadHeadroom
         config.prepareDatabase { db in
             try db.execute(sql: """
                 PRAGMA synchronous = NORMAL;
