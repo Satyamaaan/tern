@@ -25,13 +25,13 @@ extension Snapshotter {
 
         let credentials: [LoginCredential] = [.code("482913"),
                                               .magicLink(URL(string: "https://linear.app/auth/magic/Zk3P9qLmA7xR2vT8wBn5")!)]
-        let height = NSHostingView(rootView: LoginPopupView(sender: "Linear", account: "alex@kiteworks.dev", credentials: credentials,
+        let height = NSHostingView(rootView: LoginPopupView(sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
             topInset: 32, perform: { _ in }, dismiss: {}).frame(width: LoginIslandGeometry.openWidth)).fittingSize.height
         // The island as it hangs from a 32 pt notch, over a strip of menu bar and desktop, half-way down and open.
         for (name, open) in [("closed", false), ("open", true)] {
             let state = LoginIslandState(closed: CGSize(width: 190, height: 32), open: CGSize(width: LoginIslandGeometry.openWidth, height: height))
             state.isOpen = open
-            let island = LoginIsland(state: state, sender: "Linear", account: "alex@kiteworks.dev", credentials: credentials,
+            let island = LoginIsland(state: state, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
                                      perform: { _ in }, dismiss: {}, hovering: { _ in })
                 .transaction { $0.animation = nil }
             standalone(island.background(alignment: .top) {
@@ -42,7 +42,7 @@ extension Snapshotter {
         let copied = LoginIslandState(closed: CGSize(width: 190, height: 32), open: CGSize(width: LoginIslandGeometry.openWidth, height: height))
         copied.isOpen = true
         copied.copied = true
-        standalone(LoginIsland(state: copied, sender: "Linear", account: "alex@kiteworks.dev", credentials: credentials,
+        standalone(LoginIsland(state: copied, sender: "Linear · linear.app", account: "alex@kiteworks.dev", credentials: credentials,
                                perform: { _ in }, dismiss: {}, hovering: { _ in }).transaction { $0.animation = nil },
                    size: NSSize(width: 520, height: 260), to: directory.appendingPathComponent("login-island-copied.png"), dark: false)
 

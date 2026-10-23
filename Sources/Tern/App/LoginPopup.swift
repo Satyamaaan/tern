@@ -65,7 +65,8 @@ final class LoginPopup: NSObject {
                 self.dismiss()
             }
         }, dismiss: { [weak self] in self?.dismiss() }, hovering: { [weak self] inside in
-            guard let self, !state.copied else { return }
+            // A card folding away under the pointer must not shorten the one that replaced it.
+            guard let self, self.state === state, !state.copied else { return }
             if inside { self.dismissal?.cancel() } else { self.scheduleDismissal(after: .seconds(4)) }
         })
 

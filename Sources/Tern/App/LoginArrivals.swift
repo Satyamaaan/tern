@@ -19,7 +19,9 @@ struct LoginArrival: Equatable {
         guard !credentials.isEmpty else { return nil }
         self.message = message.key
         date = message.date
-        sender = message.fromName.isEmpty ? message.fromEmail : message.fromName
+        // A display name is whatever the sender typed; the address's domain shows who actually sent it.
+        let domain = message.fromEmail.split(separator: "@").last.map(String.init) ?? message.fromEmail
+        sender = message.fromName.isEmpty ? message.fromEmail : "\(message.fromName) · \(domain)"
         self.credentials = credentials
     }
 

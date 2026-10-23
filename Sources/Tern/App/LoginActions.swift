@@ -31,7 +31,10 @@ enum LoginActions {
             alert.beginSheetModal(for: window) { response in
                 if response == .alertSecondButtonReturn { NSWorkspace.shared.open(url) }
             }
-        } else if alert.runModal() == .alertSecondButtonReturn {
+        } else {
+            // From the popup Tern is usually behind another app; the confirmation must not open out of sight.
+            NSApp.activate()
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
             NSWorkspace.shared.open(url)
         }
     }

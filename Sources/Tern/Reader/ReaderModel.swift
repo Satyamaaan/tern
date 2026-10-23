@@ -32,6 +32,7 @@ final class ReaderModel {
     private(set) var key: ThreadKey?
     private(set) var detail: ThreadDetail?
     private(set) var loginArrival: LoginArrival?
+    @ObservationIgnored private var loginScan: LoginScan?
     var composing: ComposeRequest?
     var commitmentEvidence = false
     weak var app: AppModel?
@@ -182,6 +183,7 @@ final class ReaderModel {
     private func resetThreadState() {
         composing = nil
         loginArrival = nil
+        loginScan = nil
         findVisible = false
         findText = ""
         findFailed = false
@@ -206,12 +208,20 @@ final class ReaderModel {
         guard let detail else {
             self.detail = nil
             loginArrival = nil
+            loginScan = nil
             renderedSignature = nil
             engine.clear()
             return
         }
         self.detail = detail
-        loginArrival = detail.messages.last(where: { !$0.isDraft }).flatMap { LoginArrival($0, now: Date()) }
+        let latest = detail.messages.last(where: { !$0.isDraft })
+        // Refreshes of the same message (mark read, labels) keep what was found; only a new message or its body is scanned.
+        let scan = latest.map { LoginScan(message: $0.key, body: $0.bodyState,
+                                         unsafe: $0.labelIds.contains(SystemLabel.spam) || $0.labelIds.contains(SystemLabel.trash)) }
+        if scan != loginScan {
+            loginScan = scan
+            loginArrival = latest.flatMap { LoginArrival($0, now: Date()) }
+        }
         var context = context(for: detail)
         let signature = ReaderPayload.signature(detail, context: context)
         defer { if detail.ai?.needsReply == true { requestQuickReplies(after: 1.2) } }
@@ -947,4 +957,12 @@ final class ReaderMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError("not used") }
 
     @objc private func run() { handler() }
+}
+
+/// What the sign-in scan of the open thread's latest message depended on.
+private struct LoginScan: Equatable {
+    let message: MessageKey
+    let body: MailMessage.BodyState
+    /// In Spam or Trash: the only labels the scan reads.
+    let unsafe: Bool
 }

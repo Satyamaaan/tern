@@ -113,6 +113,7 @@ public enum LoginAssistance {
             // Outlook's separator starts a quote extending through its following siblings.
             if ["divRplyFwdMsg", "x_divRplyFwdMsg", "appendonsend", "OLK_SRC_BODY_SECTION"].contains(child.attribute("id") ?? "")
                 || child.hasClass("OutlookMessageHeader") { break }
+            guard text.utf8.count + local.utf8.count < 32_000 else { break }
             collect(child, text: &local, links: &links)
         }
         if node.name == "a", let href = node.attribute("href"), let url = magicLink(href, label: local) { links.insert(url) }
@@ -120,9 +121,15 @@ public enum LoginAssistance {
         if ["div", "p", "tr", "li"].contains(node.name) { text += "\n" }
     }
 
+    /// Compiled once per pattern; matching on a compiled expression is safe from any thread.
+    private static let compiled = NSCache<NSString, NSRegularExpression>()
+
     private static func regex(_ pattern: String) -> NSRegularExpression {
+        if let cached = compiled.object(forKey: pattern as NSString) { return cached }
         // All patterns are internal constants, never sender-supplied expressions.
-        try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        let expression = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+        compiled.setObject(expression, forKey: pattern as NSString)
+        return expression
     }
 
     private static func matches(_ pattern: String, _ value: String) -> Bool {

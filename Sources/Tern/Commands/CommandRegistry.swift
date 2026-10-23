@@ -323,7 +323,7 @@ final class CommandRegistry {
                     reader.model?.useLoginCredential(credential)
                 }
             },
-            Command(id: "openLoginLink", title: "Open Sign-in Link…", group: .actions, keys: [.init(key: .char("o"), modifiers: [.option, .shift])], menu: .message, section: 4,
+            Command(id: "openLoginLink", title: "Open Sign-in Link…", group: .actions, keys: [.init(key: .char("l"), modifiers: [.option, .shift])], menu: .message, section: 4,
                     aliases: ["magic link", "login"], isEnabled: {
                         reading() && reader.model?.loginCredentials.contains(where: { if case .magicLink = $0 { return true }; return false }) == true
                     }) {
