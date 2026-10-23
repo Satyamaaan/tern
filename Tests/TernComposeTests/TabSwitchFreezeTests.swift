@@ -8,6 +8,55 @@ import TernCore
 
 extension InboxPreferencesTests {
     @MainActor
+    @Test func openingThreadOverListGivesReaderTheKeyboard() async throws {
+        _ = NSApplication.shared
+        let database = try AppDatabase.inMemory()
+        let account = Account(email: "synthetic@example.com")
+        try await database.writer.write { db in
+            try account.insert(db)
+            try MailStore.upsertMessages(db, (0..<3).map { index in
+                MailMessage(accountId: account.id, id: "m\(index)", threadId: "t\(index)",
+                            date: Date(timeIntervalSince1970: Double(1_000 - index)), fromEmail: "sender@example.com",
+                            subject: "Synthetic \(index)", labelIds: [SystemLabel.inbox])
+            })
+        }
+        let prefs = Preferences.shared
+        let pane = prefs.readingPane
+        prefs.readingPane = false
+        defer { prefs.readingPane = pane }
+        let engine = ReaderWebEngine.shared
+        let active = engine.webView.isReaderActive
+        let delegate = engine.delegate
+        let openLink = engine.webView.openLinkFromMenu
+        defer {
+            engine.webView.isReaderActive = active
+            engine.delegate = delegate
+            engine.webView.openLinkFromMenu = openLink
+        }
+        let services = AppServices(store: MailStore(database))
+        let app = AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/unused"))
+        app.startObservations()
+        let registry = CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides())
+        let palette = PaletteController(model: app, registry: registry)
+        let hosting = NSHostingView(rootView: MainView(palette: palette).environment(app).environment(services))
+        hosting.sizingOptions = []
+        let window = MainWindow(contentView: hosting)
+        window.setContentSize(MainWindow.defaultSize)
+        defer { services.reader.model?.suspend(); window.contentView = nil; window.close() }
+        let snapshots = Snapshotter(model: app, registry: registry)
+        snapshots.settle(window)
+        app.focusList()
+        app.moveCursor(1)
+        try #require(!app.readerVisible && !KeyRouter.readerHasKeyboard(window))
+        try #require(window.firstResponder is NSTableView)
+        app.open()
+        snapshots.settle(window)
+        #expect(app.readerExpanded && app.focus == .reader)
+        #expect(services.reader.model?.key == app.cursor)
+        #expect(KeyRouter.readerHasKeyboard(window), "Opening over the list must give the page the real keyboard")
+    }
+
+    @MainActor
     @Test func multiSelectionKeepsTheReaderObservation() async throws {
         _ = NSApplication.shared
         let database = try AppDatabase.inMemory()
