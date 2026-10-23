@@ -72,8 +72,11 @@ public final class SyncCoordinator {
             for await snapshot in updates { self?.statuses[snapshot.accountId]?.apply(snapshot) }
         })
 
-        let reader = store.database.reader
+        let database = store.database
+        let reader = database.reader
         serviceTasks.append(Task { [weak self] in
+            let count = database.trackLongLivedObservation()
+            defer { count.cancel() }
             let observation = ValueObservation.tracking { db in try MailStore.pendingOpCounts(db) }.removeDuplicates()
             do {
                 for try await counts in observation.values(in: reader) { self?.opCountsChanged(counts) }

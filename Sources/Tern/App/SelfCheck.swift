@@ -33,6 +33,7 @@ final class SelfCheck {
         check("list loaded", model.listLoaded && !model.snapshot.isEmpty)
         check("first row selected", model.cursor == model.snapshot.order.first)
         check("launch opens the inbox on Primary", !model.prefs.splitInbox || model.activeTab == .category(.primary))
+        observationBudget("after launch")
         timeQueries()
         previews()
         triage()
@@ -95,11 +96,21 @@ final class SelfCheck {
 
     private func multiSelect() {
         model.showInboxTab(.primary)
+        let expanded = model.readerExpanded
+        model.readerExpanded = true
+        defer { model.readerExpanded = expanded }
         wait(0.2)
         model.moveToTop()
         model.moveCursor(1, extend: true)
         model.moveCursor(1, extend: true)
         check("⇧J twice selects three", model.checked.count == 3 && model.targets.count == 3)
+        wait(0.1)
+        model.clearSelection()
+        wait(0.1)
+        observationBudget("after multi-select round trip")
+        model.moveToTop()
+        model.moveCursor(1, extend: true)
+        model.moveCursor(1, extend: true)
         let targets = model.targets
         let next = model.snapshot.key(from: targets.last, offset: 1)
         model.perform(.archive, on: targets)
@@ -110,6 +121,12 @@ final class SelfCheck {
         model.undoLast()
         poll(0.6) {}
         check("undo restores the selection's threads", targets.allSatisfy { model.snapshot.rows[$0] != nil })
+    }
+
+    private func observationBudget(_ phase: String) {
+        let count = model.store.database.liveLongLivedObservationCount
+        check("long-lived observations \(phase): \(count) ≤ \(AppDatabase.longLivedObservations)",
+              count > 0 && count <= AppDatabase.longLivedObservations)
     }
 
     private func clicks() {

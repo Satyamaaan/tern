@@ -22,13 +22,14 @@ extension InboxPreferencesTests {
         }
         let services = AppServices(store: MailStore(database))
         let app = AppModel(services: services, isFake: true, databaseURL: URL(fileURLWithPath: "/unused"))
-        app.reloadList()
+        app.startObservations()
         app.readerExpanded = true
         let hosting = NSHostingView(rootView: ReaderColumn().environment(app).environment(services))
         hosting.sizingOptions = []
         let window = MainWindow(contentView: hosting)
         window.setContentSize(NSSize(width: 640, height: 720))
-        let snapshots = Snapshotter(model: app, registry: CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides()))
+        let registry = CommandRegistry(model: app, shell: nil, overrides: ShortcutOverrides())
+        let snapshots = Snapshotter(model: app, registry: registry)
         snapshots.settle(window)
         weak var original = services.reader.model
         try #require(original != nil && original?.key == app.cursor)
@@ -38,10 +39,22 @@ extension InboxPreferencesTests {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             snapshots.render(window, appearance: .aqua, to: directory.appendingPathComponent(name + ".png"))
         }
+        let launchCount = database.liveLongLivedObservationCount
+        #expect(launchCount == 6)
+        #expect(launchCount <= AppDatabase.longLivedObservations)
         shot("single")
+        let webView = ReaderWebEngine.shared.webView
+        #expect(window.makeFirstResponder(webView))
+        #expect(KeyRouter.readerHasKeyboard(window))
         app.moveCursor(1, extend: true)
         snapshots.settle(window)
         #expect(app.checked.count == 2)
+        #expect(!webView.acceptsFirstResponder)
+        #expect(!KeyRouter.readerHasKeyboard(window))
+        services.reader.focus()
+        #expect(!KeyRouter.readerHasKeyboard(window), "A covered reader cannot regain the keyboard")
+        #expect(registry["nextMessage"]?.isEnabled() == false)
+        #expect(registry["reply"]?.isEnabled() == false)
         shot("multiple")
         app.checked.removeAll()
         app.open()
@@ -49,7 +62,18 @@ extension InboxPreferencesTests {
         #expect(original != nil && services.reader.model === original,
                 "Multi-select must reuse the reader and its concurrent detail observation")
         #expect(services.reader.model?.key == app.cursor)
+        #expect(webView.acceptsFirstResponder)
         shot("returned")
+        for _ in 0..<AppDatabase.longLivedObservations + 2 {
+            app.moveToTop()
+            app.moveCursor(1, extend: true)
+            snapshots.settle(window)
+            app.clearSelection()
+            snapshots.settle(window)
+            #expect(services.reader.model === original)
+            #expect(database.liveLongLivedObservationCount == launchCount)
+            #expect(database.liveLongLivedObservationCount <= AppDatabase.longLivedObservations)
+        }
     }
 
     @MainActor
@@ -99,6 +123,7 @@ extension InboxPreferencesTests {
             reader.show(index.isMultiple(of: 2) ? key : nil)
         }
         reader.show(key)
+        #expect(database.liveLongLivedObservationCount == AppDatabase.longLivedObservations)
         #expect(start.duration(to: .now) < .seconds(1), "Launch and navigation must leave a reader available")
         #expect(reader.detail?.thread.key == key)
         release.signal()

@@ -129,6 +129,7 @@ final class ReaderModel {
         engine.webView.openLinkFromMenu = { [weak self] in self?.openHoveredLink() }
         services?.reader.model = self
         isActive = true
+        engine.webView.isReaderActive = true
         defer { self.prefetch(prefetch) }
         guard key != self.key else { return resume() }
         commitmentEvidence = false
@@ -157,6 +158,10 @@ final class ReaderModel {
     /// dropped (asked again on the way back); logo and image-setting changes wait for it.
     func suspend() {
         isActive = false
+        engine.webView.isReaderActive = false
+        if let window = engine.webView.window, KeyRouter.readerHasKeyboard(window) {
+            window.makeFirstResponder(nil)
+        }
         observer?.pause()
         isFollowing = false
         quickReplyTask?.cancel()
@@ -791,7 +796,7 @@ final class ReaderModel {
     /// inside the conversation.
     func focusPage() {
         let webView = engine.webView
-        guard let window = webView.window, window.firstResponder !== webView else { return }
+        guard isActive, let window = webView.window, window.firstResponder !== webView else { return }
         window.makeFirstResponder(webView)
     }
 
