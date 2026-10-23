@@ -21,6 +21,7 @@ struct TitleBar: View {
         .padding(.trailing, 12)
         .frame(height: MainWindow.headerHeight)
         .background(WindowDragArea())
+        .glassSurface(radius: 0, kind: .chrome)
     }
 }
 
@@ -152,7 +153,12 @@ struct TabButton: View {
 
     /// The active tab's `selected` fill, under the label; it slides to the next active tab.
     @ViewBuilder private var activeFill: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.selected))
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            .fill(Color(Theme.selected))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .strokeBorder(Color(Theme.hairlineStrong).opacity(0.6), lineWidth: 0.5)
+            }
         if let fill {
             shape.matchedGeometryEffect(id: "activeTab", in: fill)
         } else {

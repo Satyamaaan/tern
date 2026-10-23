@@ -20,9 +20,7 @@ struct BottomBar: View {
             }
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
-        .barShadow()
+        .glassSurface()
         .frame(height: Self.height)
     }
 
@@ -46,17 +44,4 @@ private struct BarButton: View {
         .buttonStyle(IconButtonStyle())
         .help(help)
     }
-}
-
-private struct BarShadow: ViewModifier {
-    @Environment(\.colorScheme) private var scheme
-
-    func body(content: Content) -> some View {
-        content.compositingGroup().shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.12), radius: 12, y: 4)
-    }
-}
-
-extension View {
-    /// A softer shadow than the overlay one: the bar rests on the list, it doesn't pop over it.
-    fileprivate func barShadow() -> some View { modifier(BarShadow()) }
 }

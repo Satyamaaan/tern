@@ -568,5 +568,10 @@ final class CursorFillView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         color.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: Theme.Radius.row, yRadius: Theme.Radius.row).fill()
+        let edge = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.25, dy: 0.25),
+                                xRadius: Theme.Radius.row, yRadius: Theme.Radius.row)
+        Theme.hairlineStrong.withAlphaComponent(0.6).setStroke()
+        edge.lineWidth = 0.5
+        edge.stroke()
     }
 }

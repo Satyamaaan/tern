@@ -2,11 +2,12 @@
 
 Direction: **list first**. The window is the mail list: tabs across the title bar, one calm line per
 conversation in a centred column, a small floating bar at the bottom. Opening a thread lays it over the list;
-Esc puts the list back exactly as it was. Chalk and charcoal neutrals with **one neutral ink** (near-black in
+Esc puts the list back exactly as it was. Porcelain and graphite neutrals with **one neutral ink** (near-black in
 light, near-white in dark) for primary buttons and everything that means *this needs you*. Colour appears only
 as a small hue on **tab and tag icons** (and in mail itself). One typeface, **Inter**, and one icon set,
-**Hugeicons Stroke Rounded**. Flat surfaces separated by hairlines, small corners, shadows only on floating
-things. Calm like Linear and ChatGPT, never the stock macOS look. Research behind the original direction:
+**Hugeicons Stroke Rounded**. Aside-inspired translucent controls and Droppy-inspired glass sit over opaque
+mail canvases. Continuous corners and fine light-catching edges distinguish floating controls; shadows stay
+behind their backgrounds. The layout, row density and keyboard model remain unchanged. Research behind the original direction:
 `research.md`. Visual reference: the offscreen renders (`--snapshot`, see "Checking it" below); the old static
 `mockup.html` is retired.
 
@@ -25,22 +26,22 @@ Hard rules
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| `bg` window, list, reader over the list | `#FFFFFF` | `#141414` |
-| `sidebar` | `#F6F6F5` | `#0E0E0E` |
-| `raised` reading pane, bottom bar, popovers | `#FFFFFF` | `#1A1A1A` |
-| `hover` | `#F1F1EF` | `#1F1F1F` |
-| `selected` selected row, active tab | `#EBEBE8` | `#272727` |
-| `selectedFocus` selected row while the list has the keyboard | `#E4E4E0` | `#2F2F2F` |
-| `hairline` row separators | `#E6E6E2` | `#2A2A2A` |
-| `hairlineStrong` tag outlines, field focus, bars | `#D6D6D1` | `#3A3A3A` |
-| `text1` | `#161616` | `#ECECEA` |
-| `text2` previews, tag labels, icons | `#5F5F5A` | `#A3A39E` |
-| `text3` times, counts, date headers | `#74746E` | `#85857F` |
+| `bg` list, reader canvas | `#FAFBFC` | `#17181B` |
+| `sidebar` glass tint and solid fallback | `#EFF1F4` | `#202227` |
+| `raised` editor, glass tint and solid fallback | `#FFFFFF` | `#212328` |
+| `hover` | `#ECEEF2` | `#282B31` |
+| `selected` selected row, active tab | `#E4E8EF` | `#30343C` |
+| `selectedFocus` selected row while the list has the keyboard | `#DBE1EA` | `#3A404B` |
+| `hairline` row separators | `#E5E8ED` | `#2C2F36` |
+| `hairlineStrong` tag outlines, field focus, bars | `#CED3DC` | `#484E59` |
+| `text1` | `#1B1E24` | `#F0F1F4` |
+| `text2` previews, tag labels, icons | `#565D69` | `#B0B6C2` |
+| `text3` times, counts, date headers | `#687181` | `#969FAD` |
 | `ink` primary fill, unread dots, needs-reply icon, focus ring, links | `#18181B` | `#EDEDEA` |
 | `inkHover` / `inkPressed` | `#2E2E33` / `#45454B` | `#D9D9D5` / `#C4C4BF` |
-| `inkSoft` | `#E4E4E0` | `#303030` |
+| `inkSoft` | `#E4E8EF` | `#30343C` |
 | `onInk` label on an `ink` fill | `#FFFFFF` | `#141414` |
-| `avatarFill` / `avatarText` letter avatars | `#E8E8E4` / `#55554F` | `#2E2E2E` / `#B4B4AE` |
+| `avatarFill` / `avatarText` letter avatars | `#E5E9F0` / `#535E70` | `#303540` / `#BEC6D3` |
 
 On a selected row, `text3` text switches to `text2`. Search matches get an `ink` 13% mark behind the word.
 The AI sparkle icon is `text3`. Errors are `ink` 500 text (no red). Destructive confirmations stay in `NSAlert`.
@@ -77,11 +78,28 @@ tag with the same dot. Each account's name and hue are set in Settings → Accou
 
 ### Radius and spacing
 
-`Theme.Radius`: **chip 4** (tags, recipient tokens, keycaps, search marks) · **control 6** (buttons, icon
-buttons, tabs, fields) · **row 6** (row, sidebar, menu and palette fills) · **overlay 8** (toasts, the chord
-HUD, the search field, small overlays) · **card 10** (⌘K, popovers, the composer card, the bottom bar).
-Continuous corners. 4 px grid. Overlay shadow (palette, menus, toasts): `0 8 30 rgba(0,0,0,.14)` light, `.5`
-dark; the bottom bar rests lower (`0 4 12`, `.12` / `.5`). Never a shadow on a button.
+`Theme.Radius`: **chip 4** (tags, recipient tokens, keycaps, search marks) · **control 8** (buttons, icon
+buttons, tabs, fields) · **row 8** (row, sidebar, menu and palette fills) · **overlay 12** (toasts, the chord
+HUD, the search field, small overlays) · **card 16** (⌘K, popovers, the composer card, the bottom bar).
+Continuous corners. 4 px grid. Floating glass has a separate black silhouette blurred 12 pt and offset
+8 pt down, at 8% opacity in light and 22% in dark. Never rasterize the glass and its content together to
+cast a shadow. Existing opaque overlays retain their older shadow treatment.
+
+### Glass and readability
+
+`Shared/GlassSurface.swift` owns `.glassSurface(radius:kind:)`. Sidebar and title chrome form continuous
+planes. Floating panels have a 0.5 pt outer edge and an inset white highlight that fades downward.
+The tint covers 72% of the sidebar and 82% of floating panels and headers, so text remains readable over
+bright desktop content. Selection is an opaque neutral fill, not another blur layer.
+
+The material reuses the sign-in notch's `WindowBackdrop`, a 6 pt live blur. It uses private `CABackdropLayer`
+and `CAFilter` APIs and remains a compatibility risk. If those classes are unavailable, floating panels use
+Liquid Glass on macOS 26 or SwiftUI material on older systems; sidebar and headers use `NSVisualEffectView`.
+Reduce Transparency or Increase Contrast replaces the glass with solid `sidebar` or `raised` fills.
+
+Never put a backdrop in a mail row, message body, editor canvas, or scrolling cell. The reusable AppKit table,
+local database reads, scroll behavior and keyboard selection remain unchanged. Buttons compress on the short
+Droppy-derived press spring and release on a softer spring; fills and list hover remain immediate.
 
 ## Type: Inter
 
@@ -129,9 +147,9 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | `hover` fill | `selected` fill |
 | link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
-All radius 6. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
-While held, text buttons also shrink to 97 % and icon buttons to 95 % (100 ms, house curve; the fill stays
-instant; no shrink with Reduce Motion).
+All radius 8. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+While held, text buttons shrink to 97 % and icon buttons to 95 %. Press uses response 0.14, damping 0.82;
+release uses response 0.24, damping 0.74. Fills stay instant; no shrink with Reduce Motion.
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
 a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
 `hairlineStrong` border, radius 4 inside 6; the segment slides to a new choice (180 ms, house curve; an 80 ms
@@ -234,8 +252,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   900 ms, then the text rises 4 pt), otherwise it is simply there. Other lists one Display 17 line in `text2`.
 
 ### Bottom bar
-A floating toolbar centred under the list, 14 px from the bottom: `raised`, radius 10, 1 px `hairlineStrong`,
-the bar shadow, 4 px padding, three 28 px icon buttons — **Search** (`/`, ⌘F when no thread is on screen),
+A floating glass toolbar centred under the list, 14 px from the bottom, radius 16,
+4 px padding, three 28 px icon buttons — **Search** (`/`, ⌘F when no thread is on screen),
 **Sidebar** (⌃⌘S), **Settings** (⌘,). A button whose thing is open gets the `selected` fill. Hidden while a
 thread covers the list.
 
@@ -273,7 +291,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   painted after the first frames fade in as they land (160 ms; cached ones never fade), and a sender logo that
   arrives late fades in over the initials (120 ms). Reduce Motion: 80 ms fades, all at once, no shimmer and no
   press shrink.
-- Bottom: the reply field ("Reply to Maya…", 36 px, radius 6, `hover` fill) in the reading column with ✦ quick
+- Bottom: the reply field ("Reply to Maya…", 36 px, radius 8, glass) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
   (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
   already in it; only the card moves, never the web view. Closing, it sinks back into the field (opacity and 98 %, 120 ms).
@@ -284,17 +302,18 @@ title bar; remembered; Reduce Motion crossfades). Mailboxes (Inbox, Needs reply,
 Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover;
 drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
 pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
-something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 6, 16 px icons in `text2`, counts
+something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 8, 16 px icons in `text2`, counts
 tabular; `selected` the moment a row is pressed, opened on release. The sync line crossfades between states, never
 within one.
 
 ### ⌘K palette
-Centred 640 px, radius 10, translucent `raised` at 92% with blur, overlay shadow. 52 px input (Inter 16).
+Centred 640 px, radius 16, shared floating glass with an opaque selected row. 52 px input (Inter 16).
 Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
 its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Fades in over 120 ms; closes at once.
 
 ### Composer
-Inline in the reader, or a floating window for new mail (`c`), 640×560, `raised`, radius 10. Flat rows with
+Inline in the reader, or a floating window for new mail (`c`), 640×560. Glass chrome surrounds opaque fields
+and editor content; the inline card has radius 16. Flat rows with
 hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Inter 15/600). Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
@@ -380,8 +399,8 @@ Values live in `Shared/Motion.swift`. The house curve is a quick ease-out `0.2, 
 - Hover reveal 90 ms, fade in only, hidden at once: the Projects `+`, a project's `⋯`, the row hover buttons
   when the pointer comes into the list (from row to row they move at once).
 - Pressed: rows, tabs and sidebar rows get a fill, instant on mouse-down, action on mouse-up, and never scale.
-  Buttons scale too while held: text buttons 97 %, icon buttons 95 %, the reader page's small controls 97 %
-  (100 ms, house curve).
+  Buttons scale too while held: text buttons 97 %, icon buttons 95 %, with the short press/release springs.
+  The reader page's small controls stay at 97 % over 100 ms on the house curve.
 - Reader over the list, sidebar and pane changes spring (response 0.32, damping 0.86); the sidebar's More opens on
   the house curve (140 ms), its rows fading down 4 pt.
 - Inbox zero after triage: fade 200 ms from 120 ms, stroke 900 ms, text 300 ms from 500 ms.
@@ -413,9 +432,23 @@ Previous Message, Open and Quick Look itself. After archive or delete with nothi
 closes whatever the preference. `g` chords time out 2 s after their hint shows (2.4 s in all).
 
 ## Checking it
-Render offscreen, never on screen: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
+Render offscreen by default: `TERN_DB=<copy of a seeded db> TERN_SNAPSHOT_EXTRAS=1 .build/debug/Tern
 --snapshot <dir>` writes the list, Gmail's tabs (Primary, Promotions with its count, the title bar alone, ⌘K's Move to …),
 reader, reading pane, sidebar, search, narrow window, palette, the settings page
 (every section, search, a shortcut being recorded, in conflict, reserved and kept for text editing, an image sender
 that couldn't be removed), onboarding, the update card's states and the move prompt in light and dark; `--check` drives the shell through its
 behaviour and timings (Gmail's tabs: landing on Primary, Tab / ⇧Tab, counts, a hidden empty tab, Move to Primary and its undo).
+
+Offscreen captures use the solid glass fallback because `cacheDisplay` cannot composite native backdrops.
+To check glass, use the built app with a disposable fake database and isolated preferences:
+
+```sh
+CFFIXED_USER_HOME=<scratch-home> TERN_DB=<disposable-fake-db> \
+  TERN_GLASS_SNAPSHOT_ONLY=1 TERN_SNAPSHOT_LIVE=1 \
+  build/Tern.app/Contents/MacOS/Tern --fake --snapshot <output-dir>
+```
+
+This briefly shows the fixture over a synthetic desktop and captures only its rectangle. It sends no
+mouse or keyboard events, then closes its windows. It covers inbox, palette, reader, inline composer,
+settings and a narrow window in both appearances. Omit `TERN_SNAPSHOT_LIVE` for the solid fallback.
+Never use a real mailbox for this command; snapshots change selection and can create disposable drafts.

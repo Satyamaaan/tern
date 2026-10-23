@@ -25,7 +25,6 @@ struct SidebarView: View {
 
             SyncStatusLine()
         }
-        .background(Color(Theme.sidebar))
     }
 
     // MARK: Mailboxes
@@ -138,20 +137,25 @@ struct SidebarRow<Leading: View>: View {
                 leading()
                     .frame(width: 16, height: 16)
                 Text(title)
-                    .font(.ui(13, selected ? .medium : .regular))
+                    .font(.ui(13, selected ? .semibold : .regular))
                     .foregroundStyle(Color(titleColor))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let count, trailing == nil || !hovering {
                     Text(count.formatted())
-                        .font(.numeric(12, countWeight))
-                        .foregroundStyle(Color(countColor))
+                        .font(.numeric(12, selected ? .medium : countWeight))
+                        .foregroundStyle(Color(selected ? Theme.text1 : countColor))
                 }
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
         }
-        .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: filled ? Theme.selected : nil, hover: filled ? nil : Theme.hover))
+        .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: filled ? Theme.selectedFocus : nil, hover: filled ? nil : Theme.hover))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+                .strokeBorder(Color(Theme.hairlineStrong).opacity(filled ? 0.65 : 0), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
         // Beside the button rather than in it, so its clicks stay its own. It fades in on hover (90 ms) and
         // goes at once, as the count comes back.
         .overlay(alignment: .trailing) {

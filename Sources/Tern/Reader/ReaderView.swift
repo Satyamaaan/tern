@@ -19,7 +19,7 @@ struct ReaderPosition {
 
 /// One conversation, either full width over the list or in the side pane. Pass the neighbours in
 /// `prefetch` (next and previous rows) so moving to them is instant, and `onBack` when the reader covers
-/// the list. The container sets the surface; the reader itself draws no background.
+/// the list. The message canvas stays opaque beneath the glass controls.
 ///
 /// `active` is false while the reader is kept in the tree but off screen (no reading pane, no thread over
 /// the list): it then follows, renders and prefetches nothing, and catches up with `key` when it is back.
@@ -93,6 +93,7 @@ struct ReaderView: View {
                         .transition(.opacity)
                 }
             }
+            .background(Color(Theme.bg))
             if key != nil {
                 // Stacked, so a closing card sinks back into the reply field fading in under it.
                 ZStack(alignment: .bottom) {
@@ -249,7 +250,7 @@ struct ReaderTopBar: View {
         .padding(.trailing, 20)
         .frame(height: MainWindow.headerHeight)
         .background(WindowDragArea())
-        .overlay(alignment: .bottom) { Hairline() }
+        .glassSurface(radius: 0, kind: .chrome)
     }
 
     /// Archive, or Move to Inbox in the Archive mailbox. The slide-over draws Archive as a box.
@@ -294,6 +295,7 @@ struct ReaderTopBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 52)
+        .glassSurface(radius: 0, kind: .chrome)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
@@ -443,7 +445,7 @@ struct ReaderFindBar: View {
         .padding(.leading, 10)
         .padding(.trailing, 4)
         .frame(height: 32)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
+        .glassSurface(radius: Theme.Radius.control)
         .onAppear { focused = true }
     }
 }
@@ -469,10 +471,7 @@ struct ReaderLinkPill: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous)
-                .fill(Color(Theme.raised))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1)))
+        .glassSurface(radius: Theme.Radius.overlay)
         .frame(maxWidth: 520, alignment: .leading)
         .padding(8)
         .allowsHitTesting(false)
@@ -485,11 +484,10 @@ struct ReaderToast: View {
     var body: some View {
         Text(text)
             .font(.ui(13))
-            .foregroundStyle(Color(Theme.bg))
+            .foregroundStyle(Color(Theme.text1))
             .padding(.horizontal, 14)
             .frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.ink)))
-            .shadow(color: .black.opacity(0.14), radius: 15, y: 8)
+            .glassSurface(radius: Theme.Radius.overlay)
             .allowsHitTesting(false)
     }
 }
@@ -520,7 +518,7 @@ struct ReaderReplyBar: View {
                 .foregroundStyle(Color(Theme.text3))
                 .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).fill(Color(Theme.hover)))
+                .glassSurface(radius: Theme.Radius.control)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

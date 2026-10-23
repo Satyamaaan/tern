@@ -47,9 +47,7 @@ struct ShortcutSheet: View {
             .frame(maxHeight: 520)
         }
         .frame(width: 600)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
-        .overlayShadow()
+        .glassSurface()
     }
 
     private static let columns: [[CommandGroup]] = [[.actions], [.goTo, .accounts, .settings]]

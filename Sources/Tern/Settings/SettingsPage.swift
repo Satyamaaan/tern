@@ -14,14 +14,15 @@ struct SettingsPage: View {
         HStack(spacing: 0) {
             SettingsNav(state: state)
                 .frame(width: MainView.sidebarWidth)
-                .background(Color(Theme.sidebar))
+                .glassSurface(radius: 0, kind: .sidebar)
             Hairline(vertical: true)
             VStack(spacing: 0) {
                 SettingsTitleBar(state: state)
+                    .glassSurface(radius: 0, kind: .chrome)
                 SettingsContent(state: state)
+                    .background(Color(Theme.bg))
             }
             .frame(maxWidth: .infinity)
-            .background(Color(Theme.bg))
         }
         .background(SettingsKeyView(state: state))
         .tint(Color(Theme.ink))

@@ -277,7 +277,7 @@ extension AppModel {
 
 // MARK: - View
 
-/// The ⌘K palette: 640 px, translucent `raised`, grouped results with keycaps on the right.
+/// The ⌘K palette: 640 px, floating glass, grouped results with keycaps on the right.
 struct PaletteView: View {
     @Bindable var controller: PaletteController
     @FocusState private var focused: Bool
@@ -300,15 +300,8 @@ struct PaletteView: View {
             results
         }
         .frame(width: 640)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Color(Theme.raised).opacity(0.92))
-            }
-        )
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .overlayShadow()
+        .glassSurface()
         .onAppear {
             controller.reset()
             focused = true
@@ -387,16 +380,17 @@ private struct PaletteRow: View {
                 .foregroundStyle(Color(Theme.text1))
                 .lineLimit(1)
             if let subtitle = item.subtitle {
-                Text(subtitle).font(.ui(12)).foregroundStyle(Color(Theme.text3)).lineLimit(1)
+                Text(subtitle).font(.ui(12)).foregroundStyle(Color(selected ? Theme.text2 : Theme.text3)).lineLimit(1)
             }
             Spacer(minLength: 8)
             if let shortcut = item.shortcut {
-                Text(shortcut).font(.numeric(12)).foregroundStyle(Color(Theme.text3))
+                Text(shortcut).font(.numeric(12)).foregroundStyle(Color(selected ? Theme.text2 : Theme.text3))
             }
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.row).fill(Color(Theme.selected).opacity(selected ? 1 : 0)))
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+            .fill(Color(Theme.selectedFocus).opacity(selected ? 1 : 0)))
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
     }

@@ -33,11 +33,11 @@ struct IconButton: View {
 
 // MARK: - Buttons
 
-/// Every text button in the app. 6 px corners, Inter Medium, 28 pt (24 pt small), no shadow.
+/// Every text button in the app. Continuous corners, Inter Medium, 28 pt (24 pt small), no shadow.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
 /// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
-/// All three darken a step and shrink to 97 % while pressed (the shrink only, on the house curve; none under
+/// All three darken a step and shrink to 97 % while pressed (the shrink only, on a short spring; none under
 /// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 40 % when disabled.
 struct TernButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, quiet }
@@ -73,6 +73,9 @@ struct TernButtonStyle: ButtonStyle {
                 .frame(height: size == .small ? Theme.Control.small : Theme.Control.regular)
                 .background(shape.fill(fill))
                 .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: kind == .secondary ? 1 : 0))
+                .overlay(shape.inset(by: 0.5).strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.2), .clear], startPoint: .top, endPoint: .bottom),
+                    lineWidth: kind == .quiet ? 0 : 0.5))
                 .focusRing(isFocused, shape: shape)
                 .contentShape(shape)
                 .pressScale(configuration.isPressed, to: 0.97)
@@ -85,7 +88,9 @@ struct TernButtonStyle: ButtonStyle {
             switch kind {
             case .primary:
                 return Color(pressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink)
-            case .secondary, .quiet:
+            case .secondary:
+                return Color(pressed ? Theme.selected : hovering ? Theme.hover : Theme.chipFill)
+            case .quiet:
                 return pressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear
             }
         }
@@ -141,7 +146,7 @@ struct LinkButtonStyle: ButtonStyle {
 }
 
 extension View {
-    /// Press feedback: shrinks to `scale` while held, over 100 ms on the house curve. Only the scale animates
+    /// Press feedback: a short compression spring and softer release. Only the scale animates
     /// (fills stay instant), and a release mid-press retargets from where it is. Nothing under Reduce Motion.
     func pressScale(_ pressed: Bool, to scale: CGFloat) -> some View {
         modifier(PressScale(pressed: pressed, scale: scale))
@@ -164,7 +169,7 @@ private struct PressScale: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        content.animation(Motion.ease(Motion.press)) {
+        content.animation(reduceMotion ? nil : pressed ? Motion.floatingPress : Motion.floatingRelease) {
             $0.scaleEffect(pressed && !reduceMotion ? scale : 1)
         }
     }

@@ -731,9 +731,7 @@ struct FormattingBar: View {
             button(.quote, .quote, on: state.block == .quote, help: "Quote  ⌘⇧9")
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        .glassSurface(radius: Theme.Radius.overlay)
         // First show: fades in and grows from 97 % toward the selection over 120 ms (a fade with Reduce Motion).
         // Moving to a new selection and hiding are instant.
         .opacity(shown ? 1 : 0)

@@ -3,12 +3,12 @@ import SwiftUI
 
 /// Lightly blur the desktop without the opaque tint imposed by system materials.
 /// CABackdropLayer and CAFilter are private APIs; callers must keep a public-material fallback.
-struct LoginBackdrop: NSViewRepresentable {
-    func makeNSView(context: Context) -> LoginBackdropView { LoginBackdropView() }
-    func updateNSView(_ view: LoginBackdropView, context: Context) {}
+struct WindowBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowBackdropView { WindowBackdropView() }
+    func updateNSView(_ view: WindowBackdropView, context: Context) {}
 }
 
-final class LoginBackdropView: NSView {
+final class WindowBackdropView: NSView {
     private static let layerType = NSClassFromString("CABackdropLayer") as? CALayer.Type
     private static let filterType = NSClassFromString("CAFilter") as? NSObject.Type
     static var isAvailable: Bool { layerType != nil && filterType != nil }

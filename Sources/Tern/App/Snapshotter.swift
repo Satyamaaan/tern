@@ -13,10 +13,16 @@ struct Snapshotter {
 
     func run(into directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // cacheDisplay cannot composite system glass. Offscreen captures exercise the solid fallback.
+        GlassSurface.forceSolid = ProcessInfo.processInfo.environment["TERN_SNAPSHOT_LIVE"] != "1"
+            || ProcessInfo.processInfo.environment["TERN_SNAPSHOT_SOLID"] == "1"
         Self.installDemoLogos()
         Self.installDemoAccountPhotos(model.accounts)
         let palette = PaletteController(model: model, registry: registry)
         let window = makeWindow(palette: palette)
+        if ProcessInfo.processInfo.environment["TERN_GLASS_SNAPSHOT_ONLY"] == "1" {
+            exit(glassShots(window, directory) ? 0 : 1)
+        }
         if ProcessInfo.processInfo.environment["TERN_DUE_SNAPSHOT_ONLY"] == "1" {
             dueShots(window, directory)
             exit(0)

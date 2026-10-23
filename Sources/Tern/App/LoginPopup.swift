@@ -433,8 +433,8 @@ private struct LoginCardSurface: View {
     }
 
     @ViewBuilder private var material: some View {
-        if LoginBackdropView.isAvailable {
-            LoginBackdrop().clipShape(shape)
+        if WindowBackdropView.isAvailable {
+            WindowBackdrop().clipShape(shape)
         } else if #available(macOS 26, *) {
             Color.clear.glassEffect(.clear, in: shape)
         } else {

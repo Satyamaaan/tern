@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The small floating card Tern uses for its own prompts (updates, moving to Applications): a `raised` surface
-/// with 10 pt corners, a hairline edge and the overlay shadow; the app icon at the top left beside a title and a
+/// The small floating glass card Tern uses for its own prompts (updates, moving to Applications):
+/// the app icon at the top left beside a title and a
 /// line of detail; optional content below, aligned with the text; buttons on the right. A `quiet` card (errors)
 /// sets its title as plain `text2` instead of a semibold heading.
 struct AppCard<Content: View, Buttons: View>: View {
@@ -19,7 +19,6 @@ struct AppCard<Content: View, Buttons: View>: View {
     @ViewBuilder var buttons: () -> Buttons
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 Image(nsImage: AppIcon.image)
@@ -55,9 +54,7 @@ struct AppCard<Content: View, Buttons: View>: View {
         }
         .padding(20)
         .frame(width: Self.width, alignment: .leading)
-        .background(shape.fill(Color(Theme.raised)))
-        .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
-        .overlayShadow()
+        .glassSurface()
     }
 }
 

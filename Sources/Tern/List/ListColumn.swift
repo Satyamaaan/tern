@@ -151,9 +151,7 @@ struct SearchSuggestions: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Color(Theme.hairline), lineWidth: 1))
-        .overlayShadow()
+        .glassSurface()
     }
 }
 

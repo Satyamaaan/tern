@@ -167,11 +167,13 @@ struct ComposerView: View {
             .frame(height: 38)
             Hairline()
             ComposerFields(model: model)
+                .background(Color(Theme.raised))
             BodyEditorView(controller: model.editor)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(Theme.raised))
             ComposerBottomArea(model: model)
         }
-        .background(Color(Theme.raised))
+        .glassSurface(radius: 0, kind: .chrome)
         .tint(Color(Theme.ink))
         .acceptsFileDrops(model)
         .ignoresSafeArea()
@@ -234,6 +236,7 @@ struct InlineComposerCard: View {
         VStack(spacing: 0) {
             if model.headerExpanded {
                 ComposerFields(model: model, inset: 16)
+                    .background(Color(Theme.raised))
             } else {
                 Button { model.headerExpanded = true } label: {
                     HStack(spacing: 8) {
@@ -252,11 +255,11 @@ struct InlineComposerCard: View {
             }
             BodyEditorView(controller: model.editor)
                 .frame(height: min(max(model.bodyHeight, Self.minBody), Self.maxBody))
+                .background(Color(Theme.raised))
             ComposerBottomArea(model: model)
         }
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).fill(Color(Theme.raised)))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .glassSurface()
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
         .opacity(appeared ? 1 : 0)

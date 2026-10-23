@@ -131,9 +131,7 @@ struct SendToastView: View {
             }
             .padding(.horizontal, 16)
             .frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairlineStrong)))
-            .shadow(color: .black.opacity(0.14), radius: 15, y: 8)
+            .glassSurface(radius: Theme.Radius.overlay)
             .padding(.horizontal, 30)
             .padding(.vertical, 24)
         }

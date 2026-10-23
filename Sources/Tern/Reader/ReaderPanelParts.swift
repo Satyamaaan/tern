@@ -154,8 +154,9 @@ private struct ReaderPanelAction: View {
             .padding(.leading, 9)
             .padding(.trailing, key == nil ? 10 : 5)
             .frame(height: 26)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(Theme.text1).opacity(hovering ? 0.11 : 0.07)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                .fill(Color(Theme.text1).opacity(hovering ? 0.06 : 0)))
+            .glassSurface(radius: Theme.Radius.control, kind: .chrome)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

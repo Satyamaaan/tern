@@ -32,7 +32,6 @@ struct MainView: View {
                     .transition(.opacity)
             }
         }
-        .background(Color(Theme.bg))
         .tint(Color(Theme.ink))
         .ignoresSafeArea()
         .overlay(alignment: .top) { overlays }
@@ -65,7 +64,7 @@ struct MainView: View {
                         SidebarView()
                     }
                     .frame(width: Self.sidebarWidth)
-                    .background(Color(Theme.sidebar))
+                    .glassSurface(radius: 0, kind: .sidebar)
                     Hairline(vertical: true)
                 }
                 .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
@@ -197,9 +196,7 @@ struct MainView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).fill(Color(Theme.raised)))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.overlay, style: .continuous).strokeBorder(Color(Theme.hairline), lineWidth: 1))
-            .overlayShadow()
+            .glassSurface(radius: Theme.Radius.overlay)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Go to: i, Inbox. r, Needs Reply. s, Starred. d, Drafts.")
             .padding(.bottom, 80)

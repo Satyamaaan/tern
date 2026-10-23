@@ -22,7 +22,8 @@ final class MainWindow: NSWindow {
         titlebarSeparatorStyle = .none
         isReleasedWhenClosed = false
         minSize = Self.minimumSize
-        backgroundColor = Theme.bg
+        isOpaque = false
+        backgroundColor = .clear
         collectionBehavior.insert(.fullScreenPrimary)
         tabbingMode = .disallowed
         self.contentView = contentView
