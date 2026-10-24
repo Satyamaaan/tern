@@ -71,6 +71,14 @@ extension Snapshotter {
         model.show(.inbox)
         model.back()
         both("inbox")
+        if let list = model.listView as? MessageListController, model.snapshot.order.count > 4 {
+            list.setHovered(model.snapshot.itemIndex[model.snapshot.order[4]])
+            model.prefs.sidebarOpen = false
+            both("sidebar-closed-hover")
+            model.prefs.sidebarOpen = true
+            both("sidebar-open-hover")
+            list.setHovered(nil)
+        }
         model.palette = .commands
         both("palette")
         model.palette = nil

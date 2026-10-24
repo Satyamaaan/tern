@@ -117,6 +117,8 @@ final class KeyRouter {
             command.run()
             return nil
         }
+        // Space activates a focused settings control when its mail command cannot run here.
+        if model.settingsOpen, shortcut.key == .space { return event }
         // A disabled Tab or ⌘ shortcut keeps its normal meaning; a disabled letter is just ignored.
         return shortcut.key == .tab || !shortcut.isBare ? event : nil
     }

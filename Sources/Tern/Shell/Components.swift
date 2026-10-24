@@ -39,7 +39,7 @@ struct IconButton: View {
 /// - `secondary`: translucent wash and a two-tone glass edge over the parent material.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
 /// All three darken a step and shrink to 97 % while pressed (the shrink only, on a short spring; none under
-/// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 40 % when disabled.
+/// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 50 % when disabled.
 struct TernButtonStyle: ButtonStyle {
     enum Kind { case primary, secondary, quiet }
     enum Size { case regular, small }
@@ -86,10 +86,10 @@ struct TernButtonStyle: ButtonStyle {
                         }
                     }
                 }
-                .focusRing(isFocused, shape: shape)
+                .focusRing(isFocused && isEnabled, shape: shape)
                 .contentShape(shape)
-                .pressScale(configuration.isPressed, to: 0.97)
-                .opacity(isEnabled ? 1 : 0.4)
+                .pressScale(configuration.isPressed && isEnabled, to: 0.97)
+                .opacity(isEnabled ? 1 : 0.5)
                 .onHover { hovering = $0 && isEnabled }
         }
 
@@ -106,7 +106,7 @@ struct TernButtonStyle: ButtonStyle {
     }
 }
 
-/// Round icon controls with a neutral wash on hover and press. Prominent controls use an ink fill.
+/// Rounded toolbar controls with a neutral wash on hover and press. Prominent controls stay round and ink-filled.
 struct IconButtonStyle: ButtonStyle {
     var prominent = false
 
@@ -119,25 +119,33 @@ struct IconButtonStyle: ButtonStyle {
         let prominent: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.isFocused) private var isFocused
+        @Environment(\.colorScheme) private var colorScheme
         @State private var hovering = false
 
         var body: some View {
-            let shape = Capsule()
+            if prominent {
+                styledLabel(shape: Capsule())
+            } else {
+                styledLabel(shape: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            }
+        }
+
+        private func styledLabel<S: InsettableShape>(shape: S) -> some View {
             let pressed = configuration.isPressed && isEnabled
             let isHovering = hovering && isEnabled
-            configuration.label
+            let hoverOpacity = colorScheme == .dark ? 0.075 : 0.05
+            return configuration.label
                 .background {
                     if prominent {
                         shape.fill(Color(pressed ? Theme.inkPressed : isHovering ? Theme.inkHover : Theme.ink))
                     } else if pressed || isHovering {
-                        shape.fill(Color(Theme.text1).opacity(pressed ? 0.12 : 0.06))
-                        shape.strokeBorder(Color(Theme.hairlineStrong).opacity(0.55), lineWidth: 0.5)
+                        shape.fill(Color(Theme.text1).opacity(pressed ? 0.12 : hoverOpacity))
                     }
                 }
-                .focusRing(isFocused, shape: shape)
+                .focusRing(isFocused && isEnabled, shape: shape)
                 .contentShape(Rectangle())
-                .pressScale(configuration.isPressed, to: 0.95)
-                .opacity(isEnabled ? 1 : 0.4)
+                .pressScale(pressed, to: 0.95)
+                .opacity(isEnabled ? 1 : 0.5)
                 .onHover { hovering = $0 && isEnabled }
         }
     }
@@ -158,7 +166,7 @@ struct LinkButtonStyle: ButtonStyle {
             configuration.label
                 .foregroundStyle(Color(Theme.ink))
                 .underline(hovering && isEnabled)
-                .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.4)
+                .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.5)
                 .onHover { hovering = $0 }
         }
     }

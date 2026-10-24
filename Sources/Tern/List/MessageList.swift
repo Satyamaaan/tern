@@ -24,6 +24,7 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
     private var hoveredRow: Int?
     private var footerHovered: Int?
     private let hoverBar: NSHostingView<RowHoverBar>
+    private var rowMenuTracking = false
     /// The cursor row's fill, below the rows, so moving the cursor slides it instead of repainting.
     private let cursorFill = CursorFillView()
     /// The thread `cursorFill` sits on; its row then draws no fill of its own.
@@ -403,6 +404,8 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         lastWidth = width
         updateStyle()
         placeCursorFill()
+        updateHoverFromMouse()
+        updateHoverBar()
     }
 
     // MARK: Cursor fill
@@ -503,11 +506,17 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
 
     func updateHoverFromMouse() {
         // A click-through window (offscreen renders) has no pointer over it.
-        guard let window = table.window, window.isVisible, !window.ignoresMouseEvents else { return }
+        guard !rowMenuTracking, let window = table.window, window.isVisible, !window.ignoresMouseEvents else { return }
         let point = table.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         let row = scrollView.contentView.bounds.contains(table.convert(point, to: scrollView.contentView)) ? table.row(at: point) : -1
         setHovered(row >= 0 && items.indices.contains(row) && items[row].threadKey != nil ? row : nil)
         setFooterHovered(row >= 0 && items.indices.contains(row) && isFooter(row) ? row : nil)
+    }
+
+    func pointerExited() {
+        guard !rowMenuTracking else { return }
+        setHovered(nil)
+        pointerEntered = true
     }
 
     func setFooterHovered(_ row: Int?) {
@@ -549,7 +558,10 @@ final class MessageListController: NSObject, NSTableViewDataSource, NSTableViewD
         let column = ListLayout.column(in: rect)
         let size = CGSize(width: ThreadRowView.hoverWidth, height: 24)
         let centerY = style.isSingleLine ? rect.midY : rect.minY + 18
-        hoverBar.rootView = RowHoverBar(model: model, keys: targets(for: key))
+        hoverBar.rootView = RowHoverBar(model: model, keys: targets(for: key)) { [weak self] tracking in
+            self?.rowMenuTracking = tracking
+            if !tracking { self?.updateHoverFromMouse() }
+        }
         hoverBar.frame = CGRect(x: column.maxX - 4 - size.width, y: centerY - size.height / 2, width: size.width, height: size.height)
         // Row views are added after the bar; keep the bar on top of them.
         if table.subviews.last !== hoverBar { table.addSubview(hoverBar, positioned: .above, relativeTo: nil) }
@@ -703,10 +715,7 @@ final class MessageTableView: NSTableView {
     }
 
     override func mouseExited(with event: NSEvent) {
-        MainActor.assumeIsolated {
-            controller?.setHovered(nil)
-            controller?.pointerEntered = true
-        }
+        MainActor.assumeIsolated { controller?.pointerExited() }
     }
 }
 

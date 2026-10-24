@@ -40,6 +40,7 @@ final class SelfCheck {
         }
         timeQueries()
         previews()
+        sidebarResizing()
         triage()
         multiSelect()
         archiveMailbox()
@@ -74,6 +75,45 @@ final class SelfCheck {
               ThreadRowView.preview("Hi Alex, the numbers", subject: "Q3 numbers") == "Hi Alex, the numbers")
     }
 
+    private func sidebarResizing() {
+        let sidebar = model.prefs.sidebarOpen, pane = model.prefs.readingPane
+        let size = window.contentLayoutRect.size, ignoresMouse = window.ignoresMouseEvents
+        defer {
+            model.prefs.sidebarOpen = sidebar
+            model.prefs.readingPane = pane
+            window.ignoresMouseEvents = ignoresMouse
+            window.setContentSize(size)
+            (model.listView as? MessageListController)?.setHovered(nil)
+        }
+        window.ignoresMouseEvents = true
+        model.back()
+        model.prefs.readingPane = false
+        model.prefs.sidebarOpen = true
+        poll(0.5) { window.contentView?.layoutSubtreeIfNeeded() }
+        guard let list = model.listView as? MessageListController, model.snapshot.order.count > 5 else {
+            return check("sidebar resize has rows", false)
+        }
+        let selected = model.snapshot.order[1], hovered = model.snapshot.order[4]
+        model.select(selected)
+        list.setHovered(model.snapshot.itemIndex[hovered])
+        for (width, open) in [(1320.0, false), (1320.0, true), (980.0, true), (980.0, false)] {
+            window.setContentSize(NSSize(width: width, height: 840))
+            model.prefs.sidebarOpen = open
+            poll(0.5) { window.contentView?.layoutSubtreeIfNeeded() }
+            let row = list.table.rect(ofRow: model.snapshot.itemIndex[selected]!)
+            let column = ListLayout.column(in: row)
+            let fill = list.table.subviews.compactMap { $0 as? CursorFillView }.first
+            let expectedFill = column.insetBy(dx: 0, dy: 2)
+            let hoverRow = list.table.rect(ofRow: model.snapshot.itemIndex[hovered]!)
+            let hoverColumn = ListLayout.column(in: hoverRow)
+            let bar = list.table.subviews.compactMap { $0 as? NSHostingView<RowHoverBar> }.first
+            let label = "sidebar \(open ? "open" : "closed") at \(Int(width))"
+            check("\(label): highlight fits its row", fill?.frame == expectedFill)
+            check("\(label): actions stay at the row's trailing edge",
+                  bar?.isHidden == false && abs((bar?.frame.maxX ?? 0) - (hoverColumn.maxX - 4)) < 0.5)
+        }
+        check("sidebar resizing preserves the selection", model.cursor == selected)
+    }
 
     private func triage() {
         model.show(.inbox)

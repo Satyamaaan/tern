@@ -14,7 +14,8 @@ behind their backgrounds. The window layout, mail-row density and keyboard model
 Hard rules
 - Never a coloured bar down one side of a row, card or callout. Status is a dot or a tag.
 - Buttons, text and dots are neutral ink. Hue lives only on tab and tag icons; "needs reply" stays ink.
-- Text buttons, account controls and the floating toolbar use pill silhouettes; icon controls are round.
+- Text buttons, account controls and the floating toolbar use pill silhouettes; ordinary icon controls use
+  continuous 8 pt corners. The prominent compose button stays round.
   Sidebar rows use continuous 12 pt corners. Sender avatars remain rounded squares (a quarter of their side).
 - At most three visible actions in any area. Everything else lives in one `…` menu or ⌘K; secondary controls
   appear on hover.
@@ -169,15 +170,18 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | primary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
 | secondary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | glass control wash and fine edge | stronger wash | strongest wash |
 | quiet | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
-| icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | 6% text wash | 12% text wash |
+| icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | 5% light / 7.5% dark text wash | 12% text wash |
 | link | text | — | Geist Medium 12, `ink` | — | underline | 60 % |
 
-Text buttons use half their height as the radius. Icon buttons use capsules. Keyboard focus: a 1.5 px `ink`
-ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity, without hover or press washes. Row and tab
+Text buttons use half their height as the radius. Ordinary icon buttons use continuous 8 pt corners with no
+hover border. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control.
+Disabled: 50 % opacity, without hover, press compression or focus rings. Row and tab
 buttons use the same disabled treatment, without compression.
 Secondary controls reveal on keyboard or accessibility focus as well as hover. Hidden controls ignore clicks.
 Native menus anchor 4 pt below their trigger, including keyboard and accessibility activation; they do not
 depend on the current mouse event. AppKit handles menu tracking and dismissal.
+Segmented choices are native buttons with selected accessibility state, keyboard focus and disabled semantics;
+their existing sliding thumb stays behind the immediate press fill.
 While held, text buttons shrink to 97 % and icon buttons to 95 %. Press uses response 0.14, damping 0.82;
 release uses response 0.24, damping 0.74. Fills stay instant; no shrink with Reduce Motion.
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
@@ -258,6 +262,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     and `⋯`. Selected: `selected` fill; the cursor row gets `selectedFocus` while the list has the keyboard in the
     key window, so focus shows without a ring. Selected neighbours join into one block. The row's icon buttons: `selected` under the
     pointer (the row already has `hover`), `selectedFocus` pressed.
+    Snooze and More keep their selected wash and the toolbar visible while their native menus track.
+    Sidebar and window resizing reposition both the cursor fill and hover toolbar using the new column bounds.
 - A row's `⋯` and right-click list every thread action with its key, and Move to Tab ▸ Gmail's tabs (the
   selection's own ticked); ⌘K has Move to Primary … Move to Forums. The move swaps Gmail's category label (every
   other category comes off, also one Gmail adds before the move lands), so Gmail files it there too, and like

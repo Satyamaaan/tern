@@ -250,6 +250,11 @@ extension SelfCheck {
         check("mail commands are off in the menus while settings is open",
               registry["archive"].map(registry.canRun) == false && registry["appearance.toggle"].map(registry.canRun) == true)
 
+        let space = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                     windowNumber: window.windowNumber, context: nil, characters: " ",
+                                     charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+        check("Space reaches settings controls instead of the disabled Quick Look command", router.handle(space) === space)
+
         send("", keyCode: 125)
         check("↓ moves to the next section", model.settings?.section == .mail)
         send("", keyCode: 126)

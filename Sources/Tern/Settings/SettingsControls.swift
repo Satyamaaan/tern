@@ -79,13 +79,14 @@ struct SegmentedTrack<Value: Hashable, Label: View>: View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
                 let chosen = selection == option
-                label(option, chosen)
-                    .padding(.horizontal, 10)
-                    .frame(height: Theme.Control.small)
-                    .background { segment(chosen) }
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection = option }
-                    .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+                Button { selection = option } label: {
+                    label(option, chosen)
+                        .padding(.horizontal, 10)
+                        .frame(height: Theme.Control.small)
+                }
+                .buttonStyle(PressFillStyle(radius: Theme.Radius.control - 2, hover: chosen ? nil : Theme.hover))
+                .background { segment(chosen) }
+                .accessibilityAddTraits(chosen ? .isSelected : [])
             }
         }
         .padding(2)
@@ -162,6 +163,7 @@ struct SettingsField: View {
                 }
                 .buttonStyle(IconButtonStyle())
                 .help("Clear")
+                .accessibilityLabel("Clear")
             }
         }
         .padding(.leading, 9)

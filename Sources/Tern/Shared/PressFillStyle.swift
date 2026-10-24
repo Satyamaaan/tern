@@ -19,13 +19,16 @@ struct PressFillStyle: ButtonStyle {
         let configuration: Configuration
         let style: PressFillStyle
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
         @State private var hovering = false
 
         var body: some View {
+            let shape = RoundedRectangle(cornerRadius: style.radius, style: .continuous)
             configuration.label
-                .background(RoundedRectangle(cornerRadius: style.radius, style: .continuous).fill(fill))
+                .background(shape.fill(fill))
+                .focusRing(isFocused && isEnabled, shape: shape)
                 .contentShape(Rectangle())
-                .opacity(isEnabled ? 1 : 0.4)
+                .opacity(isEnabled ? 1 : 0.5)
                 .onHover { hovering = $0 && isEnabled }
         }
 
