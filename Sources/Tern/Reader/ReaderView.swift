@@ -119,6 +119,7 @@ struct ReaderView: View {
                 }
             }
         }
+        .background(Color(Theme.bg))
         .onChange(of: Showing(key: key, active: active), initial: true) {
             model.attach(services)
             if active { model.show(key, prefetch: prefetch) } else { model.suspend() }
@@ -510,15 +511,16 @@ struct ReaderReplyBar: View {
         HStack(spacing: 8) {
             Button { model.reply(all: false) } label: {
                 HStack(spacing: 8) {
-                    IconView(icon: .reply, size: 15, color: Color(Theme.text3))
+                    IconView(icon: .reply, size: 15, color: Color(Theme.text2))
                     Text(model.replyName.map { "Reply to \($0)…" } ?? "Reply…")
                         .lineLimit(1)
                 }
                 .font(.ui(13))
-                .foregroundStyle(Color(Theme.text3))
+                .foregroundStyle(Color(Theme.text2))
                 .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
-                .glassSurface(radius: Theme.Radius.control)
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .fill(Color(hovering ? Theme.hover : Theme.chipFill)))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

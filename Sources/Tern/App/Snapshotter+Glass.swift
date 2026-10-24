@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TernCore
 
 extension Snapshotter {
     /// Live compositor captures use a synthetic desktop, never the user's windows, behind the glass.
@@ -83,14 +84,27 @@ extension Snapshotter {
         both("palette")
         model.palette = nil
         if let thread = model.snapshot.order.first {
+            let commitment = try? model.store.trackCommitment(on: thread, direction: .waitingOn,
+                deliverable: "Reply", counterparty: Participant(name: "Priya Raman", email: "priya@example.com"), dueAt: nil)
+            defer { if let commitment { try? model.store.restoreCommitments(commitment) } }
             model.select(thread)
             model.open()
             RunLoop.main.run(until: Date().addingTimeInterval(1))
             both("reader")
-            model.services.reader.reply(all: false)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-            both("composer")
-            model.services.reader.model?.composing = nil
+            for pane in [true, false] {
+                model.prefs.readingPane = pane
+                model.prefs.readerOverlay = .panel
+                model.open()
+                let name = pane ? "pane" : "panel"
+                both("\(name)-reply")
+                model.services.reader.reply(all: false)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+                both("\(name)-composer")
+                model.services.reader.model?.composing = nil
+                model.services.reader.model?.commitmentEvidence = true
+                both("\(name)-evidence")
+                model.services.reader.model?.commitmentEvidence = false
+            }
             model.back()
         } else {
             print("Glass snapshots require a populated fake inbox")
@@ -98,6 +112,8 @@ extension Snapshotter {
         }
         model.openSettings(.appearance)
         both("settings")
+        model.settings?.show(.layout)
+        both("layout-settings")
         model.closeSettings()
         window.setContentSize(NSSize(width: 980, height: 700))
         backdrop.setFrame(window.frame, display: true)

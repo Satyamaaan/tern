@@ -175,6 +175,8 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 
 Text buttons use half their height as the radius. Ordinary icon buttons use continuous 8 pt corners with no
 hover border. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control.
+Secondary text and account pills use circular corners and one uniform 1 pt inset edge, without a second
+reflective stroke. This keeps the lower edge readable at small sizes.
 Disabled: 50 % opacity, without hover, press compression or focus rings. Row and tab
 buttons use the same disabled treatment, without compression.
 Secondary controls reveal on keyboard or accessibility focus as well as hover. Hidden controls ignore clicks.
@@ -187,7 +189,8 @@ release uses response 0.24, damping 0.74. Fills stay instant; no shrink with Red
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
 a send-later chevron. Segmented controls: a 28 pt `selected` track, the chosen segment `raised` with a
 `hairlineStrong` border, radius 4 inside 6; the segment slides to a new choice (180 ms, house curve; an 80 ms
-crossfade with Reduce Motion). Switches are tinted `ink`.
+crossfade with Reduce Motion). Switches are tinted `ink` and retain native switch feedback. Layout springs
+belong to the mail view, never Settings, and hidden mail changes layout without animation.
 
 ## Window
 
@@ -305,7 +308,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   slide on the pane spring; a crossfade with Reduce Motion). Esc or the ← button goes back with the selection kept; j/k move to the
   next thread while reading; the list underneath keeps its scroll position.
 - ⌘\ shows the **reading pane** instead: list (resizable, 340 px min, two-line rows) · hairline · reader on
-  `raised`. Remembered (Settings → Layout).
+  `bg`. Remembered (Settings → Layout). The message, commitment area and reply footer share this canvas.
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
   Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox
   tabs on).
@@ -327,10 +330,14 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   painted after the first frames fade in as they land (160 ms; cached ones never fade), and a sender logo that
   arrives late fades in over the initials (120 ms). Reduce Motion: 80 ms fades, all at once, no shimmer and no
   press shrink.
-- Bottom: the reply field ("Reply to Maya…", 36 px, radius 8, glass) in the reading column with ✦ quick
+- Commitments sit inside the reading column in a quiet neutral fill. The deliverable is first, with owner,
+  due date and confidence below. Evidence wraps below the actions rather than stretching the reader width.
+- Bottom: the reply field ("Reply to Maya…", 36 px, radius 8, neutral fill without rim or shadow) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
   (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
   already in it; only the card moves, never the web view. Closing, it sinks back into the field (opacity and 98 %, 120 ms).
+  The open inline card uses one opaque `raised` background and one exterior edge. The recipient summary,
+  editor and send row do not create separate glass layers or summary dividers.
 
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the

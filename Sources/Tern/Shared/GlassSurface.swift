@@ -82,7 +82,7 @@ struct GlassControlFill: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: radius, style: .circular)
         let solid = GlassSurface.forceSolid || reduceTransparency || contrast == .increased
         let opacity: Double = scheme == .dark
             ? (pressed ? 0.15 : hovering || highlighted ? 0.10 : 0.08)
@@ -91,10 +91,7 @@ struct GlassControlFill: View {
             .fill(solid ? Color(highlighted || pressed ? Theme.selectedFocus : hovering ? Theme.hover : Theme.raised)
                   : Color(scheme == .dark ? Theme.text1 : Theme.ink).opacity(opacity))
             .overlay(shape.strokeBorder(scheme == .dark ? Color(Theme.text1).opacity(0.15)
-                                       : Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.55), lineWidth: 0.5))
-            .overlay(shape.inset(by: 0.75).strokeBorder(
-                LinearGradient(colors: [.white.opacity(solid || scheme == .dark ? 0 : 0.9), .clear],
-                               startPoint: .top, endPoint: .bottom), lineWidth: 0.5))
+                                       : Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.55), lineWidth: 1))
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

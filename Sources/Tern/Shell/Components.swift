@@ -36,7 +36,7 @@ struct IconButton: View {
 
 /// Text buttons use pill silhouettes, Geist Medium, and 28 pt (24 pt small) hit areas.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
-/// - `secondary`: translucent wash and a two-tone glass edge over the parent material.
+/// - `secondary`: translucent wash and one uniform inset edge over the parent material.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
 /// All three darken a step and shrink to 97 % while pressed (the shrink only, on a short spring; none under
 /// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 50 % when disabled.

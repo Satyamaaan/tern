@@ -23,6 +23,10 @@ struct MainView: View {
     var body: some View {
         ZStack {
             mail
+                .animation(model.settings == nil ? paneAnimation : nil, value: model.prefs.sidebarOpen)
+                .animation(model.settings == nil ? paneAnimation : nil, value: model.prefs.readingPane)
+                .animation(model.settings == nil ? paneAnimation : nil, value: model.readerExpanded)
+                .animation(model.settings == nil ? paneAnimation : nil, value: model.readerInPanel)
                 .allowsHitTesting(model.settings == nil)
                 .accessibilityHidden(model.settings != nil)
             // Settings lies over the mail like a thread over the list; the mail stays in the tree, so the
@@ -38,10 +42,6 @@ struct MainView: View {
         .overlay(alignment: .bottom) {
             chordHUD.animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.hintFade), value: model.chordHUD)
         }
-        .animation(paneAnimation, value: model.prefs.sidebarOpen)
-        .animation(paneAnimation, value: model.prefs.readingPane)
-        .animation(paneAnimation, value: model.readerExpanded)
-        .animation(paneAnimation, value: model.readerInPanel)
         .animation(.easeOut(duration: reduceMotion ? 0.08 : 0.14), value: model.settings != nil)
         .sheet(item: Binding(get: { model.manualCommitment }, set: { model.manualCommitment = $0 })) { draft in
             ManualCommitmentSheet(draft: draft).environment(model)

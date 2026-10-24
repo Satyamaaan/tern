@@ -236,7 +236,6 @@ struct InlineComposerCard: View {
         VStack(spacing: 0) {
             if model.headerExpanded {
                 ComposerFields(model: model, inset: 16)
-                    .background(Color(Theme.raised))
             } else {
                 Button { model.headerExpanded = true } label: {
                     HStack(spacing: 8) {
@@ -251,15 +250,16 @@ struct InlineComposerCard: View {
                 }
                 .buttonStyle(.plain)
                 .help("Show recipients and subject")
-                Hairline()
             }
             BodyEditorView(controller: model.editor)
                 .frame(height: min(max(model.bodyHeight, Self.minBody), Self.maxBody))
-                .background(Color(Theme.raised))
             ComposerBottomArea(model: model)
         }
+        .background(Color(Theme.raised))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .glassSurface()
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+            .strokeBorder(Color(Theme.hairlineStrong), lineWidth: 0.5)
+            .allowsHitTesting(false))
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
         .opacity(appeared ? 1 : 0)

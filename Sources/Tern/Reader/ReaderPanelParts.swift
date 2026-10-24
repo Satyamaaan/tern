@@ -156,7 +156,6 @@ private struct ReaderPanelAction: View {
             .frame(height: 26)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
                 .fill(Color(Theme.text1).opacity(hovering ? 0.06 : 0)))
-            .glassSurface(radius: Theme.Radius.control, kind: .chrome)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
