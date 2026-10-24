@@ -250,6 +250,7 @@ struct SendButton: View {
             .help("Send later  ⌘⇧L")
             .popover(isPresented: $model.sendLaterOpen, arrowEdge: .top) {
                 SendLaterPopover(model: model)
+                    .presentationBackground(Color(Theme.raised))
             }
         }
         .background(Color(Theme.ink))
@@ -414,4 +415,3 @@ extension View {
         }
     }
 }
-

@@ -47,7 +47,7 @@ extension Snapshotter {
                     let capture = Process()
                     capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                     // Isolated window captures omit behind-window materials. Capture the visible region instead.
-                    let rect = window.frame
+                    let rect = name == "send-menu" ? window.frame.insetBy(dx: -160, dy: 0) : window.frame
                     let screenHeight = NSScreen.screens.first?.frame.height ?? rect.maxY
                     let region = "\(Int(rect.minX)),\(Int(screenHeight - rect.maxY)),\(Int(rect.width)),\(Int(rect.height))"
                     capture.arguments = ["-x", "-R", region, url.path]
@@ -110,6 +110,11 @@ extension Snapshotter {
             print("Glass snapshots require a populated fake inbox")
             failures += 1
         }
+        model.beginSearch()
+        model.searchText = "Priya"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        both("search")
+        model.endSearch(restoreFocus: true)
         model.openSettings(.appearance)
         both("settings")
         model.settings?.show(.layout)
@@ -121,6 +126,18 @@ extension Snapshotter {
         window.hasShadow = false
         window.contentView = NSHostingView(rootView: GlassControlsPreview())
         both("controls")
+        if let composer = ComposerModel(request: .new(accountId: nil), services: model.services, mode: .window) {
+            window.setContentSize(ComposerWindowController.defaultSize)
+            backdrop.setFrame(window.frame.insetBy(dx: -180, dy: -20), display: true)
+            window.contentView = NSHostingView(rootView: ComposerView(model: composer).environment(model.services))
+            both("new-mail")
+            composer.sendLaterOpen = true
+            both("send-menu")
+            composer.sendLaterOpen = false
+            composer.tearDown()
+        } else {
+            failures += 1
+        }
         print("Glass snapshots written to \(directory.path); \(failures) failures")
         return failures == 0
     }

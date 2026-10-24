@@ -220,7 +220,11 @@ private struct PanelShadow: ViewModifier {
     let on: Bool
 
     func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(on ? (scheme == .dark ? 0.35 : 0.06) : 0), radius: 3, x: -1, y: 0)
+        content.background {
+            Color(Theme.bg)
+                .shadow(color: .black.opacity(on ? (scheme == .dark ? 0.35 : 0.06) : 0), radius: 3, x: -1, y: 0)
+                .allowsHitTesting(false)
+        }
     }
 }
 

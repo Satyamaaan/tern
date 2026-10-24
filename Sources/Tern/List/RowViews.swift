@@ -397,24 +397,18 @@ private struct RowPainter {
         return style
     }()
 
-    /// Draws `text` with a soft ink mark behind each range (search matches). Marks past the visible
-    /// width are clipped with the text.
+    /// Text layout owns both the glyphs and their search marks, including truncation and bidirectional text.
     static func drawMarked(_ text: NSAttributedString, ranges: [NSRange], in rect: CGRect) {
-        guard rect.width > 4 else { return }
-        let font = (text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) ?? Theme.ui(13)
-        let lineHeight = ceil(font.ascender - font.descender)
-        let y = rect.minY + (rect.height - lineHeight) / 2
-        let line = CTLineCreateWithAttributedString(text)
-        Theme.ink.withAlphaComponent(0.13).setFill()
-        for range in ranges where range.location < text.length {
-            let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
-            let end = CTLineGetOffsetForStringIndex(line, min(NSMaxRange(range), text.length), nil)
-            let mark = CGRect(x: rect.minX + start - 2, y: y - 1, width: end - start + 4, height: lineHeight + 2)
-                .intersection(rect.insetBy(dx: -2, dy: -2))
-            guard mark.width > 3 else { continue }
-            NSBezierPath(roundedRect: mark, xRadius: Theme.Radius.chip, yRadius: Theme.Radius.chip).fill()
+        guard rect.width > 4, text.length > 0 else { return }
+        let marked = NSMutableAttributedString(attributedString: text)
+        for range in ranges where range.location < text.length && range.length > 0 {
+            let visible = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+            marked.addAttribute(.backgroundColor, value: Theme.ink.withAlphaComponent(0.13), range: visible)
         }
-        draw(text, in: rect)
+        NSGraphicsContext.saveGraphicsState()
+        rect.clip()
+        draw(marked, in: rect)
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     static func drawText(_ text: String, _ attributes: [NSAttributedString.Key: Any], in rect: CGRect) {

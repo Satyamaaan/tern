@@ -10,7 +10,7 @@ struct ReaderCommitmentStrip: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(model.stripItems, id: \.id) { item in
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         if model.stripItems.count > 1 {
                             Button { model.focusedCommitmentId = item.id } label: {
                                 Image(systemName: model.focusedCommitment?.id == item.id ? "circle.inset.filled" : "circle")
@@ -20,17 +20,17 @@ struct ReaderCommitmentStrip: View {
                             .accessibilityLabel("Focus commitment: \(item.deliverable)")
                             .accessibilityValue(model.focusedCommitment?.id == item.id ? "Selected" : "Not selected")
                         }
-                        VStack(alignment: .leading, spacing: 3) {
+                        (
                             Text(item.deliverable)
                                 .font(.ui(12, .medium))
                                 .foregroundStyle(Color(Theme.text1))
-                                .lineLimit(2)
-                            Text(context(item))
-                                .font(.ui(11))
-                                .foregroundStyle(Color(Theme.text3))
-                                .lineLimit(2)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
+                            + Text(" · " + context(item))
+                                .font(.ui(12))
+                                .foregroundStyle(Color(Theme.text2))
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help("\(item.deliverable) · \(context(item))")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         Button {
                             app?.changeCommitment(item, to: item.state == .open ? .done : .open)

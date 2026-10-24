@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import TernCore
 
-/// From, To, Cc, Bcc and Subject as flat rows separated by hairlines.
+/// From, To, Cc, Bcc and Subject grouped by aligned labels and row spacing.
 struct ComposerFields: View {
     let model: ComposerModel
     var inset: CGFloat = 20
@@ -11,7 +11,6 @@ struct ComposerFields: View {
         VStack(spacing: 0) {
             if model.hasSeveralAccounts {
                 FieldRow(label: "From", inset: inset) { AccountPicker(model: model) }
-                Hairline()
             }
             FieldRow(label: "To", inset: inset) {
                 RecipientFieldView(model: model, kind: .to, tokens: model.to)
@@ -21,14 +20,11 @@ struct ComposerFields: View {
                     if !model.showBcc { RevealButton(title: "Bcc", help: "Add Bcc  ⌘⇧B") { model.focus(.bcc) } }
                 }
             }
-            Hairline()
             if model.showCc {
                 FieldRow(label: "Cc", inset: inset) { RecipientFieldView(model: model, kind: .cc, tokens: model.cc) }
-                Hairline()
             }
             if model.showBcc {
                 FieldRow(label: "Bcc", inset: inset) { RecipientFieldView(model: model, kind: .bcc, tokens: model.bcc) }
-                Hairline()
             }
             ComposerTextField(
                 model: model, field: .subject, text: model.subject, placeholder: "Subject",
@@ -36,7 +32,6 @@ struct ComposerFields: View {
                 .frame(height: 22)
                 .padding(.horizontal, inset)
                 .frame(height: 46)
-            Hairline()
         }
     }
 }

@@ -230,6 +230,7 @@ struct ReaderTopBar: View {
                             model.pickingSnoozeDate = false
                             model.perform(.snooze(until: date))
                         }
+                        .presentationBackground(Color(Theme.raised))
                     }
                     archiveButton(icon: .archiveBox)
                 }
@@ -290,6 +291,7 @@ struct ReaderTopBar: View {
                         model.pickingSnoozeDate = false
                         model.perform(.snooze(until: date))
                     }
+                    .presentationBackground(Color(Theme.raised))
                 }
                 ReaderMenuButton(icon: .ellipsis, help: "More") { moreMenu }
             }

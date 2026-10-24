@@ -103,9 +103,16 @@ struct SearchField: View {
                     .buttonStyle(TernButtonStyle(.quiet, size: .small))
                     .help("Pin this search as a tab")
             }
-            Button { model.endSearch(restoreFocus: true) } label: { Keycap(text: "esc") }
+            Button { model.endSearch(restoreFocus: true) } label: {
+                Text("esc")
+                    .font(.ui(11))
+                    .foregroundStyle(Color(Theme.text3))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
                 .buttonStyle(.plain)
                 .help("Close search  Esc")
+                .accessibilityLabel("Close search")
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)

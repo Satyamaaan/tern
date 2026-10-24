@@ -330,8 +330,8 @@ closes the dropdown, then the search. A search can be pinned as a tab.
   painted after the first frames fade in as they land (160 ms; cached ones never fade), and a sender logo that
   arrives late fades in over the initials (120 ms). Reduce Motion: 80 ms fades, all at once, no shimmer and no
   press shrink.
-- Commitments sit inside the reading column in a quiet neutral fill. The deliverable is first, with owner,
-  due date and confidence below. Evidence wraps below the actions rather than stretching the reader width.
+- Commitments sit inside the reading column in a quiet neutral fill. Deliverable, owner, due date and actions
+  align on one line; long text truncates with its full text in the tooltip. Expanded evidence wraps below.
 - Bottom: the reply field ("Reply to Maya…", 36 px, radius 8, neutral fill without rim or shadow) in the reading column with ✦ quick
   replies on hover; `r` or a click expands the inline reply card in place. The card rises out of the field
   (opacity, 98 % scale from the bottom and 6 pt, 150 ms; an 80 ms fade with Reduce Motion) with the keyboard
@@ -361,9 +361,9 @@ overwrite keyboard selection. Only keyboard and query changes scroll to the sele
 button actions and selected state to accessibility, while keyboard navigation stays in the search field.
 
 ### Composer
-Inline in the reader, or a floating window for new mail (`c`), 640×560. Glass chrome surrounds opaque fields
-and editor content; the inline card has radius 16. Flat rows with
-hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Geist 15/600). Rich text
+Inline in the reader, or a floating window for new mail (`c`), 640×560. One opaque `raised` canvas covers
+fields, editor and Send controls; the inline card has radius 16. Labels and spacing separate the rows,
+without hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Geist 15/600). Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
 The formatting bar fades in and grows from 97 % toward the selection on first show (120 ms); moving to a new
