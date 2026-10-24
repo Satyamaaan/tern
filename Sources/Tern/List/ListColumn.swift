@@ -265,14 +265,16 @@ private struct ToastPill: View {
 struct MenuButton: View {
     let icon: Icon
     var help = ""
+    var size: CGFloat = 28
+    var onTrackingChange: ((Bool) -> Void)? = nil
     let menu: () -> NSMenu
+    @State private var menuAnchor = MenuAnchor.AnchorView()
 
     var body: some View {
-        IconButton(icon: icon, help: help) {
-            guard let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
-            let point = view.convert(event.locationInWindow, from: nil)
-            menu().popUp(positioning: nil, at: NSPoint(x: point.x - 8, y: point.y - 14), in: view)
+        IconButton(icon: icon, size: size, help: help) {
+            menuAnchor.popUp(menu(), onTrackingChange: onTrackingChange)
         }
+        .background(MenuAnchor(view: menuAnchor).accessibilityHidden(true))
     }
 }
 

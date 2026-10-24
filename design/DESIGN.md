@@ -104,6 +104,9 @@ and `CAFilter` APIs and remains a compatibility risk. If those classes are unava
 Liquid Glass on macOS 26 or SwiftUI material on older systems; sidebar and headers use `NSVisualEffectView`.
 Reduce Transparency or Increase Contrast replaces the glass with solid `sidebar` or `raised` fills.
 
+Native decorative backdrops return nil from hit testing and refuse window dragging. The title bar owns
+its drag region; decorative materials must not change input behavior.
+
 Never put a backdrop in a mail row, message body, editor canvas, or scrolling cell. The reusable AppKit table,
 local database reads, scroll behavior and keyboard selection remain unchanged. Buttons compress on the short
 Droppy-derived press spring and release on a softer spring; fills and list hover remain immediate.
@@ -155,7 +158,11 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
 Text buttons use half their height as the radius. Icon buttons use capsules. Keyboard focus: a 1.5 px `ink`
-ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity, without hover or press washes. Row and tab
+buttons use the same disabled treatment, without compression.
+Secondary controls reveal on keyboard or accessibility focus as well as hover. Hidden controls ignore clicks.
+Native menus anchor 4 pt below their trigger, including keyboard and accessibility activation; they do not
+depend on the current mouse event. AppKit handles menu tracking and dismissal.
 While held, text buttons shrink to 97 % and icon buttons to 95 %. Press uses response 0.14, damping 0.82;
 release uses response 0.24, damping 0.74. Fills stay instant; no shrink with Reduce Motion.
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
@@ -314,11 +321,16 @@ something needs you) with the sun/moon switch (⇧⌘L) and Settings grouped in 
 radius 12, 16 pt icons in `text2`, tabular counts in 20 pt capsules. Row spacing is 2 pt, section spacing 18 pt.
 Selection and press washes appear immediately; rows open on release. Mailbox and account selection remain
 independent. The sync line permits two lines and crossfades between states, never within one.
+Project menu buttons remain in the view tree, reveal on row or button focus, and stay visible during menu
+tracking. The 24 pt button replaces the unread capsule while visible; it is not nested inside the row button.
 
 ### ⌘K palette
 Centred 640 px, radius 16, shared floating glass with an opaque selected row. 52 px input (Inter 16).
 Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
 its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Fades in over 120 ms; closes at once.
+Pointer selection requires movement in screen coordinates. Rows moving beneath a stationary pointer cannot
+overwrite keyboard selection. Only keyboard and query changes scroll to the selected row. Results expose
+button actions and selected state to accessibility, while keyboard navigation stays in the search field.
 
 ### Composer
 Inline in the reader, or a floating window for new mail (`c`), 640×560. Glass chrome surrounds opaque fields
@@ -460,6 +472,8 @@ CFFIXED_USER_HOME=<scratch-home> TERN_DB=<disposable-fake-db> \
 This briefly shows the fixture over a synthetic desktop and captures only its rectangle. It sends no
 mouse or keyboard events, then closes its windows. It covers inbox, palette, reader, inline composer,
 settings, a narrow window and a control-state fixture in both appearances. The fixture shows enabled and
-disabled buttons plus rest, hover and press washes; it does not simulate pointer interaction.
+disabled buttons, project controls at rest and during menu tracking, plus rest, hover and press washes;
+it does not simulate pointer interaction.
+Captures alone do not establish keyboard navigation or VoiceOver behavior.
 Omit `TERN_SNAPSHOT_LIVE` for the solid fallback.
 Never use a real mailbox for this command; snapshots change selection and can create disposable drafts.

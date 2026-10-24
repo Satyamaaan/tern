@@ -445,6 +445,13 @@ final class SelfCheck {
         check("fuzzy 'arc' ranks Archive first", palette.flatItems.first?.title == "Archive")
         palette.query = "mtp"
         check("fuzzy 'mtp' finds Move to Project", palette.flatItems.contains { $0.title == "Move to Project…" })
+        palette.query = ""
+        palette.hover(2, at: NSPoint(x: 10, y: 10))
+        _ = palette.handle(.down)
+        palette.hover(0, at: NSPoint(x: 10, y: 10))
+        check("palette keyboard selection survives rows moving under a stationary pointer", palette.selection == 3)
+        palette.hover(1, at: NSPoint(x: 11, y: 10))
+        check("moving the pointer takes palette selection back from the keyboard", palette.selection == 1)
         palette.close()
     }
 

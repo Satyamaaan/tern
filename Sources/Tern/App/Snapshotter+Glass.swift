@@ -119,6 +119,27 @@ private struct GlassControlsPreview: View {
                     .disabled(!enabled)
                 }
             }
+            HStack(spacing: 12) {
+                Button { } label: {
+                    Text("Row button").font(.ui(13)).padding(8)
+                }
+                .buttonStyle(PressFillStyle(radius: 12))
+                Button { } label: {
+                    Text("Unavailable").font(.ui(13)).padding(8)
+                }
+                .buttonStyle(PressFillStyle(radius: 12))
+                .disabled(true)
+            }
+            VStack(spacing: 4) {
+                ForEach([false, true], id: \.self) { tracking in
+                    SidebarRow(title: tracking ? "Menu tracking" : "Project at rest", count: 12, selected: false,
+                               trailing: AnyView(IconButton(icon: .ellipsis, size: 24, help: "Project options") {}),
+                               menuOpen: tracking) {
+                        IconView(icon: .folder, size: 16)
+                    } action: { }
+                }
+            }
+            .frame(width: 260)
             VStack(alignment: .leading, spacing: 12) {
                 Text("Control wash states").font(.ui(13, .medium))
                 HStack(spacing: 12) {

@@ -333,6 +333,7 @@ extension Icon {
 /// Overlapping account avatars and "3 accounts" (or the account in scope). Opens the scope menu.
 struct AccountStack: View {
     @Environment(AppModel.self) private var model
+    @State private var menuAnchor = MenuAnchor.AnchorView()
 
     var body: some View {
         let shown = model.scopedAccount.map { [$0] } ?? Array(model.accounts.prefix(3))
@@ -358,6 +359,7 @@ struct AccountStack: View {
         .buttonStyle(PressFillStyle(radius: 14, hover: Theme.text1.withAlphaComponent(0.06),
                                    pressed: Theme.text1.withAlphaComponent(0.12)))
         .background(GlassControlFill())
+        .background(MenuAnchor(view: menuAnchor).accessibilityHidden(true))
         .help("Switch account  \(model.registry?["scope.all"]?.shortcutText.map { "\($0), " } ?? "")⌘1–⌘9")
         .accessibilityLabel("Switch account, \(title)")
         .opacity(model.accounts.isEmpty ? 0 : 1)
@@ -369,10 +371,9 @@ struct AccountStack: View {
     }
 
     private func showMenu() {
-        guard let event = NSApp.currentEvent, let view = event.window?.contentView, let registry = model.registry else { return }
+        guard let registry = model.registry else { return }
         let menu = AccountMenu.make(model: model, registry: registry)
-        let origin = view.convert(event.locationInWindow, from: nil)
-        menu.popUp(positioning: nil, at: NSPoint(x: origin.x - 40, y: origin.y - 12), in: view)
+        menuAnchor.popUp(menu)
     }
 }
 

@@ -18,18 +18,20 @@ struct PressFillStyle: ButtonStyle {
     private struct Styled: View {
         let configuration: Configuration
         let style: PressFillStyle
+        @Environment(\.isEnabled) private var isEnabled
         @State private var hovering = false
 
         var body: some View {
             configuration.label
                 .background(RoundedRectangle(cornerRadius: style.radius, style: .continuous).fill(fill))
                 .contentShape(Rectangle())
-                .onHover { hovering = $0 }
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovering = $0 && isEnabled }
         }
 
         private var fill: Color {
-            if configuration.isPressed { return Color(style.pressed) }
-            if hovering, let hover = style.hover { return Color(hover) }
+            if isEnabled && configuration.isPressed { return Color(style.pressed) }
+            if isEnabled && hovering, let hover = style.hover { return Color(hover) }
             return style.rest.map { Color($0) } ?? .clear
         }
     }

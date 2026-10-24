@@ -31,6 +31,7 @@ final class WindowBackdropView: NSView {
     required init?(coder: NSCoder) { nil }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

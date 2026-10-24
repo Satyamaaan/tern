@@ -99,7 +99,7 @@ struct GlassControlFill: View {
 /// The sidebar samples the desktop through the window. Mail and editor canvases remain opaque.
 private struct DesktopMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = MaterialView()
         view.material = .sidebar
         view.blendingMode = .behindWindow
         view.state = .active
@@ -107,4 +107,9 @@ private struct DesktopMaterial: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+
+    private final class MaterialView: NSVisualEffectView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
 }

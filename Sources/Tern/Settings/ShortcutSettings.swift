@@ -79,15 +79,14 @@ struct ShortcutRow: View {
                 let tools = hovering && recording == nil
                 if customized {
                     IconButton(icon: .undo, size: Theme.Control.small, iconSize: 14, help: resetHelp) { registry?.resetKeys(for: command.id) }
+                        .disabled(recording != nil)
                         .hoverReveal(tools)
-                        .allowsHitTesting(tools)
                 }
                 if !locked, recording == nil {
                     IconButton(icon: .plus, size: Theme.Control.small, iconSize: 14, help: "Add a shortcut") {
                         state.startRecording(command.id, slot: nil)
                     }
                     .hoverReveal(tools)
-                    .allowsHitTesting(tools)
                 }
                 ForEach(Array(command.keys.enumerated()), id: \.offset) { slot, key in
                     if recording?.slot == slot {

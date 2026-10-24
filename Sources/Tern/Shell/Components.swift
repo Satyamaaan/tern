@@ -28,6 +28,7 @@ struct IconButton: View {
         }
         .buttonStyle(IconButtonStyle())
         .help(help)
+        .accessibilityLabel(help, isEnabled: !help.isEmpty)
     }
 }
 
@@ -93,7 +94,8 @@ struct TernButtonStyle: ButtonStyle {
         }
 
         private var fill: Color {
-            let pressed = configuration.isPressed
+            let pressed = configuration.isPressed && isEnabled
+            let hovering = hovering && isEnabled
             switch kind {
             case .primary:
                 return Color(pressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink)
@@ -121,12 +123,14 @@ struct IconButtonStyle: ButtonStyle {
 
         var body: some View {
             let shape = Capsule()
+            let pressed = configuration.isPressed && isEnabled
+            let isHovering = hovering && isEnabled
             configuration.label
                 .background {
                     if prominent {
-                        shape.fill(Color(configuration.isPressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink))
-                    } else if configuration.isPressed || hovering {
-                        shape.fill(Color(Theme.text1).opacity(configuration.isPressed ? 0.12 : 0.06))
+                        shape.fill(Color(pressed ? Theme.inkPressed : isHovering ? Theme.inkHover : Theme.ink))
+                    } else if pressed || isHovering {
+                        shape.fill(Color(Theme.text1).opacity(pressed ? 0.12 : 0.06))
                         shape.strokeBorder(Color(Theme.hairlineStrong).opacity(0.55), lineWidth: 0.5)
                     }
                 }
@@ -167,7 +171,7 @@ extension View {
         modifier(PressScale(pressed: pressed, scale: scale))
     }
 
-    /// A secondary control shown on hover: fades in over 90 ms (80 ms with Reduce Motion), hides at once.
+    /// Secondary controls reveal on hover, keyboard focus or accessibility focus; hidden controls ignore clicks.
     func hoverReveal(_ visible: Bool) -> some View {
         modifier(HoverReveal(visible: visible))
     }
@@ -193,11 +197,19 @@ private struct PressScale: ViewModifier {
 private struct HoverReveal: ViewModifier {
     let visible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+    @AccessibilityFocusState private var accessibilityFocused: Bool
 
     func body(content: Content) -> some View {
-        content.animation(visible ? Motion.or(reduced: reduceMotion, .easeOut(duration: Motion.hover)) : nil) {
-            $0.opacity(visible ? 1 : 0)
-        }
+        let shown = visible || focused || accessibilityFocused
+        content
+            .focused($focused)
+            .accessibilityFocused($accessibilityFocused)
+            .allowsHitTesting(shown)
+            .animation(visible && !focused && !accessibilityFocused
+                       ? Motion.or(reduced: reduceMotion, .easeOut(duration: Motion.hover)) : nil) {
+                $0.opacity(shown ? 1 : 0)
+            }
     }
 }
 

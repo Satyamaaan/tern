@@ -37,11 +37,14 @@ final class PaletteController {
     var query = "" {
         didSet {
             guard query != oldValue else { return }
+            selectionUsesPointer = false
             selection = 0
             searchThreads()
         }
     }
     var selection = 0
+    private(set) var selectionUsesPointer = false
+    @ObservationIgnored private var pointerPosition: NSPoint?
     private(set) var threadRows: [ThreadRow] = []
     @ObservationIgnored private var searchTask: Task<Void, Never>?
 
@@ -80,7 +83,16 @@ final class PaletteController {
 
     // MARK: Keys
 
+    /// Pointer-driven selection, with the screen position supplied by the row's tracking callback.
+    func hover(_ position: Int, at point: NSPoint) {
+        guard point != pointerPosition else { return }
+        pointerPosition = point
+        selectionUsesPointer = true
+        selection = position
+    }
+
     func handle(_ key: KeyRouter.PaletteKey) -> Bool {
+        selectionUsesPointer = false
         let items = flatItems
         switch key {
         case .up: selection = max(0, selection - 1)
@@ -108,6 +120,8 @@ final class PaletteController {
     /// Every opening starts from an empty query with the first row highlighted.
     func reset() {
         query = ""
+        pointerPosition = NSEvent.mouseLocation
+        selectionUsesPointer = false
         selection = 0
     }
 
@@ -352,10 +366,16 @@ struct PaletteView: View {
                             .frame(height: 30, alignment: .bottom)
                             .padding(.bottom, 4)
                         ForEach(items, id: \.1.id) { position, item in
-                            PaletteRow(item: item, selected: position == controller.selection)
-                                .id(position)
-                                .onTapGesture { controller.run(item) }
-                                .onHover { if $0 { controller.selection = position } }
+                            Button { controller.run(item) } label: {
+                                PaletteRow(item: item, selected: position == controller.selection)
+                            }
+                            .buttonStyle(.plain)
+                            .focusable(false)
+                            .accessibilityAddTraits(position == controller.selection ? .isSelected : [])
+                            .id(position)
+                            .onContinuousHover { phase in
+                                if case .active = phase { controller.hover(position, at: NSEvent.mouseLocation) }
+                            }
                         }
                     }
                 }
@@ -363,7 +383,9 @@ struct PaletteView: View {
             }
             .frame(maxHeight: 400)
             .fixedSize(horizontal: false, vertical: true)
-            .onChange(of: controller.selection) { _, selection in proxy.scrollTo(selection) }
+            .onChange(of: controller.selection) { _, selection in
+                if !controller.selectionUsesPointer { proxy.scrollTo(selection) }
+            }
         }
     }
 }

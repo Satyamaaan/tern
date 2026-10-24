@@ -13,6 +13,7 @@ struct AccountRow: View {
 
     @State private var name = ""
     @State private var hovered = false
+    @State private var menuAnchor = MenuAnchor.AnchorView()
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -49,6 +50,7 @@ struct AccountRow: View {
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(IconButtonStyle())
+        .background(MenuAnchor(view: menuAnchor).accessibilityHidden(true))
         .help("Colour: \(colourName)")
         .accessibilityLabel("Colour for \(account.email)")
         .accessibilityValue(colourName)
@@ -79,7 +81,6 @@ struct AccountRow: View {
     }
 
     private func showColours() {
-        guard let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
         let model = self.model
         let account = self.account
         let menu = NSMenu()
@@ -89,7 +90,6 @@ struct AccountRow: View {
             item.state = abs(account.colorIndex) % Theme.accountHues.count == index ? .on : .off
             menu.addItem(item)
         }
-        let point = view.convert(event.locationInWindow, from: nil)
-        menu.popUp(positioning: nil, at: NSPoint(x: point.x - 12, y: point.y - 12), in: view)
+        menuAnchor.popUp(menu)
     }
 }

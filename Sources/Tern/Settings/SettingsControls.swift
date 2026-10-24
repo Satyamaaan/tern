@@ -125,12 +125,11 @@ struct MenuPickerButton: View {
     var kind: TernButtonStyle.Kind = .secondary
     var size: TernButtonStyle.Size = .small
     let menu: () -> NSMenu
+    @State private var menuAnchor = MenuAnchor.AnchorView()
 
     var body: some View {
         Button {
-            guard let event = NSApp.currentEvent, let view = event.window?.contentView else { return }
-            let point = view.convert(event.locationInWindow, from: nil)
-            menu().popUp(positioning: nil, at: NSPoint(x: point.x - 12, y: point.y - 12), in: view)
+            menuAnchor.popUp(menu())
         } label: {
             HStack(spacing: 6) {
                 Text(title).lineLimit(1)
@@ -138,6 +137,7 @@ struct MenuPickerButton: View {
             }
         }
         .buttonStyle(TernButtonStyle(kind, size: size))
+        .background(MenuAnchor(view: menuAnchor).accessibilityHidden(true))
     }
 }
 

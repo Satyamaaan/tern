@@ -131,10 +131,14 @@ struct SidebarRow<Leading: View>: View {
     var titleColor: NSColor = Theme.text1
     var dropTargeted = false
     var trailing: AnyView?
+    var menuOpen = false
     @ViewBuilder let leading: () -> Leading
     let action: () -> Void
 
     @State private var hovering = false
+    @FocusState private var rowFocused: Bool
+    @FocusState private var trailingFocused: Bool
+    @AccessibilityFocusState private var trailingAccessibilityFocused: Bool
 
     var body: some View {
         Button(action: action) {
@@ -146,7 +150,7 @@ struct SidebarRow<Leading: View>: View {
                     .foregroundStyle(Color(selected ? Theme.text1 : titleColor))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let count, trailing == nil || !hovering {
+                if let count, trailing == nil || !showsTrailing {
                     Text(count.formatted())
                         .font(.numeric(11, selected ? .medium : countWeight))
                         .foregroundStyle(Color(selected ? Theme.text1 : countColor))
@@ -154,8 +158,8 @@ struct SidebarRow<Leading: View>: View {
                         .frame(minWidth: 22, minHeight: 20)
                         .background(Capsule().fill(Color(Theme.ink).opacity(selected ? 0.06 : 0.04)))
                         .fixedSize()
-                } else if trailing != nil, hovering {
-                    Color.clear.frame(width: 20, height: 20)
+                } else if trailing != nil, showsTrailing {
+                    Color.clear.frame(width: 24, height: 24)
                 }
             }
             .padding(.horizontal, 10)
@@ -167,6 +171,8 @@ struct SidebarRow<Leading: View>: View {
             hover: filled ? nil : Theme.ink.withAlphaComponent(0.06),
             pressed: Theme.ink.withAlphaComponent(0.12)
         ))
+        .focused($rowFocused)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(
@@ -184,8 +190,12 @@ struct SidebarRow<Leading: View>: View {
         }
         // Keep the menu outside the row button so its clicks stay its own.
         .overlay(alignment: .trailing) {
-            if let trailing, hovering {
+            if let trailing {
                 trailing
+                    .focused($trailingFocused)
+                    .accessibilityFocused($trailingAccessibilityFocused)
+                    .opacity(showsTrailing ? 1 : 0)
+                    .allowsHitTesting(showsTrailing)
                     .padding(.trailing, 10)
             }
         }
@@ -193,6 +203,7 @@ struct SidebarRow<Leading: View>: View {
     }
 
     private var filled: Bool { selected || dropTargeted }
+    private var showsTrailing: Bool { hovering || rowFocused || trailingFocused || trailingAccessibilityFocused || menuOpen }
 }
 
 private struct LabelRow: View {
@@ -228,7 +239,7 @@ private struct ProjectsHeader: View {
             Spacer()
             IconButton(icon: .plus, size: 24, iconSize: 14,
                        help: model.registry?.hint("New project", "newProject") ?? "New project") { model.newProject() }
-                .opacity(hovering ? 1 : 0)
+                .hoverReveal(hovering)
         }
         .padding(.leading, 10)
         .padding(.trailing, 4)
@@ -242,6 +253,7 @@ private struct ProjectRow: View {
     @Environment(AppModel.self) private var model
     let project: Project
     @State private var targeted = false
+    @State private var menuOpen = false
 
     var body: some View {
         let unread = model.counts.projectUnread[project.id] ?? 0
@@ -249,7 +261,9 @@ private struct ProjectRow: View {
             title: project.name, count: unread > 0 ? unread : nil,
             selected: model.kind == .project(project.id) && !model.isSearching,
             dropTargeted: targeted,
-            trailing: AnyView(MenuButton(icon: .ellipsis, help: "Project options") { menu() }.frame(width: 20, height: 20).scaleEffect(0.8))
+            trailing: AnyView(MenuButton(icon: .ellipsis, help: "Options for \(project.name)", size: 24,
+                                         onTrackingChange: { menuOpen = $0 }) { menu() }),
+            menuOpen: menuOpen
         ) {
             ProjectGlyph(project: project)
         } action: {
