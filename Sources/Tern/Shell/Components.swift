@@ -34,7 +34,7 @@ struct IconButton: View {
 
 // MARK: - Buttons
 
-/// Text buttons use pill silhouettes, Inter Medium, and 28 pt (24 pt small) hit areas.
+/// Text buttons use pill silhouettes, Geist Medium, and 28 pt (24 pt small) hit areas.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
 /// - `secondary`: translucent wash and a two-tone glass edge over the parent material.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
@@ -242,7 +242,7 @@ struct WaitingText: View {
     }
 }
 
-/// A shortcut key in Inter with tabular figures, e.g. the `/` in the search field or `⌘K` in the palette.
+/// A shortcut key in Geist with tabular figures, e.g. the `/` in the search field or `⌘K` in the palette.
 struct Keycap: View {
     let text: String
     var inverted = false
@@ -291,7 +291,7 @@ struct Dot: View {
     }
 }
 
-/// Section caps: Inter 11/14 500, +0.6 tracking, `text3`.
+/// Section caps: Geist 11/14 500, +0.6 tracking, `text3`.
 struct CapsLabel: View {
     let text: String
 

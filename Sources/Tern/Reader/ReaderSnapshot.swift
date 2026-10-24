@@ -401,7 +401,7 @@ enum ReaderSnapshot {
         func checkCSSEscape(_ suffix: String) async {
             let control = "@media all {\u{301}, :host {\n& { contain: none !important; overflow: visible !important; "
                 + "position: absolute !important; inset: 0 !important }\n}\n"
-            let fontControl = "@font-face {font-family: Inter; src: local(Zapfino)}\n"
+            let fontControl = "@font-face {font-family: Geist; src: local(Zapfino)}\n"
             let result = try? await ReaderWebEngine.shared.webView.callAsyncJavaScript("""
                 const host = document.querySelector('.msg.open .mbody');
                 if (!host || !host.shadowRoot) return 'no body';

@@ -167,7 +167,7 @@ struct SidebarRow<Leading: View>: View {
         }
         .buttonStyle(PressFillStyle(
             radius: 12,
-            rest: filled ? (contrast == .increased ? Theme.selectedFocus : Theme.ink.withAlphaComponent(0.08)) : nil,
+            rest: filled ? (contrast == .increased ? Theme.selectedFocus : colorScheme == .dark ? Theme.selected : Theme.ink.withAlphaComponent(0.08)) : nil,
             hover: filled ? nil : Theme.ink.withAlphaComponent(0.06),
             pressed: Theme.ink.withAlphaComponent(0.12)
         ))
@@ -178,7 +178,7 @@ struct SidebarRow<Leading: View>: View {
                 .strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(colorScheme == .dark ? 0.20 : 0.85),
+                            Color.white.opacity(colorScheme == .dark ? 0.08 : 0.85),
                             Color(Theme.hairlineStrong).opacity(0.55)
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing

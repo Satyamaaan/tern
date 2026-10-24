@@ -639,7 +639,7 @@
     },
     clear() { state = null; root().innerHTML = ''; window.scrollTo(0, 0); },
     fontsReady() {
-      return Promise.all(['400 13px Inter', '500 13px Inter', '600 13px Inter', '600 24px "Inter Display"']
+      return Promise.all(['400 13px Geist', '500 13px Geist', '600 13px Geist', '600 24px Geist']
         .map((font) => document.fonts.load(font))).then(() => true);
     },
   };

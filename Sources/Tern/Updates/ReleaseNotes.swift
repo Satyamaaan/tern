@@ -1,6 +1,6 @@
 import Foundation
 
-/// An update's "What's new": the appcast item's description turned into lines the update card draws in Inter.
+/// An update's "What's new": the appcast item's description turned into lines the update card draws in the UI font.
 /// Reads the small HTML subset scripts/appcast.swift writes (`h1`–`h6`, `p`, `ul`/`ol` with `li`, inline tags
 /// whose text is kept) and plain text with `-` bullets; anything else keeps only its text.
 struct ReleaseNotes: Equatable {

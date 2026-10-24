@@ -58,8 +58,9 @@ made by `scripts/release.sh` carry the update feed, so development builds never 
 
 ## Credits
 
-- [Inter](https://github.com/rsms/inter) by Rasmus Andersson and the Inter Project Authors, under the SIL Open Font
-  License 1.1 ([Resources/Fonts/OFL-Inter.txt](Resources/Fonts/OFL-Inter.txt)).
+- [Geist](https://github.com/vercel/geist-font) by the Geist Project Authors, under the SIL Open Font
+  License 1.1 ([Resources/Fonts/OFL-Geist.txt](Resources/Fonts/OFL-Geist.txt)). Bundled static cuts and
+  tabular-digit adjustments are described in [the visual spec](design/DESIGN.md#type-geist).
 - [Hugeicons](https://github.com/hugeicons/hugeicons) free "Stroke Rounded" icons, under the MIT License
   ([Resources/Licenses/Hugeicons-MIT.txt](Resources/Licenses/Hugeicons-MIT.txt)). `scripts/hugeicons.py` turns the
   icons Tern uses into `Sources/Tern/Shared/Hugeicons.swift`.

@@ -322,14 +322,14 @@ enum ReaderSnapshotFixtures {
         """
 
     /// `ReaderSnapshot.checkCSSEscape` reads the card's containment and the reader's own text width after this
-    /// renders. The `@font-face` rules would re-glyph Tern's Inter text (all of it, or just `W`) if they got through,
+    /// renders. The `@font-face` rules would re-glyph Tern's Geist text (all of it, or just `W`) if they got through,
     /// and so would the style rules written to come out as one: `@/**/font-face` and a no-break space before the `@`.
     static let cssEscape = """
         <html><head>
-        <style>@font-face{font-family:Inter;src:local(Zapfino)} @font-face{font-family:"Inter Display";src:local(Zapfino)}
-        @font-face{font-family:Inter;src:local("Zapfino");unicode-range:U+0057}</style>
-        <style>@/**/font-face{font-family:Inter;src:local(Zapfino)} @media screen{@/**/font-face{font-family:Inter;src:local(Zapfino)}}
-        \u{A0}@font-face{font-family:Inter;src:local(Zapfino)}</style>
+        <style>@font-face{font-family:Geist;src:local(Zapfino)}
+        @font-face{font-family:Geist;src:local("Zapfino");unicode-range:U+0057}</style>
+        <style>@/**/font-face{font-family:Geist;src:local(Zapfino)} @media screen{@/**/font-face{font-family:Geist;src:local(Zapfino)}}
+        \u{A0}@font-face{font-family:Geist;src:local(Zapfino)}</style>
         <style media="all {&#x301;, :host">
         & { contain:none !important; overflow:visible !important; position:absolute !important; inset:0 !important }
         </style>

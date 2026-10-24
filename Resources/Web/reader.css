@@ -1,9 +1,8 @@
-@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: Inter; src: url("tern-app://fonts/Inter-SemiBold.ttf"); font-weight: 600; }
-@font-face { font-family: "Inter Display"; src: url("tern-app://fonts/InterDisplay-SemiBold.ttf"); font-weight: 600; }
+@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Regular.ttf"); font-weight: 400; }
+@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-Medium.ttf"); font-weight: 500; }
+@font-face { font-family: Geist; src: url("tern-app://fonts/Geist-SemiBold.ttf"); font-weight: 600; }
 
-:root { --ease: cubic-bezier(0.2, 0.9, 0.25, 1); color-scheme: light; --ui: Inter, -apple-system, "Helvetica Neue", sans-serif; --display: "Inter Display", Inter, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+:root { --ease: cubic-bezier(0.2, 0.9, 0.25, 1); color-scheme: light; --ui: Geist, -apple-system, "Helvetica Neue", sans-serif; --display: Geist, -apple-system, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 html { background: transparent; -webkit-text-size-adjust: none; }

@@ -21,49 +21,52 @@ struct GlassSurface: View {
 
     private var solid: Bool { Self.forceSolid || reduceTransparency || contrast == .increased }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+    private var tint: NSColor { kind == .sidebar || (scheme == .dark && kind == .chrome) ? Theme.sidebar : Theme.raised }
 
     var body: some View {
         ZStack {
             if kind == .floating {
                 // A separate silhouette casts the shadow without flattening the live material or text.
-                shape.fill(.black.opacity(scheme == .dark ? 0.22 : 0.08))
-                    .blur(radius: 12)
-                    .offset(y: 8)
+                shape.fill(.black.opacity(scheme == .dark ? 0.10 : 0.08))
+                    .blur(radius: scheme == .dark ? 6 : 12)
+                    .offset(y: scheme == .dark ? 4 : 8)
                     .padding(1)
             }
             material
                 .clipShape(shape)
             if kind == .floating {
-                shape.strokeBorder(Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.65), lineWidth: 0.5)
-                shape.inset(by: 0.75).strokeBorder(
-                    LinearGradient(colors: [.white.opacity(scheme == .dark ? 0.18 : 0.85),
-                                            .white.opacity(scheme == .dark ? 0.025 : 0.12)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: solid ? 0 : 0.5)
+                shape.strokeBorder(scheme == .dark ? Color(Theme.text1).opacity(0.15)
+                                   : Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.65), lineWidth: 0.5)
+                if scheme == .light {
+                    shape.inset(by: 0.75).strokeBorder(
+                        LinearGradient(colors: [.white.opacity(0.85), .white.opacity(0.12)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: solid ? 0 : 0.5)
+                }
             }
         }
     }
 
     @ViewBuilder private var material: some View {
         if solid {
-            Color(kind == .sidebar ? Theme.sidebar : Theme.raised)
+            Color(tint)
         } else if WindowBackdropView.isAvailable {
             WindowBackdrop()
-                .overlay(Color(kind == .sidebar ? Theme.sidebar : Theme.raised)
-                    .opacity(kind == .sidebar ? 0.72 : 0.82))
+                .overlay(Color(tint)
+                    .opacity(scheme == .dark ? (kind == .floating ? 0.92 : 0.96) : (kind == .sidebar ? 0.72 : 0.82)))
         } else if kind == .sidebar {
             DesktopMaterial()
-                .overlay(Color(Theme.sidebar).opacity(scheme == .dark ? 0.32 : 0.22))
+                .overlay(Color(tint).opacity(scheme == .dark ? 0.96 : 0.22))
         } else if kind == .floating {
             if #available(macOS 26.0, *) {
                 Color.clear.glassEffect(.clear, in: shape)
-                    .overlay(Color(Theme.raised).opacity(scheme == .dark ? 0.72 : 0.78))
+                    .overlay(Color(tint).opacity(scheme == .dark ? 0.92 : 0.78))
             } else {
                 shape.fill(.ultraThinMaterial)
-                    .overlay(Color(Theme.raised).opacity(0.16))
+                    .overlay(Color(tint).opacity(scheme == .dark ? 0.92 : 0.16))
             }
         } else {
             DesktopMaterial()
-                .overlay(Color(Theme.raised).opacity(scheme == .dark ? 0.48 : 0.6))
+                .overlay(Color(tint).opacity(scheme == .dark ? 0.96 : 0.6))
         }
     }
 }
@@ -82,14 +85,15 @@ struct GlassControlFill: View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let solid = GlassSurface.forceSolid || reduceTransparency || contrast == .increased
         let opacity: Double = scheme == .dark
-            ? (pressed ? 0.20 : hovering || highlighted ? 0.14 : 0.08)
+            ? (pressed ? 0.15 : hovering || highlighted ? 0.10 : 0.08)
             : (pressed ? 0.10 : hovering || highlighted ? 0.065 : 0.035)
         shape
             .fill(solid ? Color(highlighted || pressed ? Theme.selectedFocus : hovering ? Theme.hover : Theme.raised)
-                  : Color(scheme == .dark ? NSColor.white : Theme.ink).opacity(opacity))
-            .overlay(shape.strokeBorder(Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.55), lineWidth: 0.5))
+                  : Color(scheme == .dark ? Theme.text1 : Theme.ink).opacity(opacity))
+            .overlay(shape.strokeBorder(scheme == .dark ? Color(Theme.text1).opacity(0.15)
+                                       : Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.55), lineWidth: 0.5))
             .overlay(shape.inset(by: 0.75).strokeBorder(
-                LinearGradient(colors: [.white.opacity(solid ? 0 : scheme == .dark ? 0.22 : 0.9), .clear],
+                LinearGradient(colors: [.white.opacity(solid || scheme == .dark ? 0 : 0.9), .clear],
                                startPoint: .top, endPoint: .bottom), lineWidth: 0.5))
             .allowsHitTesting(false)
             .accessibilityHidden(true)

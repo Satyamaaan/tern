@@ -1,7 +1,7 @@
 import Foundation
 
 /// Plain-text mail: finds the quoted reply and the signature, links URLs, and renders HTML for the
-/// reader (Inter 14/22 with `white-space: pre-wrap`, so the sender's line breaks survive).
+/// reader (14/22 with `white-space: pre-wrap`, so the sender's line breaks survive).
 public enum PlainTextMail {
     /// A plain-text body split into what the sender wrote, their signature and the quoted reply below.
     public struct Parts: Equatable, Sendable {

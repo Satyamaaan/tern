@@ -33,6 +33,11 @@ final class SelfCheck {
         check("list loaded", model.listLoaded && !model.snapshot.isEmpty)
         check("first row selected", model.cursor == model.snapshot.order.first)
         check("launch opens the inbox on Primary", !model.prefs.splitInbox || model.activeTab == .category(.primary))
+        for weight in [Theme.Weight.regular, .medium, .semibold] {
+            let font = Theme.numeric(12, weight)
+            let widths = "0123456789".map { String($0).size(withAttributes: [.font: font]).width }
+            check("numeric \(weight) digits keep counts aligned", widths.allSatisfy { abs($0 - widths[0]) < 0.001 })
+        }
         timeQueries()
         previews()
         triage()

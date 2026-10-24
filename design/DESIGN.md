@@ -4,7 +4,7 @@ Direction: **list first**. The window is the mail list: tabs across the title ba
 conversation in a centred column, a small floating bar at the bottom. Opening a thread lays it over the list;
 Esc puts the list back exactly as it was. Porcelain and graphite neutrals with **one neutral ink** (near-black in
 light, near-white in dark) for primary buttons and everything that means *this needs you*. Colour appears only
-as a small hue on **tab and tag icons** (and in mail itself). One typeface, **Inter**, and one icon set,
+as a small hue on **tab and tag icons** (and in mail itself). One typeface, **Geist**, and one icon set,
 **Hugeicons Stroke Rounded**. Aside-inspired translucent controls and Droppy-inspired glass sit over opaque
 mail canvases. Continuous corners and fine light-catching edges distinguish floating controls; shadows stay
 behind their backgrounds. The window layout, mail-row density and keyboard model remain unchanged. Research behind the original direction:
@@ -26,22 +26,27 @@ Hard rules
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| `bg` list, reader canvas | `#FAFBFC` | `#17181B` |
-| `sidebar` glass tint and solid fallback | `#EFF1F4` | `#202227` |
-| `raised` editor, glass tint and solid fallback | `#FFFFFF` | `#212328` |
-| `hover` | `#ECEEF2` | `#282B31` |
-| `selected` selected row, active tab | `#E4E8EF` | `#30343C` |
-| `selectedFocus` selected row while the list has the keyboard | `#DBE1EA` | `#3A404B` |
-| `hairline` row separators | `#E5E8ED` | `#2C2F36` |
-| `hairlineStrong` tag outlines, field focus, bars | `#CED3DC` | `#484E59` |
-| `text1` | `#1B1E24` | `#F0F1F4` |
-| `text2` previews, tag labels, icons | `#565D69` | `#B0B6C2` |
-| `text3` times, counts, date headers | `#687181` | `#969FAD` |
-| `ink` primary fill, unread dots, needs-reply icon, focus ring, links | `#18181B` | `#EDEDEA` |
-| `inkHover` / `inkPressed` | `#2E2E33` / `#45454B` | `#D9D9D5` / `#C4C4BF` |
-| `inkSoft` | `#E4E8EF` | `#30343C` |
-| `onInk` label on an `ink` fill | `#FFFFFF` | `#141414` |
-| `avatarFill` / `avatarText` letter avatars | `#E5E9F0` / `#535E70` | `#303540` / `#BEC6D3` |
+| `bg` list, reader canvas | `#FAFBFC` | `#202020` |
+| `sidebar` glass tint and solid fallback | `#EFF1F4` | `#202020` |
+| `raised` editor, glass tint and solid fallback | `#FFFFFF` | `#303030` |
+| `hover` | `#ECEEF2` | `#363636` |
+| `selected` selected row, active tab | `#E4E8EF` | `#363636` |
+| `selectedFocus` selected row while the list has the keyboard | `#DBE1EA` | `#404040` |
+| `hairline` row separators | `#E5E8ED` | `#363636` |
+| `hairlineStrong` tag outlines, field focus, bars | `#CED3DC` | `#4A4A4A` |
+| `text1` | `#1B1E24` | `#FAFAFA` |
+| `text2` previews, tag labels, icons | `#565D69` | `#D9D9D9` |
+| `text3` times, counts, date headers | `#687181` | `#A3A3A3` |
+| `ink` primary fill, unread dots, needs-reply icon, focus ring, links | `#18181B` | `#E5E5E5` |
+| `inkHover` / `inkPressed` | `#2E2E33` / `#45454B` | `#FAFAFA` / `#CFCFCF` |
+| `inkSoft` | `#E4E8EF` | `#363636` |
+| `onInk` label on an `ink` fill | `#FFFFFF` | `#202020` |
+| `avatarFill` / `avatarText` letter avatars | `#E5E9F0` / `#535E70` | `#363636` / `#B3B3B3` |
+
+Dark neutrals follow the supplied Aside screenshot: canvas `#202020`, panels near `#303030`, and
+bubbles near `#363636`. Aside's CSS uses neutral-900 at 80% alpha for its page, not a solid `#202020`.
+Its foreground is `oklch(98.5% 0 0)`, with 85% primary and 55% muted text. The opaque text and selection
+tokens above adapt that hierarchy to Tern's dense mail list. Light colours retain Tern's existing palette.
 
 On a selected row, `text3` text switches to `text2`. Search matches get an `ink` 13% mark behind the word.
 The AI sparkle icon is `text3`. Errors are `ink` 500 text (no red). Destructive confirmations stay in `NSAlert`.
@@ -82,21 +87,25 @@ tag with the same dot. Each account's name and hue are set in Settings → Accou
 segmented controls) · **row 8** (mail, menu and palette fills) · **overlay 12** (toasts, the chord
 HUD, the search field, small overlays) · **card 16** (⌘K, popovers, the composer card).
 Navigation rows use radius 12; buttons and tabs use half-height corners; the bottom toolbar uses radius 18.
-Continuous corners. 4 px grid. Floating glass has a separate black silhouette blurred 12 pt and offset
-8 pt down, at 8% opacity in light and 22% in dark. Never rasterize the glass and its content together to
+Continuous corners. 4 px grid. Floating glass has a separate black silhouette: light uses 12 pt blur,
+8 pt downward offset and 8% opacity; dark uses 6 pt blur, 4 pt offset and 10% opacity. Never rasterize the glass and its content together to
 cast a shadow. Existing opaque overlays retain their older shadow treatment.
 
 ### Glass and readability
 
 `Shared/GlassSurface.swift` owns `.glassSurface(radius:kind:)`. Sidebar and title chrome form continuous
-planes. Floating panels have a 0.5 pt outer edge and an inset white highlight that fades downward.
-The tint covers 72% of the sidebar and 82% of floating panels and headers, so text remains readable over
-bright desktop content. Mail-list selection is an opaque neutral fill, not another blur layer.
+planes. Dark floating panels have a single 0.5 pt near-white edge at 15% alpha. Light panels also have
+an inset white highlight that fades downward. Dark material tints cover 96% of shell chrome and 92% of
+floating panels; light uses 72% sidebar and 82% floating/header tints on the custom backdrop path.
+Those native material tints are Tern adaptations, not recovered Aside constants. Aside's regular session
+composer uses an 8% near-white fill, 15% edge and small shadow without persistent backdrop blur.
+Mail-list selection remains opaque, with no per-row blur.
 
-`GlassControlFill` draws a wash and two-tone 0.5 pt edge without another backdrop. Dark controls use white
-at 8%, 14% and 20% for rest, hover and press. Light controls use ink at 3.5%, 6.5% and 10%. Active tabs use
+`GlassControlFill` draws a wash and 0.5 pt edge without another backdrop. Dark controls use near-white
+at 8%, 10% and 15% for rest, hover and press. Light controls use ink at 3.5%, 6.5% and 10% with a two-tone edge. Active tabs use
 the hover wash. Text buttons and tabs are 28 pt pills; the small button variant is 24 pt. Icon controls retain
-their rectangular hit area. Sidebar rows use an 8% ink selection wash, 6% hover and 12% press. These component
+their rectangular hit area. Sidebar rows use the dark `selected` fill or an 8% light ink selection wash,
+6% hover and 12% press. These component
 shapes replace the earlier uniform rounded rectangles; mail rows keep their existing shape and density.
 
 The material reuses the sign-in notch's `WindowBackdrop`, a 6 pt live blur. It uses private `CABackdropLayer`
@@ -111,26 +120,32 @@ Never put a backdrop in a mail row, message body, editor canvas, or scrolling ce
 local database reads, scroll behavior and keyboard selection remain unchanged. Buttons compress on the short
 Droppy-derived press spring and release on a softer spring; fills and list hover remain immediate.
 
-## Type: Inter
+## Type: Geist
 
-Bundled in `Resources/Fonts` (OFL): Inter Regular, Medium, SemiBold and Inter Display SemiBold (the optical
-size for large text). Registered at launch. `Theme.ui(size, weight)` for text, `Theme.numeric(size, weight)`
-for anything with figures that should line up (Inter's tabular figures, `tnum`), `Theme.display(size)` for
+Bundled in `Resources/Fonts` (SIL OFL 1.1): Geist Regular, Medium and SemiBold, version 1.401, matching
+Aside's content font. Static weights 400, 500 and 600 were instantiated with fontTools from Aside's
+Latin, Latin-ext and Cyrillic Geist Variable WOFF2 assets, then merged per weight. The license comes from
+vercel/geist-font tag 1.4.2. These are open-source Geist fonts, not Aside's separate branded display face.
+The source's tabular digit advances differ slightly. Tern normalizes the ten `.tf` digit advances to
+`zero.tf` at each weight so counts align; proportional glyph metrics and all outlines remain unchanged.
+No installed Aside app or font-generation tool is needed to build or run Tern.
+Registered at launch. `Theme.ui(size, weight)` for text, `Theme.numeric(size, weight)`
+for anything with figures that should line up (Geist's tabular figures, `tnum`), `Theme.display(size)` for
 headlines. No serif, no monospace in the interface (mail's own `<pre>` keeps a system monospace).
 
 | Use | Font |
 | --- | --- |
-| UI default, row text | Inter 13/18 |
-| Row sender | Inter 13, 600 `text1` unread, 400 `text2` read |
-| Row subject | Inter 13, 500 `text1` unread, 400 `text2` read; preview 400 `text3` |
-| Small, meta, tags | Inter 11.5–12, tags 500 |
-| Date headers | Inter 12 500, sentence case, `text3`, left in line with the avatars, vertically centred |
-| Sidebar section labels | Inter 12 500, sentence case, `text2` |
-| Times, counts, keycaps | Inter 12 tabular (`numeric`) |
-| Tabs | Inter 13, 500 active / 400 others; count 12 tabular `text3` |
-| Open thread subject | **Inter Display SemiBold 23/30**, −0.3 tracking |
-| Empty states, headlines | Inter Display SemiBold 17–20 (onboarding 30), −0.2 to −0.5 tracking |
-| Reading body (plain text mail) | Inter 14/22, max line 680 |
+| UI default, row text | Geist 13/18 |
+| Row sender | Geist 13, 600 `text1` unread, 400 `text2` read |
+| Row subject | Geist 13, 500 `text1` unread, 400 `text2` read; preview 400 `text3` |
+| Small, meta, tags | Geist 11.5–12, tags 500 |
+| Date headers | Geist 12 500, sentence case, `text3`, left in line with the avatars, vertically centred |
+| Sidebar section labels | Geist 12 500, sentence case, `text2` |
+| Times, counts, keycaps | Geist 12 tabular (`numeric`) |
+| Tabs | Geist 13, 500 active / 400 others; count 12 tabular `text3` |
+| Open thread subject | **Geist SemiBold 23/30**, −0.3 tracking |
+| Empty states, headlines | Geist SemiBold 17–20 (onboarding 30), −0.2 to −0.5 tracking |
+| Reading body (plain text mail) | Geist 14/22, max line 680 |
 
 ## Icons: Hugeicons Stroke Rounded
 
@@ -151,11 +166,11 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 
 | | Height | Padding | Label | Rest | Hover | Pressed |
 | --- | --- | --- | --- | --- | --- | --- |
-| primary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
-| secondary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | glass control wash and two-tone edge | stronger wash | strongest wash |
-| quiet | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
+| primary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
+| secondary | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | glass control wash and fine edge | stronger wash | strongest wash |
+| quiet | 28 (small 24) | 12 (small 10) | Geist Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
 | icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | 6% text wash | 12% text wash |
-| link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
+| link | text | — | Geist Medium 12, `ink` | — | underline | 60 % |
 
 Text buttons use half their height as the radius. Icon buttons use capsules. Keyboard focus: a 1.5 px `ink`
 ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity, without hover or press washes. Row and tab
@@ -232,7 +247,7 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
     fetch, no cached logo), in the list and the reader.
   - **Sender names** drop a bot's `[bot]`: `vercel[bot]` reads "Vercel".
   - **Tags**: soft filled chips, no border: 20 px tall, radius 4, `text1` at 5 % (light) / 7 % (dark), 12 px
-    coloured icon, label Inter 11.5 500 `text2`. Needs reply (ink reply icon) first, then the project or the
+    coloured icon, label Geist 11.5 500 `text2`. Needs reply (ink reply icon) first, then the project or the
     category (not People/Other). A category tag that only repeats the list stays off: the Gmail tab it files
     under (Notification in Updates, Promotion in Promotions), or the category more than half of the first 40
     threads share (eight at least). Two at most on one line, one on two lines; dropped before they squeeze the subject.
@@ -288,7 +303,7 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 - Top bar 52 px: ← back on the left (over the list only) and the hover-only "12 of 48" with ‹ ›; on the right
   Archive (Move to Inbox in the Archive mailbox), Snooze, `⋯` as icon buttons (`⋯` has Move to Tab with inbox
   tabs on).
-- A centred reading column ~720 px. Subject Inter Display 23/30, then tags (the row's filled style; the account last while several are signed in), then the
+- A centred reading column ~720 px. Subject Geist SemiBold 23/30, then tags (the row's filled style; the account last while several are signed in), then the
   AI summary line (sparkle icon, `text2`). Older messages collapse to one-liners with 24 px avatars; the latest
   unread (or last) message is open: 28 px rounded-square avatar (logo or initials), sender 600 + address `text3`, "to me"
   disclosure, date in tabular `text3`. Your draft in the conversation shows Edit · Discard on its line (`text2`
@@ -325,7 +340,7 @@ Project menu buttons remain in the view tree, reveal on row or button focus, and
 tracking. The 24 pt button replaces the unread capsule while visible; it is not nested inside the row button.
 
 ### ⌘K palette
-Centred 640 px, radius 16, shared floating glass with an opaque selected row. 52 px input (Inter 16).
+Centred 640 px, radius 16, shared floating glass with an opaque selected row. 52 px input (Geist 16).
 Results grouped: Actions (keycaps right-aligned), Go to, Threads, Projects, Labels, Accounts, Settings, each with
 its Hugeicon. ↑↓ / ⌃N ⌃P, Enter runs, ⌘Enter runs on all selected threads. Fades in over 120 ms; closes at once.
 Pointer selection requires movement in screen coordinates. Rows moving beneath a stationary pointer cannot
@@ -335,7 +350,7 @@ button actions and selected state to accessibility, while keyboard navigation st
 ### Composer
 Inline in the reader, or a floating window for new mail (`c`), 640×560. Glass chrome surrounds opaque fields
 and editor content; the inline card has radius 16. Flat rows with
-hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Inter 15/600). Rich text
+hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Geist 15/600). Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
 The formatting bar fades in and grows from 97 % toward the selection on first show (120 ms); moving to a new
@@ -346,8 +361,8 @@ Reduce Motion: fades only, 80 ms, and no shimmer. Cc/Bcc, the AI bar, tokens and
 ### Update card and prompts
 Tern's own small floating card, never Sparkle's or a stock alert: 380 pt wide, `raised`, radius 10, 1 px
 `hairlineStrong`, the overlay shadow, borderless and movable by its background. The app icon (44 pt) sits at the
-top left beside the title (Inter 14 semibold) and one line of `text2` detail; content below aligns with the text: a
-3 pt `ink` progress line on `inkSoft` while something runs, "What's new" (caps label, Inter 12.5 bullets, scrolling
+top left beside the title (Geist 14 semibold) and one line of `text2` detail; content below aligns with the text: a
+3 pt `ink` progress line on `inkSoft` while something runs, "What's new" (caps label, Geist 12.5 bullets, scrolling
 with a soft bottom edge past 168 pt). At most two buttons on the right, secondary then primary; Return and Esc work.
 Errors are one quiet `text2` line with OK. States: checking, available (auto-update off), downloading, preparing,
 ready ("Tern 0.2.1 is ready" · Later · Restart to update), installing, up to date (manual checks only), error. The
@@ -369,7 +384,7 @@ and the keyboard goes to the list when the thread it was in no longer shows. The
   else. ↑ ↓ and ⌃Tab move between them when no field has the keyboard; ⌘F goes to the search.
 - Right: a 52 px title bar with ← (back) and "Settings" in `text2`, then a centred column at most 680 wide
   (28 px margins from 760 px, 20 below) with the section title (Display 22) and flat rows with hairlines:
-  title Inter 13, detail 12 `text3`, the control on the right. Small caps (`CapsLabel`) group rows inside a
+  title Geist 13, detail 12 `text3`, the control on the right. Small caps (`CapsLabel`) group rows inside a
   section (Reading, Writing; Window, Tabs). The bottom bar is hidden under the page.
 - Search lists matching settings across sections under their sections' caps, then matching shortcuts; words match
   from their start. Sections without a match fade to `text3` in the list. Return opens the first match's section.
@@ -393,7 +408,7 @@ and the keyboard goes to the list when the thread it was in no longer shows. The
 
 ### Onboarding
 Onboarding: one 640×560 window,
-four steps (Google client, Accounts, AI, Done), each with an Inter Display 30 headline (the first is "Mail at
+four steps (Google client, Accounts, AI, Done), each with a Geist SemiBold 30 headline (the first is "Mail at
 the speed you think."), one `text2` line under it, the stepper top right and Back / Continue bottom right. The AI
 step shows Claude Code and Codex as two cards (mark, name, what pays for it, live status: Ready; Not signed
 in with the sign-in command and a copy button; Not installed with an install link); the chosen card gets a

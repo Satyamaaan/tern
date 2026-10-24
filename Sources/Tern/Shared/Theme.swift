@@ -5,36 +5,36 @@ import TernCore
 
 /// Design tokens from design/DESIGN.md. Colors resolve per appearance (light / dark).
 enum Theme {
-    static let bg = dynamic(light: 0xFAFBFC, dark: 0x17181B)
-    static let sidebar = dynamic(light: 0xEFF1F4, dark: 0x202227)
-    static let raised = dynamic(light: 0xFFFFFF, dark: 0x212328)
-    static let hover = dynamic(light: 0xECEEF2, dark: 0x282B31)
-    static let selected = dynamic(light: 0xE4E8EF, dark: 0x30343C)
+    static let bg = dynamic(light: 0xFAFBFC, dark: 0x202020)
+    static let sidebar = dynamic(light: 0xEFF1F4, dark: 0x202020)
+    static let raised = dynamic(light: 0xFFFFFF, dark: 0x303030)
+    static let hover = dynamic(light: 0xECEEF2, dark: 0x363636)
+    static let selected = dynamic(light: 0xE4E8EF, dark: 0x363636)
     /// The selected row while the list has the keyboard: a step stronger than `selected`, so focus shows
     /// without a ring.
-    static let selectedFocus = dynamic(light: 0xDBE1EA, dark: 0x3A404B)
-    static let hairline = dynamic(light: 0xE5E8ED, dark: 0x2C2F36)
-    static let hairlineStrong = dynamic(light: 0xCED3DC, dark: 0x484E59)
+    static let selectedFocus = dynamic(light: 0xDBE1EA, dark: 0x404040)
+    static let hairline = dynamic(light: 0xE5E8ED, dark: 0x363636)
+    static let hairlineStrong = dynamic(light: 0xCED3DC, dark: 0x4A4A4A)
     /// Row tags: a soft wash of the text colour, so a tag reads on the list, a hovered row and a selected one.
     static let chipFill = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.07) : NSColor(white: 0, alpha: 0.05)
     }
-    static let text1 = dynamic(light: 0x1B1E24, dark: 0xF0F1F4)
-    static let text2 = dynamic(light: 0x565D69, dark: 0xB0B6C2)
-    static let text3 = dynamic(light: 0x687181, dark: 0x969FAD)
+    static let text1 = dynamic(light: 0x1B1E24, dark: 0xFAFAFA)
+    static let text2 = dynamic(light: 0x565D69, dark: 0xD9D9D9)
+    static let text3 = dynamic(light: 0x687181, dark: 0xA3A3A3)
     /// The one strong colour: near-black in light, near-white in dark. Primary button fill, unread and
     /// needs-reply dots, the Flock, focus rings, links. The UI has no hue of its own.
-    static let ink = dynamic(light: 0x18181B, dark: 0xEDEDEA)
+    static let ink = dynamic(light: 0x18181B, dark: 0xE5E5E5)
     /// `ink` under the pointer.
-    static let inkHover = dynamic(light: 0x2E2E33, dark: 0xD9D9D5)
+    static let inkHover = dynamic(light: 0x2E2E33, dark: 0xFAFAFA)
     /// `ink` while pressed.
-    static let inkPressed = dynamic(light: 0x45454B, dark: 0xC4C4BF)
+    static let inkPressed = dynamic(light: 0x45454B, dark: 0xCFCFCF)
     /// Recipient addresses in the slide-over's message headers: the reader's one muted blue.
     static let link = dynamic(light: 0x3D6A92, dark: 0xA3C0D8)
     /// Soft neutral fill for "needs you" chips and other soft states.
-    static let inkSoft = dynamic(light: 0xE4E8EF, dark: 0x30343C)
+    static let inkSoft = dynamic(light: 0xE4E8EF, dark: 0x363636)
     /// Label on an `ink` fill.
-    static let onInk = dynamic(light: 0xFFFFFF, dark: 0x141414)
+    static let onInk = dynamic(light: 0xFFFFFF, dark: 0x202020)
 
     static let accountHues: [UInt32] = [0x4F7CAC, 0x8A6FB3, 0x3E9A86, 0x8F7F62, 0xB05C7A, 0x6B7F4A]
     static let projectHues: [UInt32] = [0x6B6B66, 0x2F6FD8, 0x23764A, 0x8A6FB3, 0x8F7F62, 0xB05C7A, 0x3E9A86, 0x5E6B7A]
@@ -43,8 +43,8 @@ enum Theme {
     static func projectColor(_ index: Int) -> NSColor { rgb(projectHues[abs(index) % projectHues.count]) }
 
     /// Letter avatars: initials on a soft neutral disc.
-    static let avatarFill = dynamic(light: 0xE5E9F0, dark: 0x303540)
-    static let avatarText = dynamic(light: 0x535E70, dark: 0xBEC6D3)
+    static let avatarFill = dynamic(light: 0xE5E9F0, dark: 0x363636)
+    static let avatarText = dynamic(light: 0x535E70, dark: 0xB3B3B3)
     /// The faint edge around logo avatars.
     static let avatarRing = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white.withAlphaComponent(0.14) : .black.withAlphaComponent(0.1)
@@ -134,18 +134,17 @@ enum Theme {
 
     enum Weight { case regular, medium, semibold }
 
-    /// Inter, the one typeface: every label, row and the reader.
+    /// Geist, the Aside content typeface: every label, row and the reader.
     static func ui(_ size: CGFloat, _ weight: Weight = .regular) -> NSFont {
         FontCache.font(.text, size, weight)
     }
 
-    /// Inter with tabular figures, so times, counts and keycaps line up.
+    /// Geist with tabular figures, so times, counts and keycaps line up.
     static func numeric(_ size: CGFloat = 12, _ weight: Weight = .regular) -> NSFont {
         FontCache.font(.numeric, size, weight)
     }
 
-    /// Inter Display SemiBold, the optical size cut for large text: the open thread's subject, empty states
-    /// and headlines.
+    /// Geist SemiBold for the open thread's subject, empty states and headlines.
     static func display(_ size: CGFloat) -> NSFont {
         FontCache.font(.display, size, .semibold)
     }
@@ -202,10 +201,10 @@ private enum FontCache {
 
     private static func make(_ style: Style, _ size: CGFloat, _ weight: Theme.Weight) -> NSFont {
         let name = switch (style, weight) {
-        case (.display, _): "InterDisplay-SemiBold"
-        case (_, .regular): "Inter-Regular"
-        case (_, .medium): "Inter-Medium"
-        case (_, .semibold): "Inter-SemiBold"
+        case (.display, _): "Geist-SemiBold"
+        case (_, .regular): "Geist-Regular"
+        case (_, .medium): "Geist-Medium"
+        case (_, .semibold): "Geist-SemiBold"
         }
         let systemWeight: NSFont.Weight = weight == .regular ? .regular : weight == .medium ? .medium : .semibold
         let base = NSFont(name: name, size: size) ?? .systemFont(ofSize: size, weight: style == .display ? .semibold : systemWeight)
