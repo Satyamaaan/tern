@@ -3,6 +3,12 @@ import GRDB
 
 /// The single SQLite file holding every account. The UI only ever reads from here.
 public final class AppDatabase: Sendable {
+    /// Reader slots reserved for the nine global observations and the conversation reader.
+    public static let longLivedObservations = 10
+
+    /// Number of live value-observation subscriptions using this database.
+    public var liveLongLivedObservationCount: Int { LongLivedObservationCounts.count(in: reader) }
+
     public let writer: any DatabaseWriter
     public var reader: any DatabaseReader { writer }
 
@@ -22,7 +28,10 @@ public final class AppDatabase: Sendable {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var config = Configuration()
         config.foreignKeysEnabled = true
-        config.maximumReaderCount = 8
+        // Each concurrent observation can retain its initial reader until the writer is free.
+        // Reserve one for each of the nine global observations and the reader, plus plain reads.
+        let plainReadHeadroom = 4
+        config.maximumReaderCount = longLivedObservations + plainReadHeadroom
         config.prepareDatabase { db in
             try db.execute(sql: """
                 PRAGMA synchronous = NORMAL;

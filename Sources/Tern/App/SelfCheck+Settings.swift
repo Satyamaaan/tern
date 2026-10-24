@@ -366,7 +366,8 @@ extension SelfCheck {
         send("", keyCode: 36)
         _ = waitUntil(1) { KeyRouter.readerHasKeyboard(window) && self.model.services.reader.model?.key == order[1] }
         wait(0.3)
-        guard KeyRouter.readerHasKeyboard(window) else { return print("  (the reader page did not take the keyboard offscreen; checks skipped)") }
+        check("opening over the list gives the reader page the keyboard", KeyRouter.readerHasKeyboard(window))
+        guard KeyRouter.readerHasKeyboard(window) else { return }
 
         let n = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
                                  context: nil, characters: "n", charactersIgnoringModifiers: "n", isARepeat: false, keyCode: 45)!

@@ -294,6 +294,10 @@ final class ReaderSchemeHandler: NSObject, WKURLSchemeHandler {
 
 /// The shared web view: trims the context menu to reading actions and hosts Quick Look.
 final class ReaderWebView: WKWebView {
+    /// A covered reader keeps its page but cannot take the keyboard.
+    var isReaderActive = true
+    override var acceptsFirstResponder: Bool { isReaderActive && super.acceptsFirstResponder }
+
     /// Called with the current hovered link when the context menu opens on one.
     var openLinkFromMenu: (() -> Void)?
     /// Called when the page takes the keyboard (a click into the conversation).
@@ -329,6 +333,7 @@ final class ReaderWebView: WKWebView {
     @objc private func openHoveredLink() { openLinkFromMenu?() }
 
     override func becomeFirstResponder() -> Bool {
+        guard isReaderActive else { return false }
         let accepted = super.becomeFirstResponder()
         if accepted { didTakeFocus?() }
         return accepted

@@ -270,24 +270,31 @@ struct ReaderColumn: View {
     var panel: ReaderPanelControls?
 
     var body: some View {
-        Group {
-            if model.checked.count > 1 {
+        ZStack {
+            ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack,
+                       panel: panel, active: model.readerVisible && !multiple)
+                .opacity(multiple ? 0 : 1)
+                .allowsHitTesting(!multiple)
+                .disabled(multiple)
+                .accessibilityHidden(multiple)
+            if multiple {
                 MultiSelectionView(count: model.checked.count)
-            } else {
-                ReaderView(key: model.readerKey, prefetch: model.readerNeighbours, position: model.readerPosition, onBack: onBack,
-                           panel: panel, active: model.readerVisible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(besideList ? Theme.raised : Theme.bg))
-        .simultaneousGesture(TapGesture().onEnded { model.focus = .reader })
+        .onChange(of: multiple) { if multiple { model.focusList() } }
+        .simultaneousGesture(TapGesture().onEnded { if !multiple { model.focus = .reader } })
         // The click above has Return or o on the keyboard; VoiceOver gets it as an action of the column.
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Move Keyboard to Conversation") {
+            guard !multiple else { return }
             model.focus = .reader
             model.services.reader.focus()
         }
     }
+
+    private var multiple: Bool { model.checked.count > 1 }
 }
 
 private struct MultiSelectionView: View {

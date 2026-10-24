@@ -13,6 +13,7 @@ extension ValueObservation where Reducer: ValueReducer {
         onError: @escaping @Sendable (Error) -> Void,
         onChange: @escaping @Sendable (Reducer.Value) -> Void
     ) -> AnyDatabaseCancellable {
+        let count = LongLivedObservationCounts.track(in: reader)
         let restarts = ObservationRestarts()
         let observation = self
         restarts.begin = { [weak restarts] in
@@ -28,7 +29,10 @@ extension ValueObservation where Reducer: ValueReducer {
                 })
         }
         restarts.restart()
-        return AnyDatabaseCancellable { restarts.cancel() }
+        return AnyDatabaseCancellable {
+            restarts.cancel()
+            count.cancel()
+        }
     }
 
     /// `startRestarting` for main-actor callers, like GRDB's main-actor `start`.

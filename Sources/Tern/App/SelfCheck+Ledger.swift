@@ -48,7 +48,11 @@ extension SelfCheck {
             model.setCursor(key, open: true)
             model.focus = .list
             model.open()
-            _ = waitUntil { self.model.services.reader.shows(key) && self.model.services.reader.model?.focusedCommitment?.state == .open }
+            check("reader observes commitment cleanup", waitUntil {
+                guard self.model.services.reader.shows(key), let reader = self.model.services.reader.model else { return false }
+                return reader.detail?.commitments.contains { extra.created.contains($0.id ?? -1) } == false
+                    && reader.focusedCommitment?.id == first.id && reader.focusedCommitment?.state == .open
+            })
             model.focus = .reader
         }
         send("d")

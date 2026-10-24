@@ -38,6 +38,7 @@ final class SelfCheck {
             let widths = "0123456789".map { String($0).size(withAttributes: [.font: font]).width }
             check("numeric \(weight) digits keep counts aligned", widths.allSatisfy { abs($0 - widths[0]) < 0.001 })
         }
+        observationBudget("after launch")
         timeQueries()
         previews()
         sidebarResizing()
@@ -140,11 +141,29 @@ final class SelfCheck {
 
     private func multiSelect() {
         model.showInboxTab(.primary)
+        let expanded = model.readerExpanded
+        model.readerExpanded = true
+        defer { model.readerExpanded = expanded }
         wait(0.2)
+        let observations = model.store.database.liveLongLivedObservationCount
+        for cycle in 1...3 {
+            model.moveToTop()
+            model.moveCursor(1, extend: true)
+            model.moveCursor(1, extend: true)
+            check("⇧J twice selects three (round \(cycle))", model.checked.count == 3 && model.targets.count == 3)
+            wait(0.1)
+            model.open()
+            model.open()
+            check("Enter leaves the keyboard on the selection (round \(cycle))",
+                  model.focus == .list && !KeyRouter.readerHasKeyboard(window))
+            model.clearSelection()
+            wait(0.1)
+            check("multi-select keeps the observation count (round \(cycle))",
+                  model.store.database.liveLongLivedObservationCount == observations)
+        }
         model.moveToTop()
         model.moveCursor(1, extend: true)
         model.moveCursor(1, extend: true)
-        check("⇧J twice selects three", model.checked.count == 3 && model.targets.count == 3)
         let targets = model.targets
         let next = model.snapshot.key(from: targets.last, offset: 1)
         model.perform(.archive, on: targets)
@@ -155,6 +174,12 @@ final class SelfCheck {
         model.undoLast()
         poll(0.6) {}
         check("undo restores the selection's threads", targets.allSatisfy { model.snapshot.rows[$0] != nil })
+    }
+
+    private func observationBudget(_ phase: String) {
+        let count = model.store.database.liveLongLivedObservationCount
+        check("long-lived observations \(phase): \(count) ≤ \(AppDatabase.longLivedObservations)",
+              count > 0 && count <= AppDatabase.longLivedObservations)
     }
 
     private func clicks() {

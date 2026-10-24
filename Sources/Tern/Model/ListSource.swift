@@ -14,7 +14,7 @@ extension InboxTab {
     }
 }
 
-/// What the list column reads. One value per screen state; the list observation restarts when it changes.
+/// What the list column reads. One value per screen state, shared with the list observation.
 struct ListSource: Hashable, Sendable {
     var mailbox: Mailbox
     /// Gmail's tab, when the mailbox is the inbox and its tabs are on; nil is the whole inbox.

@@ -157,10 +157,18 @@ final class AppModel {
     /// Threads an undo is putting back; their return to the list slides them in (`ListAnimation.restore`).
     @ObservationIgnored var restoring: Set<ThreadKey> = []
     @ObservationIgnored var undoStack: [UndoEntry] = []
+    @ObservationIgnored var rowsReadTask: Task<Void, Never>?
+    @ObservationIgnored let rowsSource: ListObservationSource
     @ObservationIgnored var rowsObservation: AnyDatabaseCancellable?
+    @ObservationIgnored var rowsObservedGeneration = -1
+    @ObservationIgnored let scopeSource = ScopeObservationSource()
+    @ObservationIgnored var countsReadTask: Task<Void, Never>?
+    @ObservationIgnored var countsObservedGeneration = -1
     @ObservationIgnored var countsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var accountsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var projectsObservation: AnyDatabaseCancellable?
+    @ObservationIgnored var labelsReadTask: Task<Void, Never>?
+    @ObservationIgnored var labelsObservedGeneration = -1
     @ObservationIgnored var labelsObservation: AnyDatabaseCancellable?
     @ObservationIgnored var searchTask: Task<Void, Never>?
     @ObservationIgnored var searchGeneration = 0
@@ -188,7 +196,9 @@ final class AppModel {
         self.store = services.store
         self.isFake = isFake
         self.databaseURL = databaseURL
-        self.source = ListSource(mailbox: .unifiedInbox, tab: nil)
+        let source = ListSource(mailbox: .unifiedInbox, tab: nil)
+        self.source = source
+        rowsSource = ListObservationSource(source: source, limit: Self.pageSize)
         inboxTab = landingTab
     }
 
@@ -363,7 +373,7 @@ final class AppModel {
     /// Enter / o: open the thread for reading. In the open thread, Enter expands or collapses the
     /// focused message.
     func open() {
-        guard let cursor else { return }
+        guard checked.count <= 1, let cursor else { return }
         if focus == .reader, services.reader.isActive {
             services.reader.toggleMessage()
             return
@@ -401,7 +411,11 @@ final class AppModel {
                 self.paletteReturn = nil
                 guard !self.searchFieldFocused, self.projectEditor == nil else { return }
                 if let settings = self.settings { return settings.takeKeyboard() }
-                if self.focus == .reader, self.services.reader.isActive { self.services.reader.focus() } else { self.listView?.takeKeyboard() }
+                if self.focus == .reader, self.readerVisible, self.readerKey != nil, self.services.reader.isActive {
+                    self.services.reader.focus()
+                } else {
+                    self.focusList()
+                }
             }
         }
     }
