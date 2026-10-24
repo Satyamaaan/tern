@@ -139,7 +139,8 @@ struct TabButton: View {
             .frame(height: 28)
             .background { if active { activeFill } }
         }
-        .buttonStyle(PressFillStyle(hover: active ? nil : Theme.hover))
+        .buttonStyle(PressFillStyle(radius: 14, hover: active ? nil : Theme.text1.withAlphaComponent(0.06),
+                                   pressed: Theme.text1.withAlphaComponent(0.12)))
         .fixedSize()
         .help(help)
         .contextMenu {
@@ -153,12 +154,7 @@ struct TabButton: View {
 
     /// The active tab's `selected` fill, under the label; it slides to the next active tab.
     @ViewBuilder private var activeFill: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-            .fill(Color(Theme.selected))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .strokeBorder(Color(Theme.hairlineStrong).opacity(0.6), lineWidth: 0.5)
-            }
+        let shape = GlassControlFill(highlighted: true)
         if let fill {
             shape.matchedGeometryEffect(id: "activeTab", in: fill)
         } else {
@@ -359,7 +355,9 @@ struct AccountStack: View {
             .padding(.horizontal, 8)
             .frame(height: 28)
         }
-        .buttonStyle(PressFillStyle())
+        .buttonStyle(PressFillStyle(radius: 14, hover: Theme.text1.withAlphaComponent(0.06),
+                                   pressed: Theme.text1.withAlphaComponent(0.12)))
+        .background(GlassControlFill())
         .help("Switch account  \(model.registry?["scope.all"]?.shortcutText.map { "\($0), " } ?? "")⌘1–⌘9")
         .accessibilityLabel("Switch account, \(title)")
         .opacity(model.accounts.isEmpty ? 0 : 1)
@@ -458,12 +456,10 @@ private struct ComposeButton: View {
 
     var body: some View {
         Button { model.compose() } label: {
-            IconView(icon: .compose, size: 16, color: Color(Theme.ink))
+            IconView(icon: .compose, size: 16, color: Color(Theme.onInk))
                 .frame(width: Theme.Control.regular, height: Theme.Control.regular)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1))
         }
-        .buttonStyle(IconButtonStyle())
+        .buttonStyle(IconButtonStyle(prominent: true))
         .help(model.registry?.hint("New message", "compose") ?? "New message")
     }
 }

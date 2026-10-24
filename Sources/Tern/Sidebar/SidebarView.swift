@@ -12,13 +12,15 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 1) {
-                    mailboxes
-                    projects
-                    accounts
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 2) { mailboxes }
+                    VStack(alignment: .leading, spacing: 2) { projects }
+                    if model.accounts.count > 1 {
+                        VStack(alignment: .leading, spacing: 2) { accounts }
+                    }
                 }
                 .padding(.horizontal, 10)
-                .padding(.top, 6)
+                .padding(.top, 10)
                 .padding(.bottom, 12)
             }
             .scrollIndicators(.never)
@@ -77,10 +79,11 @@ struct SidebarView: View {
 
     @ViewBuilder private var accounts: some View {
         if model.accounts.count > 1 {
-            CapsLabel(text: "Accounts")
-                .padding(.leading, 8)
-                .frame(height: 22)
-                .padding(.top, 16)
+            Text("Accounts")
+                .font(.ui(12, .medium))
+                .foregroundStyle(Color(Theme.text2))
+                .padding(.leading, 10)
+                .frame(height: 24)
                 .padding(.bottom, 4)
             SidebarRow(title: "All accounts", selected: model.scope == .all) {
                 IconView(icon: .inbox, size: 16)
@@ -101,7 +104,6 @@ struct SidebarView: View {
 
     @ViewBuilder private var projects: some View {
         ProjectsHeader()
-            .padding(.top, 16)
             .padding(.bottom, 4)
         ForEach(model.projects) { project in
             ProjectRow(project: project)
@@ -110,14 +112,17 @@ struct SidebarView: View {
             Text("Group mail by client or product across accounts.")
                 .font(.ui(12))
                 .foregroundStyle(Color(Theme.text3))
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 10)
                 .padding(.top, 2)
         }
     }
 }
 
-/// A 28 px sidebar row: icon, title, count. `selected` fill when current, `hover` fill under the pointer.
+/// A 32 pt sidebar row with a continuous selection wash and a quiet count capsule.
 struct SidebarRow<Leading: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
     let title: String
     var count: Int?
     var countColor: NSColor = Theme.text3
@@ -138,35 +143,51 @@ struct SidebarRow<Leading: View>: View {
                     .frame(width: 16, height: 16)
                 Text(title)
                     .font(.ui(13, selected ? .semibold : .regular))
-                    .foregroundStyle(Color(titleColor))
+                    .foregroundStyle(Color(selected ? Theme.text1 : titleColor))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let count, trailing == nil || !hovering {
                     Text(count.formatted())
-                        .font(.numeric(12, selected ? .medium : countWeight))
+                        .font(.numeric(11, selected ? .medium : countWeight))
                         .foregroundStyle(Color(selected ? Theme.text1 : countColor))
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 22, minHeight: 20)
+                        .background(Capsule().fill(Color(Theme.ink).opacity(selected ? 0.06 : 0.04)))
+                        .fixedSize()
+                } else if trailing != nil, hovering {
+                    Color.clear.frame(width: 20, height: 20)
                 }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 28)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
         }
-        .buttonStyle(PressFillStyle(radius: Theme.Radius.row, rest: filled ? Theme.selectedFocus : nil, hover: filled ? nil : Theme.hover))
+        .buttonStyle(PressFillStyle(
+            radius: 12,
+            rest: filled ? (contrast == .increased ? Theme.selectedFocus : Theme.ink.withAlphaComponent(0.08)) : nil,
+            hover: filled ? nil : Theme.ink.withAlphaComponent(0.06),
+            pressed: Theme.ink.withAlphaComponent(0.12)
+        ))
         .overlay {
-            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                .strokeBorder(Color(Theme.hairlineStrong).opacity(filled ? 0.65 : 0), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(colorScheme == .dark ? 0.20 : 0.85),
+                            Color(Theme.hairlineStrong).opacity(0.55)
+                        ],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.5
+                )
+                .opacity(filled ? 1 : 0)
                 .allowsHitTesting(false)
         }
-        // Beside the button rather than in it, so its clicks stay its own. It fades in on hover (90 ms) and
-        // goes at once, as the count comes back.
+        // Keep the menu outside the row button so its clicks stay its own.
         .overlay(alignment: .trailing) {
-            ZStack {
-                if let trailing, hovering {
-                    trailing
-                        .padding(.trailing, 8)
-                        .transition(.asymmetric(insertion: .opacity, removal: .identity))
-                }
+            if let trailing, hovering {
+                trailing
+                    .padding(.trailing, 10)
             }
-            .animation(hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
         }
         .onHover { hovering = $0 }
     }
@@ -201,16 +222,17 @@ private struct ProjectsHeader: View {
 
     var body: some View {
         HStack {
-            CapsLabel(text: "Projects")
+            Text("Projects")
+                .font(.ui(12, .medium))
+                .foregroundStyle(Color(Theme.text2))
             Spacer()
-            IconButton(icon: .plus, size: 20, iconSize: 14, help: "New project  ⇧⌘P") { model.newProject() }
+            IconButton(icon: .plus, size: 24, iconSize: 14,
+                       help: model.registry?.hint("New project", "newProject") ?? "New project") { model.newProject() }
                 .opacity(hovering ? 1 : 0)
-                // Fades in (90 ms), hides at once.
-                .animation(hovering ? .easeOut(duration: Motion.hover) : nil, value: hovering)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 2)
-        .frame(height: 22)
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(height: 24)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
@@ -298,29 +320,38 @@ struct SyncStatusLine: View {
             // One state crossfades into the next; the figures within a state (Syncing 1,204 of 8,330) just change.
             ZStack(alignment: .leading) {
                 HStack(spacing: 7) { content }
+                    .lineLimit(2)
                     .id(state)
                     .transition(.opacity)
             }
             .animation(reduceMotion ? Motion.reduced : .easeOut(duration: Motion.reveal), value: state)
             Spacer(minLength: 0)
-            Button { model.prefs.appearance = AppearanceMode.flipped } label: {
-                IconView(icon: colorScheme == .dark ? .sun : .moon, size: 15, color: Color(Theme.text2))
-                    .frame(width: 24, height: 24)
+            HStack(spacing: 0) {
+                Button { model.prefs.appearance = AppearanceMode.flipped } label: {
+                    IconView(icon: colorScheme == .dark ? .sun : .moon, size: 15, color: Color(Theme.text2))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(PressFillStyle(radius: 14, hover: Theme.ink.withAlphaComponent(0.06), pressed: Theme.ink.withAlphaComponent(0.12)))
+                .help(model.registry?.hint(colorScheme == .dark ? "Switch to Light Appearance" : "Switch to Dark Appearance", "appearance.toggle") ?? "Change appearance")
+                Button { model.registry?.run("settings") } label: {
+                    IconView(icon: .settings, size: 15, color: Color(model.settingsOpen ? Theme.text1 : Theme.text2))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(PressFillStyle(
+                    radius: 14, rest: model.settingsOpen ? Theme.ink.withAlphaComponent(0.08) : nil,
+                    hover: Theme.ink.withAlphaComponent(0.06), pressed: Theme.ink.withAlphaComponent(0.12)
+                ))
+                .help(model.registry?.hint("Settings", "settings") ?? "Settings")
             }
-            .buttonStyle(IconButtonStyle())
-            .help(model.registry?.hint(colorScheme == .dark ? "Switch to Light Appearance" : "Switch to Dark Appearance", "appearance.toggle") ?? "")
-            Button { model.registry?.run("settings") } label: {
-                IconView(icon: .settings, size: 15, color: Color(model.settingsOpen ? Theme.text1 : Theme.text2))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(IconButtonStyle())
-            .help(model.registry?.hint("Settings", "settings") ?? "Settings")
+            .padding(2)
+            .background(Capsule().fill(Color(Theme.ink).opacity(0.04)))
+            .fixedSize()
         }
         .font(.ui(12))
-        .padding(.leading, 18)
+        .padding(.leading, 20)
         .padding(.trailing, 10)
         .frame(height: 44)
-        .overlay(alignment: .top) { Hairline() }
+        .overlay(alignment: .top) { Hairline().padding(.horizontal, 20) }
     }
 
     /// Which line shows, without its figures.

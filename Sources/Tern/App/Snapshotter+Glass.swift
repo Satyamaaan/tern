@@ -94,7 +94,52 @@ extension Snapshotter {
         window.setContentSize(NSSize(width: 980, height: 700))
         backdrop.setFrame(window.frame, display: true)
         both("narrow")
+        window.hasShadow = false
+        window.contentView = NSHostingView(rootView: GlassControlsPreview())
+        both("controls")
         print("Glass snapshots written to \(directory.path); \(failures) failures")
         return failures == 0
+    }
+}
+
+/// A fixture for the shared controls, including states that mail screenshots do not exercise.
+private struct GlassControlsPreview: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text("Controls").font(.display(23))
+            ForEach([true, false], id: \.self) { enabled in
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(enabled ? "Enabled" : "Disabled").font(.ui(13, .medium))
+                    HStack(spacing: 12) {
+                        Button("New message") {}.buttonStyle(TernButtonStyle(.primary))
+                        Button("Add account") {}.buttonStyle(TernButtonStyle(.secondary))
+                        Button("Cancel") {}.buttonStyle(TernButtonStyle(.quiet))
+                        IconButton(icon: .settings, help: "Settings") {}
+                    }
+                    .disabled(!enabled)
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Control wash states").font(.ui(13, .medium))
+                HStack(spacing: 12) {
+                    wash("Rest", hovering: false, pressed: false)
+                    wash("Hover", hovering: true, pressed: false)
+                    wash("Pressed", hovering: true, pressed: true)
+                }
+            }
+            Text("Mail rows and editor content remain opaque.")
+                .font(.ui(12)).foregroundStyle(Color(Theme.text2))
+        }
+        .foregroundStyle(Color(Theme.text1))
+        .padding(32)
+        .glassSurface(radius: 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func wash(_ title: String, hovering: Bool, pressed: Bool) -> some View {
+        Text(title)
+            .font(.ui(13, .medium))
+            .frame(width: 100, height: 28)
+            .background(GlassControlFill(hovering: hovering, pressed: pressed))
     }
 }

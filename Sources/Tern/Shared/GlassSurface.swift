@@ -68,6 +68,34 @@ struct GlassSurface: View {
     }
 }
 
+/// A lightweight control wash over the parent material. It never creates another backdrop layer.
+struct GlassControlFill: View {
+    var radius: CGFloat = 14
+    var highlighted = false
+    var hovering = false
+    var pressed = false
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let solid = GlassSurface.forceSolid || reduceTransparency || contrast == .increased
+        let opacity: Double = scheme == .dark
+            ? (pressed ? 0.20 : hovering || highlighted ? 0.14 : 0.08)
+            : (pressed ? 0.10 : hovering || highlighted ? 0.065 : 0.035)
+        shape
+            .fill(solid ? Color(highlighted || pressed ? Theme.selectedFocus : hovering ? Theme.hover : Theme.raised)
+                  : Color(scheme == .dark ? NSColor.white : Theme.ink).opacity(opacity))
+            .overlay(shape.strokeBorder(Color(Theme.hairlineStrong).opacity(solid ? 1 : 0.55), lineWidth: 0.5))
+            .overlay(shape.inset(by: 0.75).strokeBorder(
+                LinearGradient(colors: [.white.opacity(solid ? 0 : scheme == .dark ? 0.22 : 0.9), .clear],
+                               startPoint: .top, endPoint: .bottom), lineWidth: 0.5))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 /// The sidebar samples the desktop through the window. Mail and editor canvases remain opaque.
 private struct DesktopMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {

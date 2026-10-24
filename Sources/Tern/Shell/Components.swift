@@ -33,9 +33,9 @@ struct IconButton: View {
 
 // MARK: - Buttons
 
-/// Every text button in the app. Continuous corners, Inter Medium, 28 pt (24 pt small), no shadow.
+/// Text buttons use pill silhouettes, Inter Medium, and 28 pt (24 pt small) hit areas.
 /// - `primary`: `ink` fill, `onInk` label. One per area at most.
-/// - `secondary`: 1 px `hairlineStrong` border, `hover` fill under the pointer.
+/// - `secondary`: translucent wash and a two-tone glass edge over the parent material.
 /// - `quiet`: no border; the `hover` fill appears under the pointer.
 /// All three darken a step and shrink to 97 % while pressed (the shrink only, on a short spring; none under
 /// Reduce Motion), show an `ink` ring when focused from the keyboard and drop to 40 % when disabled.
@@ -64,18 +64,27 @@ struct TernButtonStyle: ButtonStyle {
         @State private var hovering = false
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            let radius = (size == .small ? Theme.Control.small : Theme.Control.regular) / 2
+            let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
             configuration.label
                 .font(.ui(size == .small ? 12 : 13, .medium))
                 .lineLimit(1)
                 .foregroundStyle(Color(kind == .primary ? Theme.onInk : Theme.text1))
                 .padding(.horizontal, size == .small ? 10 : 12)
                 .frame(height: size == .small ? Theme.Control.small : Theme.Control.regular)
-                .background(shape.fill(fill))
-                .overlay(shape.strokeBorder(Color(Theme.hairlineStrong), lineWidth: kind == .secondary ? 1 : 0))
-                .overlay(shape.inset(by: 0.5).strokeBorder(
-                    LinearGradient(colors: [.white.opacity(0.2), .clear], startPoint: .top, endPoint: .bottom),
-                    lineWidth: kind == .quiet ? 0 : 0.5))
+                .background {
+                    if kind == .secondary {
+                        GlassControlFill(radius: radius, hovering: hovering && isEnabled,
+                                         pressed: configuration.isPressed && isEnabled)
+                    } else {
+                        shape.fill(fill)
+                        if kind == .primary {
+                            shape.inset(by: 0.75).strokeBorder(
+                                LinearGradient(colors: [.white.opacity(0.35), .clear],
+                                               startPoint: .top, endPoint: .bottom), lineWidth: 0.5)
+                        }
+                    }
+                }
                 .focusRing(isFocused, shape: shape)
                 .contentShape(shape)
                 .pressScale(configuration.isPressed, to: 0.97)
@@ -88,35 +97,41 @@ struct TernButtonStyle: ButtonStyle {
             switch kind {
             case .primary:
                 return Color(pressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink)
-            case .secondary:
-                return Color(pressed ? Theme.selected : hovering ? Theme.hover : Theme.chipFill)
-            case .quiet:
+            case .secondary, .quiet:
                 return pressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear
             }
         }
     }
 }
 
-/// Icon-only buttons: the label sets the size (28 pt by default); `hover` fill under the pointer,
-/// `selected` and 95 % while pressed, an `ink` ring when focused, 40 % when disabled.
+/// Round icon controls with a neutral wash on hover and press. Prominent controls use an ink fill.
 struct IconButtonStyle: ButtonStyle {
+    var prominent = false
+
     func makeBody(configuration: Configuration) -> some View {
-        StyledButton(configuration: configuration)
+        StyledButton(configuration: configuration, prominent: prominent)
     }
 
     private struct StyledButton: View {
         let configuration: Configuration
+        let prominent: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.isFocused) private var isFocused
         @State private var hovering = false
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            let shape = Capsule()
             configuration.label
-                .background(shape.fill(
-                    configuration.isPressed ? Color(Theme.selected) : hovering ? Color(Theme.hover) : .clear))
+                .background {
+                    if prominent {
+                        shape.fill(Color(configuration.isPressed ? Theme.inkPressed : hovering ? Theme.inkHover : Theme.ink))
+                    } else if configuration.isPressed || hovering {
+                        shape.fill(Color(Theme.text1).opacity(configuration.isPressed ? 0.12 : 0.06))
+                        shape.strokeBorder(Color(Theme.hairlineStrong).opacity(0.55), lineWidth: 0.5)
+                    }
+                }
                 .focusRing(isFocused, shape: shape)
-                .contentShape(shape)
+                .contentShape(Rectangle())
                 .pressScale(configuration.isPressed, to: 0.95)
                 .opacity(isEnabled ? 1 : 0.4)
                 .onHover { hovering = $0 && isEnabled }

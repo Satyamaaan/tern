@@ -7,15 +7,15 @@ light, near-white in dark) for primary buttons and everything that means *this n
 as a small hue on **tab and tag icons** (and in mail itself). One typeface, **Inter**, and one icon set,
 **Hugeicons Stroke Rounded**. Aside-inspired translucent controls and Droppy-inspired glass sit over opaque
 mail canvases. Continuous corners and fine light-catching edges distinguish floating controls; shadows stay
-behind their backgrounds. The layout, row density and keyboard model remain unchanged. Research behind the original direction:
+behind their backgrounds. The window layout, mail-row density and keyboard model remain unchanged. Research behind the original direction:
 `research.md`. Visual reference: the offscreen renders (`--snapshot`, see "Checking it" below); the old static
 `mockup.html` is retired.
 
 Hard rules
 - Never a coloured bar down one side of a row, card or callout. Status is a dot or a tag.
 - Buttons, text and dots are neutral ink. Hue lives only on tab and tag icons; "needs reply" stays ink.
-- Nothing is a pill. Only status dots and the account stack are round; sender avatars are rounded squares
-  (a quarter of their side), like app icons.
+- Text buttons, account controls and the floating toolbar use pill silhouettes; icon controls are round.
+  Sidebar rows use continuous 12 pt corners. Sender avatars remain rounded squares (a quarter of their side).
 - At most three visible actions in any area. Everything else lives in one `…` menu or ⌘K; secondary controls
   appear on hover.
 - Every action has a shortcut; ⌘K lists each command with its key.
@@ -78,9 +78,10 @@ tag with the same dot. Each account's name and hue are set in Settings → Accou
 
 ### Radius and spacing
 
-`Theme.Radius`: **chip 4** (tags, recipient tokens, keycaps, search marks) · **control 8** (buttons, icon
-buttons, tabs, fields) · **row 8** (row, sidebar, menu and palette fills) · **overlay 12** (toasts, the chord
-HUD, the search field, small overlays) · **card 16** (⌘K, popovers, the composer card, the bottom bar).
+`Theme.Radius`: **chip 4** (tags, recipient tokens, keycaps, search marks) · **control 8** (fields and compact
+segmented controls) · **row 8** (mail, menu and palette fills) · **overlay 12** (toasts, the chord
+HUD, the search field, small overlays) · **card 16** (⌘K, popovers, the composer card).
+Navigation rows use radius 12; buttons and tabs use half-height corners; the bottom toolbar uses radius 18.
 Continuous corners. 4 px grid. Floating glass has a separate black silhouette blurred 12 pt and offset
 8 pt down, at 8% opacity in light and 22% in dark. Never rasterize the glass and its content together to
 cast a shadow. Existing opaque overlays retain their older shadow treatment.
@@ -90,7 +91,13 @@ cast a shadow. Existing opaque overlays retain their older shadow treatment.
 `Shared/GlassSurface.swift` owns `.glassSurface(radius:kind:)`. Sidebar and title chrome form continuous
 planes. Floating panels have a 0.5 pt outer edge and an inset white highlight that fades downward.
 The tint covers 72% of the sidebar and 82% of floating panels and headers, so text remains readable over
-bright desktop content. Selection is an opaque neutral fill, not another blur layer.
+bright desktop content. Mail-list selection is an opaque neutral fill, not another blur layer.
+
+`GlassControlFill` draws a wash and two-tone 0.5 pt edge without another backdrop. Dark controls use white
+at 8%, 14% and 20% for rest, hover and press. Light controls use ink at 3.5%, 6.5% and 10%. Active tabs use
+the hover wash. Text buttons and tabs are 28 pt pills; the small button variant is 24 pt. Icon controls retain
+their rectangular hit area. Sidebar rows use an 8% ink selection wash, 6% hover and 12% press. These component
+shapes replace the earlier uniform rounded rectangles; mail rows keep their existing shape and density.
 
 The material reuses the sign-in notch's `WindowBackdrop`, a 6 pt live blur. It uses private `CABackdropLayer`
 and `CAFilter` APIs and remains a compatibility risk. If those classes are unavailable, floating panels use
@@ -115,7 +122,7 @@ headlines. No serif, no monospace in the interface (mail's own `<pre>` keeps a s
 | Row subject | Inter 13, 500 `text1` unread, 400 `text2` read; preview 400 `text3` |
 | Small, meta, tags | Inter 11.5–12, tags 500 |
 | Date headers | Inter 12 500, sentence case, `text3`, left in line with the avatars, vertically centred |
-| Section caps (sidebar) | Inter 11 500, +0.6 tracking, `text3` |
+| Sidebar section labels | Inter 12 500, sentence case, `text2` |
 | Times, counts, keycaps | Inter 12 tabular (`numeric`) |
 | Tabs | Inter 13, 500 active / 400 others; count 12 tabular `text3` |
 | Open thread subject | **Inter Display SemiBold 23/30**, −0.3 tracking |
@@ -142,12 +149,13 @@ One system (`TernButtonStyle`, `IconButtonStyle`, `LinkButtonStyle` in `Shell/Co
 | | Height | Padding | Label | Rest | Hover | Pressed |
 | --- | --- | --- | --- | --- | --- | --- |
 | primary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `onInk` | `ink` fill | `inkHover` | `inkPressed` |
-| secondary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | 1 px `hairlineStrong` border | `hover` fill | `selected` fill |
+| secondary | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | glass control wash and two-tone edge | stronger wash | strongest wash |
 | quiet | 28 (small 24) | 12 (small 10) | Inter Medium 13 (12), `text1` | nothing | `hover` fill | `selected` fill |
-| icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | `hover` fill | `selected` fill |
+| icon | 28 × 28 (24–26 in rows) | — | 16 px Hugeicon, `text2` | nothing | 6% text wash | 12% text wash |
 | link | text | — | Inter Medium 12, `ink` | — | underline | 60 % |
 
-All radius 8. Keyboard focus: a 1.5 px `ink` ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
+Text buttons use half their height as the radius. Icon buttons use capsules. Keyboard focus: a 1.5 px `ink`
+ring at 50 %, 2.5 px outside the control. Disabled: 40 % opacity.
 While held, text buttons shrink to 97 % and icon buttons to 95 %. Press uses response 0.14, damping 0.82;
 release uses response 0.24, damping 0.74. Fills stay instant; no shrink with Reduce Motion.
 At most one primary per area. The Send button is one `ink` block split by a 1 px `onInk` 22 % rule into Send and
@@ -180,8 +188,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   by Tern's category (promotion and newsletter → Promotions, notification and receipt → Updates, the rest and
   unclassified mail → Primary). Each: 14 px icon (hue per the table), title, count in tabular `text3`: unread on
   Promotions, Social, Updates and Forums, waiting threads on Needs reply, none on All and Primary (their unread
-  mail is the list itself; with inbox tabs off All counts its unread). 28 px tall, radius 6; active = `selected`
-  fill and Medium text; hover = `hover`; pressed = `selected` at once. A tab is as wide as its Medium title, so
+  mail is the list itself; with inbox tabs off All counts its unread). 28 px tall, radius 14; active = glass
+  control wash and Medium text; hover and press add a neutral wash at once. A tab is as wide as its Medium title, so
   turning active never shifts its neighbours; the active fill slides to the next tab (130 ms, the cursor's curve).
 - A mailbox opened from the sidebar, ⌘K or a `g` chord (Sent, Starred, Drafts…) or a search that isn't
   pinned shows as a temporary tab at the end while it is open.
@@ -192,8 +200,8 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   given another command before Gmail's tabs stays theirs; that tab then starts without one).
 - Right side: the **account stack** (up to three 20 px account avatars, overlapping by 6 px with a 2 px `bg`
   ring: each account's Google profile photo, else its initial in the account hue) + "3 accounts" (or the scoped account's name) opens the scope menu (All accounts ⌘0, each
-  account ⌘1…⌘9, Add account…, Settings…); then **compose**: a 28 px icon button, ink pencil, `hairlineStrong`
-  outline (`c`, ⌘N). No notification bell.
+  account ⌘1…⌘9, Add account…, Settings…) inside a glass control pill; then **compose**: a 28 px round ink
+  button with an `onInk` pencil (`c`, ⌘N). No notification bell.
 
 ### List
 - A centred column: full width minus 8 px margins when narrow, 28 px margins from 760 px, at most **1040 px**.
@@ -252,9 +260,9 @@ Hidden title bar (`fullSizeContentView`, transparent), our own background. Minim
   900 ms, then the text rises 4 pt), otherwise it is simply there. Other lists one Display 17 line in `text2`.
 
 ### Bottom bar
-A floating glass toolbar centred under the list, 14 px from the bottom, radius 16,
+A floating glass toolbar centred under the list, 14 px from the bottom, radius 18,
 4 px padding, three 28 px icon buttons — **Search** (`/`, ⌘F when no thread is on screen),
-**Sidebar** (⌃⌘S), **Settings** (⌘,). A button whose thing is open gets the `selected` fill. Hidden while a
+**Sidebar** (⌃⌘S), **Settings** (⌘,). A button whose thing is open gets the glass control wash. Hidden while a
 thread covers the list.
 
 ### Search
@@ -299,12 +307,13 @@ closes the dropdown, then the search. A search can be pinned as a tab.
 ### Sidebar
 Hidden by default; the bottom bar or ⌃⌘S slides it in beside the list (232 px, `sidebar` surface, under the
 title bar; remembered; Reduce Motion crossfades). Mailboxes (Inbox, Needs reply, Snoozed, Starred, Drafts,
-Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), `PROJECTS` (with `+` on hover;
-drag rows onto a project or label), `ACCOUNTS` (All accounts and each account, when there are several), and
+Sent, Archive, All mail, More → Spam, Trash and the scoped account's labels), `Projects` (with `+` on hover;
+drag rows onto a project or label), `Accounts` (All accounts and each account, when there are several), and
 pinned at the bottom one quiet sync line (`text3`; hollow ring up to date, filled dot syncing, `ink` dot when
-something needs you) with the sun/moon switch (⇧⌘L). Rows 28 px, radius 8, 16 px icons in `text2`, counts
-tabular; `selected` the moment a row is pressed, opened on release. The sync line crossfades between states, never
-within one.
+something needs you) with the sun/moon switch (⇧⌘L) and Settings grouped in one quiet capsule. Rows 32 pt,
+radius 12, 16 pt icons in `text2`, tabular counts in 20 pt capsules. Row spacing is 2 pt, section spacing 18 pt.
+Selection and press washes appear immediately; rows open on release. Mailbox and account selection remain
+independent. The sync line permits two lines and crossfades between states, never within one.
 
 ### ⌘K palette
 Centred 640 px, radius 16, shared floating glass with an opaque selected row. 52 px input (Inter 16).
@@ -450,5 +459,7 @@ CFFIXED_USER_HOME=<scratch-home> TERN_DB=<disposable-fake-db> \
 
 This briefly shows the fixture over a synthetic desktop and captures only its rectangle. It sends no
 mouse or keyboard events, then closes its windows. It covers inbox, palette, reader, inline composer,
-settings and a narrow window in both appearances. Omit `TERN_SNAPSHOT_LIVE` for the solid fallback.
+settings, a narrow window and a control-state fixture in both appearances. The fixture shows enabled and
+disabled buttons plus rest, hover and press washes; it does not simulate pointer interaction.
+Omit `TERN_SNAPSHOT_LIVE` for the solid fallback.
 Never use a real mailbox for this command; snapshots change selection and can create disposable drafts.

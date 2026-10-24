@@ -20,7 +20,7 @@ struct BottomBar: View {
             }
         }
         .padding(4)
-        .glassSurface()
+        .glassSurface(radius: Self.height / 2)
         .frame(height: Self.height)
     }
 
@@ -38,8 +38,9 @@ private struct BarButton: View {
         Button(action: action) {
             IconView(icon: icon, size: 16, color: Color(on ? Theme.text1 : Theme.text2))
                 .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                    .fill(Color(Theme.selected).opacity(on ? 1 : 0)))
+                .background {
+                    if on { GlassControlFill(highlighted: true) }
+                }
         }
         .buttonStyle(IconButtonStyle())
         .help(help)
