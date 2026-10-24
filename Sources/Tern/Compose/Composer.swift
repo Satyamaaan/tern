@@ -230,6 +230,7 @@ struct InlineComposerCard: View {
     @State private var appeared = false
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .circular)
         VStack(spacing: 0) {
             if model.headerExpanded {
                 ComposerFields(model: model, inset: 16)
@@ -253,9 +254,9 @@ struct InlineComposerCard: View {
             ComposerBottomArea(model: model)
         }
         .background(Color(Theme.raised))
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-            .strokeBorder(Color(Theme.hairlineStrong), lineWidth: 0.5)
+        .clipShape(shape)
+        .overlay(shape
+            .strokeBorder(Color(Theme.hairlineStrong), lineWidth: 1)
             .allowsHitTesting(false))
         .acceptsFileDrops(model)
         .background(ComposerKeyCatcher(model: model))
