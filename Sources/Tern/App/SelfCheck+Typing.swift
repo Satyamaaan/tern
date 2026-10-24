@@ -88,6 +88,15 @@ extension SelfCheck {
         composer.focus(.body)
         pumpUntil { KeyRouter.textInput(in: target).map { !$0.isFieldEditor } ?? false }
         typeInto("the composer's body", in: target)
+        KeyRouter.textInput(in: target)?.selectAll(nil)
+        PostedKeys.type("Keep this draft", to: target)
+        PostedKeys.press(53, to: target)
+        check("Esc in the new-message body closes its window", pumpUntil { !target.isVisible })
+        check("Esc saves the latest subject and body as a draft", pumpUntil {
+            guard let saved = try? composer.drafts.draft(id: composer.id) else { return false }
+            return saved.subject == "rrrrrr" && saved.state == .editing
+                && DraftContent(stored: saved).body.blocks.map(\.text).joined() == "Keep this draft"
+        })
     }
 
     /// Recipient autocomplete: a burst of keys reads the suggestions once, off the main thread; an answer slower than

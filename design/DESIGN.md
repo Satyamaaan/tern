@@ -362,8 +362,10 @@ button actions and selected state to accessibility, while keyboard navigation st
 
 ### Composer
 Inline in the reader, or a floating window for new mail (`c`), 640×560. One opaque `raised` canvas covers
-fields, editor and Send controls; the inline card has radius 16. Labels and spacing separate the rows,
-without hairlines: From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Geist 15/600). Rich text
+fields, editor and Send controls; the inline card has radius 16. In the floating window, inset hairlines separate
+From (several accounts), To (tokens radius 4), Cc/Bcc (⌘⇧C/⌘⇧B), Subject (Geist 15/600) and the body.
+Inline replies keep their field rows borderless. Escape dismisses an open suggestion or composer prompt first,
+then closes the composer, saving nonempty drafts. Rich text
 with a formatting bar on selection (Hugeicons bold, italic, underline, link, lists, quote). Bottom bar: Send
 (⌘↵) with the send-later chevron (⌘⇧L), paperclip, ✦ Write with AI (⌘J), discard at the far right.
 The formatting bar fades in and grows from 97 % toward the selection on first show (120 ms); moving to a new

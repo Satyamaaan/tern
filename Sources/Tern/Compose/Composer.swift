@@ -86,6 +86,10 @@ final class ComposerWindow: NSWindow {
         if model?.handleKeyEquivalent(event) == true { return true }
         return super.performKeyEquivalent(with: event)
     }
+
+    override func cancelOperation(_ sender: Any?) {
+        model?.escape()
+    }
 }
 
 @MainActor

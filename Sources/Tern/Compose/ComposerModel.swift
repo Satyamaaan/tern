@@ -338,7 +338,7 @@ final class ComposerModel: Identifiable {
 
     // MARK: Closing
 
-    /// ⌘W, the close button, or Esc inline: keeps the draft, or drops it when nothing was written.
+    /// ⌘W, the close button, or Esc: keeps the draft, or drops it when nothing was written.
     func close() {
         guard !finished else { return }
         saveOrDrop()
@@ -379,7 +379,7 @@ final class ComposerModel: Identifiable {
         if sendLaterOpen { sendLaterOpen = false; return }
         if aiInstruction != nil { aiInstruction = nil; focus(.body); return }
         if confirmingDiscard { confirmingDiscard = false; return }
-        if mode == .inline { close() }
+        close()
     }
 
     /// Breaks the editor → accessory → model reference once the composer is gone.

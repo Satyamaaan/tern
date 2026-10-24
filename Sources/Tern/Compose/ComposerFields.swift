@@ -11,6 +11,7 @@ struct ComposerFields: View {
         VStack(spacing: 0) {
             if model.hasSeveralAccounts {
                 FieldRow(label: "From", inset: inset) { AccountPicker(model: model) }
+                separator
             }
             FieldRow(label: "To", inset: inset) {
                 RecipientFieldView(model: model, kind: .to, tokens: model.to)
@@ -20,11 +21,14 @@ struct ComposerFields: View {
                     if !model.showBcc { RevealButton(title: "Bcc", help: "Add Bcc  ⌘⇧B") { model.focus(.bcc) } }
                 }
             }
+            separator
             if model.showCc {
                 FieldRow(label: "Cc", inset: inset) { RecipientFieldView(model: model, kind: .cc, tokens: model.cc) }
+                separator
             }
             if model.showBcc {
                 FieldRow(label: "Bcc", inset: inset) { RecipientFieldView(model: model, kind: .bcc, tokens: model.bcc) }
+                separator
             }
             ComposerTextField(
                 model: model, field: .subject, text: model.subject, placeholder: "Subject",
@@ -32,6 +36,13 @@ struct ComposerFields: View {
                 .frame(height: 22)
                 .padding(.horizontal, inset)
                 .frame(height: 46)
+            separator
+        }
+    }
+
+    @ViewBuilder private var separator: some View {
+        if model.mode == .window {
+            Hairline().padding(.horizontal, inset).accessibilityHidden(true)
         }
     }
 }
